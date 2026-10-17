@@ -1,0 +1,180 @@
+import { expect, mock, test } from 'claude-code/testing'
+import type { On } from 'claude-code'
+
+import { applyPlan, keyFile, projectKey, statusOf } from '../hooks/sessions'
+
+const NOW = Date.parse('2026-10-17T12:00:00.000Z')
+const PROJECT = 'C:\\Users\\dev\\Projects\\Acme 商店後台'
+const DIR = 'C:/home/.claude/project-pm'
+const PROJECT_FILE = `${DIR}/projects/${keyFile(projectKey(PROJECT))}.json`
+
+const SESSIONS = [
+  { sessionId: 'local_open', title: '商品列表頁', cwd: PROJECT, isArchived: false, isRunning: false, lastActivityAt: '2026-10-17T11:50:00.000Z' },
+  { sessionId: 'local_ask', title: '移除舊版優惠欄位', cwd: `${PROJECT}\\.claude\\worktrees\\x`, isArchived: false, isRunning: false, lastActivityAt: '2026-10-17T11:40:00.000Z' },
+  { sessionId: 'local_run', title: '金流對帳', cwd: PROJECT, isArchived: false, isRunning: true, lastActivityAt: '2026-10-17T11:59:00.000Z' },
+  { sessionId: 'local_other', title: '別的專案', cwd: 'C:\\Users\\dev\\Projects\\Weather app', isArchived: false, isRunning: false, lastActivityAt: '2026-10-17T10:00:00.000Z' },
+]
+
+const track = (id: string, extra: object) => ({
+  id,
+  title: id,
+  cwd: PROJECT,
+  plan: [],
+  recap: null,
+  ask: null,
+  lastPrompt: '',
+  lastAnswer: '',
+  turnAt: NOW - 600000,
+  planAt: NOW - 600000,
+  ...extra,
+})
+
+type Files = Map<string, string>
+
+/** The test host spells paths its own way: compare them by what follows the data folder. */
+const norm = (path: string) => path.replace(/\\/g, '/').replace(/^.*\/\.claude\/project-pm/, DIR)
+
+/** The desktop app and the disk, from memory: `self` is this session's id. */
+function world(on: On, self: string, files: Files, archived: string[] = []) {
+  let list = [...SESSIONS]
+  mock.env(on, { USERPROFILE: 'C:\\home' })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.cwd', () => ({ value: PROJECT }))
+  on('command.register', ($, e) => ({ value: { command: e.name } }))
+  on('tool.register', ($, e) => ({ value: { tool: `mcp__project-pm__${e.name}` } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.panes', () => ({ value: [] }))
+  on('fs.exists', ($, e) => ({ value: files.has(norm(e.path)) || [...files.keys()].some(k => k.startsWith(`${norm(e.path)}/`)) }))
+  on('fs.read', ($, e) => {
+    const text = files.get(norm(e.path))
+    if (text === undefined) throw new Error(`ENOENT ${e.path}`)
+
+    return { value: text }
+  })
+  on('fs.write', ($, e) => {
+    files.set(norm(e.path), e.text)
+
+    return { value: undefined }
+  })
+  on('fs.list', ($, e) => {
+    const dir = norm(e.path)
+
+    return {
+      value: [...files.keys()]
+        .filter(k => k.startsWith(`${dir}/`) && !k.slice(dir.length + 1).includes('/'))
+        .map(k => ({ name: k.slice(dir.length + 1), kind: 'file' as const, size: 1, mtimeMs: files.get(k)!.length, isLink: false })),
+    }
+  })
+  on('mcp.call', ($, e) => {
+    const text = (t: string) => ({ value: { content: [{ type: 'text' as const, text: t }], isError: false } })
+    if (e.tool === 'get_session') return text(JSON.stringify({ sessionId: self, title: '我', cwd: PROJECT }))
+    if (e.tool === 'list_sessions') return text(JSON.stringify(list))
+    if (e.tool === 'list_events') return text('[assistant] 已修好。\n[result] done (success), 1 turns')
+    if (e.tool === 'archive_session') {
+      archived.push(String(e.args?.session_id))
+      list = list.filter(s => s.sessionId !== e.args?.session_id)
+
+      return text('Archived.')
+    }
+
+    return { value: { content: [{ type: 'text' as const, text: 'unknown' }], isError: true } }
+  })
+}
+
+const START = { cwd: PROJECT, surface: 'desktop', isInteractive: true } as const
+
+test('a session keeps its own task list and recap on disk', async ($, on) => {
+  const files: Files = new Map()
+  mock.clock(on, { now: NOW })
+  world(on, 'local_me', files)
+  on('tool.call', { tool: 'mcp__ccd_turn__update_plan' }, () => ({ result: 'ok' }))
+  on('tool.call', { tool: 'mcp__ccd_turn__wrap_up' }, () => ({ result: 'ok' }))
+  await $.session.start(START)
+
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', items: [{ content: '讀程式', status: 'in_progress' }, { content: '改欄位', status: 'pending' }, { content: '測試', status: 'pending' }] } as never)
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', advance: true } as never)
+  const mid = JSON.parse(files.get(`${DIR}/sessions/local_me.json`)!)
+  expect(mid.plan.map((s: { status: string }) => s.status)).toEqual(['completed', 'in_progress', 'pending'])
+
+  await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', recap: '欄位已移除，還沒部署。', ask: '要部署嗎？' } as never)
+  const end = JSON.parse(files.get(`${DIR}/sessions/local_me.json`)!)
+  expect(end.recap).toBe('欄位已移除，還沒部署。')
+  expect(end.ask).toBe('要部署嗎？')
+  expect(end.plan.every((s: { status: string }) => s.status === 'completed')).toBe(true)
+})
+
+test('the PM board puts what is left first, and the ledger tracks what was asked', async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { plan: [{ content: '畫表格', status: 'completed' }, { content: '加篩選', status: 'pending' }] })))
+  files.set(`${DIR}/sessions/local_ask.json`, JSON.stringify(track('local_ask', { ask: '要一起發 2.3.1 嗎？' })))
+  mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+
+  const shown = await $.tool.call({ tool: 'mcp__project-pm__board' } as never)
+  const text = String((shown as { result?: unknown }).result)
+  expect(text).toMatch(/## 需要處理/)
+  expect(text).toMatch(/\[中斷・未完成\] 「商品列表頁」\(local_open\) 已停止，任務清單仍有 1 項未完成：加篩選/)
+  expect(text).toMatch(/\[待回覆\] 「移除舊版優惠欄位」\(local_ask\) 等待使用者決策：要一起發 2.3.1 嗎？/)
+  // Another project's session stays off this project's board.
+  expect(text).not.toMatch(/別的專案/)
+
+  await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'add', text: '列表頁加匯出 CSV' } as never)
+  const after = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(after).toMatch(/工作項目 T-01「列表頁加匯出 CSV」尚未指派負責 Session/)
+
+  await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, owner: 'local_open' } as never)
+  const assigned = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(assigned).toMatch(/T-01 \(id 1\) \[open\] 列表頁加匯出 CSV｜負責：商品列表頁/)
+  expect(assigned).not.toMatch(/尚未指派負責/)
+})
+
+test('the pane shows the project, and archives after a confirm', async ($, on) => {
+  const files: Files = new Map()
+  const archived: string[] = []
+  const item = (id: number, status: string) => ({ id, text: `項目 ${id}`, owner: 'local_open', status, note: '', createdAt: NOW, updatedAt: NOW })
+  const ledger = [item(1, 'done'), item(2, 'open'), item(3, 'dropped')]
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger, nextId: 4 }))
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { plan: [{ content: '畫表格', status: 'completed' }, { content: '加篩選', status: 'pending' }] })))
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files, archived)
+  await $.session.start(START)
+  await clock.advance(400)
+
+  const ui = await $.ui.mount({
+    plugin: 'project-pm',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: 'project-pm',
+    props: { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 40 } },
+  } as never)
+  expect(await ui.find({ type: 'Text', text: 'Acme 商店後台' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /▸ 加篩選/ })).toBeDefined()
+  expect(await ui.find({ key: 'archive:local_run' })).toBeUndefined()
+
+  // Progress counts the ledger, not the sessions' own checklists.
+  expect(await ui.find({ type: 'Text', text: '50%' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '工作項目完成 1/2' })).toBeDefined()
+
+  await ui.press({ key: 'archive:local_open' })
+  expect(await ui.find({ type: 'Text', text: /尚有 1 項步驟未完成/ })).toBeDefined()
+  await ui.press({ key: 'yes:local_open' })
+  expect(archived).toEqual(['local_open'])
+
+  await ui.press({ key: 'scope:all' })
+  expect(await ui.find({ type: 'Text', text: 'Weather app' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('task list updates replay as the desktop app sends them', () => {
+  const plan = applyPlan([], { items: [{ content: 'a', status: 'in_progress' }, { content: 'b', status: 'pending' }, { content: 'c', status: 'pending' }] })
+  const advanced = applyPlan(plan, { advance: true })
+  expect(advanced.map(s => s.status)).toEqual(['completed', 'in_progress', 'pending'])
+  const jumped = applyPlan(advanced, { done: [2], start: 3 })
+  expect(jumped.map(s => s.status)).toEqual(['completed', 'completed', 'in_progress'])
+
+  const session = { id: 'x', title: 't', cwd: '', isRunning: false, lastActivityAt: new Date(NOW - 5 * 60000).toISOString(), isPinned: false, hasOpenPr: false }
+  expect(statusOf(session, track('x', { plan: advanced }) as never, undefined, NOW)).toBe('open')
+  expect(statusOf(session, track('x', { plan: jumped.map(s => ({ ...s, status: 'completed' })) }) as never, undefined, NOW)).toBe('done')
+})

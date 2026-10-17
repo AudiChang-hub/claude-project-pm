@@ -1,0 +1,6 @@
+{
+  "name": "claude-project-pm",
+  "owner": { "name": "AudiChang-hub" },
+  "description": "Project PM for Claude Code: one PM session per project that tracks every sub-session's task list, open questions and assigned work.",
+  "plugins": [{ "name": "project-pm", "source": "./" }]
+}
