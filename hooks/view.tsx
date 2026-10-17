@@ -192,7 +192,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
       <Box flexDirection="row">
         {metric('kpi:running', count('running') + count('waiting'), '執行中', 'success')}
         {metric('kpi:asking', count('asking'), '待回覆', 'warning')}
-        {metric('kpi:open', count('open'), '中斷・未完成', 'claude')}
+        {metric('kpi:open', count('open') + count('ci'), '未完成・待 CI', 'claude')}
       </Box>
     </Box>
   )

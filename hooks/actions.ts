@@ -7,11 +7,14 @@ import type { EngineInterface, McpToolResult } from 'claude-code'
 import type { LastWord, LedgerItem, Me, Notice, ProjectFile, Session, Sessions, Track } from '../types'
 import {
   boardText,
+  clip,
   emptyProject,
   groupProjects,
+  isCiPending,
   isScratch,
   itemCode,
   keyFile,
+  latestWords,
   openSteps,
   parseLastWord,
   parseSessions,
@@ -287,11 +290,12 @@ export const ROLE = (self: Me) => `# 你是「${self.projectName}」專案的 PM
 1. 使用者問進度、問有沒有漏掉、或你要回報之前，先呼叫 ${BOARD_TOOL} 看最新看板，不要憑記憶回答。
 2. 使用者交代新工作：先用 ${LEDGER_TOOL}（action: "add"）登記為工作項目，再決定交給現有 Session（SendMessage，to 填它的 local_… id）或開新 Session（start_session），派出後用 ledger update 填上 owner。
 3. 不要自己動手改專案的程式碼；實作交給子 Session。使用者明確要你自己做時才例外。
-4. 一個工作項目只有在你確認對應 Session 真的做完（看板上沒有未完成步驟、收尾摘要沒提到還沒做的事，必要時用 list_events 看它的紀錄）之後，才用 ledger update 標成 done。
-5. 說「都完成了」之前，看板的「需要處理」必須是空的、工作項目沒有 open；不是的話，逐條列出還差什麼。
-6. 子 Session 在等使用者回覆時，把它的問題原文轉述給使用者，使用者回答後用 SendMessage 轉達回去。
-7. 封存 Session 前先確認它沒有未完成步驟、沒有開著的 PR，並問過使用者。
-8. 提到 Session 時用 [標題](#local_…) 連結它。`
+4. CI 還在跑、還沒部署完成的工作一律不算完成：負責 Session 狀態為「等待 CI」「執行中」「背景執行」「待回覆」或「未完成」時，ledger 會拒絕結案。
+5. 一個工作項目只有在你確認對應 Session 真的做完（看板上沒有未完成步驟、收尾摘要沒提到還沒做的事，必要時用 list_events 看它的紀錄）之後，才用 ledger update 標成 done。
+6. 說「都完成了」之前，看板的「需要處理」必須是空的、工作項目沒有 open；不是的話，逐條列出還差什麼。
+7. 子 Session 在等使用者回覆時，把它的問題原文轉述給使用者，使用者回答後用 SendMessage 轉達回去。
+8. 封存 Session 前先確認它沒有未完成步驟、沒有開著的 PR，並問過使用者。
+9. 提到 Session 時用 [標題](#local_…) 連結它。`
 
 export async function registerTools($: EngineInterface) {
   await $.tool.register({
@@ -320,6 +324,7 @@ export async function registerTools($: EngineInterface) {
         owner: { type: 'string', description: '負責的 Session id（local_…）；空字串表示取消指派' },
         status: { type: 'string', enum: ['open', 'done', 'dropped'] },
         note: { type: 'string', description: '備註：進度、驗收結果、為什麼放棄' },
+        force: { type: 'boolean', description: '負責 Session 仍在等 CI 或未完成時，強制結案。只有使用者明確確認時才能用，且 note 必填。' },
       },
       required: ['action'],
     },
@@ -448,6 +453,28 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
     .join('\n\n---\n\n')
 }
 
+/** Why the owner's work cannot be counted done yet, or null when nothing stands in the way. */
+async function ownerBlocker($: EngineInterface, ownerId: string): Promise<string | null> {
+  await refresh($, true)
+  const one = (await read($, sessions)).list.find(s => s.id === ownerId)
+  const track = (await read($, tracks))[ownerId] ?? (await readJson<Track>($, `${await dataDir($)}/sessions/${ownerId}.json`)) ?? undefined
+  const title = one?.title ?? track?.title ?? ownerId
+  if (!one) {
+    return track && isCiPending(latestWords(track)) ? `負責的 Session「${title}」最後回報 CI 尚未跑完（${clip(latestWords(track), 120)}）。` : null
+  }
+  const status = statusOf(one, track, (await read($, lastWords))[ownerId], await $.clock.now())
+  const said = track ? latestWords(track) : ((await read($, lastWords))[ownerId]?.said ?? '')
+  const why: Partial<Record<Status, string>> = {
+    ci: 'CI 尚未跑完',
+    running: '仍在執行中',
+    waiting: '仍有背景作業在跑',
+    asking: '正在等使用者回覆',
+    open: '任務清單仍有未完成步驟',
+  }
+
+  return why[status] ? `負責的 Session「${title}」${why[status]}${said ? `（最後回報：${clip(said, 120)}）` : ''}。` : null
+}
+
 export function ledgerText(items: LedgerItem[]): string {
   if (items.length === 0) return '目前沒有工作項目。'
 
@@ -482,6 +509,13 @@ export async function ledger($: EngineInterface, input: Record<string, unknown>)
     const item = project.ledger.find(i => i.id === id)
     if (!item) return `找不到工作項目 id ${String(input.id)}。\n\n${ledgerText(project.ledger)}`
     const status = str(input.status)
+    if (status === 'done' && item.status !== 'done') {
+      const owner = input.owner === undefined ? item.owner : str(input.owner) || null
+      const blocker = owner ? await ownerBlocker($, owner) : null
+      if (blocker && !(input.force === true && str(input.note)?.trim())) {
+        return `無法將 ${itemCode(id)} 標記為完成：${blocker}\n確認 CI 通過、部署完成後再結案；若使用者已明確確認可結案，帶 force: true 並在 note 寫明確認內容。\n\n${ledgerText(project.ledger)}`
+      }
+    }
     const changed: LedgerItem = {
       ...item,
       text: str(input.text)?.trim() || item.text,

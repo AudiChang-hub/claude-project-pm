@@ -178,3 +178,37 @@ test('task list updates replay as the desktop app sends them', () => {
   expect(statusOf(session, track('x', { plan: advanced }) as never, undefined, NOW)).toBe('open')
   expect(statusOf(session, track('x', { plan: jumped.map(s => ({ ...s, status: 'completed' })) }) as never, undefined, NOW)).toBe('done')
 })
+
+test('work whose CI is still running is never done', () => {
+  const twoDaysAgo = { id: 'x', title: 't', cwd: '', isRunning: false, lastActivityAt: new Date(NOW - 2 * 24 * 3600000).toISOString(), isPinned: false, hasOpenPr: false }
+  const said = (lastAnswer: string, recap: string | null = null) => statusOf(twoDaysAgo, track('x', { lastAnswer, recap }) as never, undefined, NOW)
+
+  expect(said('已推上 main（4dca77c），CI 還在跑，通過後才會打標籤和部署。')).toBe('ci')
+  expect(said('已回覆對方。', '1.86.11 已推上 main，等 CI 通過後我會部署。')).toBe('ci')
+  expect(said('Pushed to main; waiting for CI before tagging.')).toBe('ci')
+  expect(said('CI 已通過，已打標籤並部署 2.3.1。')).toBe('done')
+  expect(said('CI 跑完了，已部署 2.3.1。')).toBe('done')
+  expect(said('先前 CI 還在跑，現在 CI 已通過並完成部署。')).toBe('done')
+  expect(said('已修好返回鍵。')).toBe('done')
+})
+
+test('the ledger will not close an item while its session waits on CI', async ($, on) => {
+  const files: Files = new Map()
+  const item = { id: 1, text: '列表頁加匯出 CSV', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { recap: '已推上 main，CI 還在跑，還沒部署。' })))
+  mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+
+  const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(board).toMatch(/\[等待 CI・未完成\] 「商品列表頁」\(local_open\) 最後回報 CI 尚未跑完/)
+
+  const refused = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done' } as never)) as { result?: unknown }).result)
+  expect(refused).toMatch(/無法將 T-01 標記為完成：負責的 Session「商品列表頁」CI 尚未跑完/)
+  expect(JSON.parse(files.get(PROJECT_FILE)!).ledger[0].status).toBe('open')
+
+  // Only the person's explicit word, written down, closes it anyway.
+  await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done', force: true, note: '使用者確認 CI 已在 GitHub 上通過' } as never)
+  expect(JSON.parse(files.get(PROJECT_FILE)!).ledger[0].status).toBe('done')
+})

@@ -60,7 +60,8 @@ export const register: Register = on => {
         $.ui.log(`project-pm: ${reason(err)}`)
       }
     }
-    if (!e.isMeta && !e.command) await changeMine($, t => ({ ...t, lastPrompt: clip(e.text, 400), ask: null, recap: null }))
+    // A new turn starts: last turn's recap and question no longer stand (a background wake-up included).
+    if (!e.command) await changeMine($, t => ({ ...t, ask: null, recap: null, ...(e.isMeta ? {} : { lastPrompt: clip(e.text, 400) }) }))
     refreshSoon($, 500)
 
     return next(e)

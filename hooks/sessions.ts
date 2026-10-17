@@ -3,7 +3,7 @@
 
 import type { LastWord, LedgerItem, ProjectFile, Session, Step, Track } from '../types'
 
-export type Status = 'running' | 'asking' | 'open' | 'waiting' | 'done' | 'stale'
+export type Status = 'running' | 'asking' | 'open' | 'ci' | 'waiting' | 'done' | 'stale'
 
 /**
  * How each status reads and looks: `color` is a theme key (drawn right in light and dark),
@@ -12,10 +12,11 @@ export type Status = 'running' | 'asking' | 'open' | 'waiting' | 'done' | 'stale
 export const STATUS: Record<Status, { label: string; tag: string; color: string; hex: string; rank: number }> = {
   asking: { label: '待回覆', tag: '待回覆', color: 'warning', hex: '#f59e0b', rank: 0 },
   open: { label: '未完成', tag: '中斷・未完成', color: 'claude', hex: '#d97757', rank: 1 },
-  running: { label: '執行中', tag: '執行中', color: 'success', hex: '#22c55e', rank: 2 },
-  waiting: { label: '背景執行', tag: '背景執行', color: 'suggestion', hex: '#3b82f6', rank: 3 },
-  done: { label: '已結束', tag: '已結束', color: 'inactive', hex: '#9ca3af', rank: 4 },
-  stale: { label: '長期閒置', tag: '長期閒置', color: 'subtle', hex: '#6b7280', rank: 5 },
+  ci: { label: '等待 CI', tag: '等待 CI・未完成', color: 'permission', hex: '#8b5cf6', rank: 2 },
+  running: { label: '執行中', tag: '執行中', color: 'success', hex: '#22c55e', rank: 3 },
+  waiting: { label: '背景執行', tag: '背景執行', color: 'suggestion', hex: '#3b82f6', rank: 4 },
+  done: { label: '已結束', tag: '已結束', color: 'inactive', hex: '#9ca3af', rank: 5 },
+  stale: { label: '長期閒置', tag: '長期閒置', color: 'subtle', hex: '#6b7280', rank: 6 },
 }
 
 export function isActive(status: Status): boolean {
@@ -33,6 +34,32 @@ const STALE_DAYS = 3
 /** Words a session leaves when its turn ends but work goes on: a background job, a CI run, a deploy. */
 const WAITING =
   /背景|等.{0,16}(CI|部署|測試|建置|build|跑完|完成|結果)|跑完.{0,8}(會|再|就)|完成後.{0,8}(會|再|就)|自動接著|(waiting|wait) (for|on)|in the background|once (it|the) .{0,30}(finish|pass|complete)/i
+
+/** Words that say CI (or the checks a release waits on) has not finished yet. */
+const CI_PENDING =
+  /(CI|GitHub Actions|workflow|pipeline|檢查|checks?)[^。\n]{0,16}(還在|仍在|正在|尚未|還沒|未|進行中|執行中|跑(?!完)|running|pending|in progress|queued|not (yet )?(finished|done|passed))|(還在|仍在|正在)(跑|等)[^。\n]{0,8}(CI|測試|workflow|pipeline|檢查|checks?)|等[^。\n]{0,8}(CI|checks?)|(waiting|wait) (for|on) (the )?(CI|checks?|workflow|pipeline)|(CI|checks?)[^。\n]{0,10}(通過|跑完|完成)(後|之後|再|才)|once (the )?(CI|checks?)[^.\n]{0,20}(pass|finish|complete)/gi
+
+/** Words that say CI has finished and passed. */
+const CI_PASSED = /(CI|GitHub Actions|workflow|pipeline|檢查|checks?)[^。\n]{0,12}(已|都)?(通過|跑完|全綠|綠燈|成功|passed|succeeded|green)(?!後|之後|再|才|就)/gi
+
+function lastIndex(re: RegExp, text: string): number {
+  let at = -1
+  for (const m of text.matchAll(re)) at = m.index ?? at
+
+  return at
+}
+
+/** The latest turn says CI has not finished (and says nothing later about it passing). */
+export function isCiPending(text: string): boolean {
+  const pending = lastIndex(CI_PENDING, text)
+
+  return pending >= 0 && pending > lastIndex(CI_PASSED, text)
+}
+
+/** What the session said in its latest turn: its recap and final answer. */
+export function latestWords(track: Track): string {
+  return [track.recap ?? '', track.lastAnswer].filter(Boolean).join('\n')
+}
 
 /** Words a recap uses for what is left: not committed, not verified, not deployed. */
 const CAVEAT =
@@ -102,10 +129,13 @@ export function statusOf(one: Session, track: Track | undefined, word: LastWord 
   if (track) {
     if (track.ask || /[?？]\s*$/.test(track.lastAnswer)) return 'asking'
     if (openSteps(track).length > 0) return 'open'
+    // CI that has not finished is never done, however long ago the session stopped.
+    if (isCiPending(latestWords(track))) return 'ci'
     if (WAITING.test(track.lastAnswer) && minutes < WAITING_MINUTES) return 'waiting'
   } else {
-    if (word?.isWaiting && minutes < WAITING_MINUTES) return 'waiting'
     if (word?.isAsking) return 'asking'
+    if (word && isCiPending(word.said)) return 'ci'
+    if (word?.isWaiting && minutes < WAITING_MINUTES) return 'waiting'
   }
 
   return minutes > STALE_DAYS * 24 * 60 ? 'stale' : 'done'
@@ -254,8 +284,9 @@ export function boardText(input: BoardInput): string {
       const left = openSteps(r.track)
       attention.push(`- [中斷・未完成] ${name} 已停止，任務清單仍有 ${left.length} 項未完成：${left.map(s => s.content).join('；')}`)
     }
+    if (r.status === 'ci') attention.push(`- [等待 CI・未完成] ${name} 最後回報 CI 尚未跑完，不能視為完成：${clip(r.track ? latestWords(r.track) : (r.word?.said ?? ''), 200)}`)
     const caveat = caveatOf(r.track)
-    if (caveat && r.status !== 'running') attention.push(`- [需追蹤] ${name} 收尾摘要載明尚有未完成事項：${clip(caveat, 200)}`)
+    if (caveat && r.status !== 'running' && r.status !== 'ci') attention.push(`- [需追蹤] ${name} 收尾摘要載明尚有未完成事項：${clip(caveat, 200)}`)
     if (r.one.hasOpenPr && r.status !== 'running') attention.push(`- [PR 開啟中] ${name}`)
   }
   const openLedger = ledger.filter(item => item.status === 'open')
