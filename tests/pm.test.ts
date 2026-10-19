@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { applyPlan, caveatOf, ciTarget, ciTargets, isCiPending, keyFile, parseLastWord, projectKey, statusOf, undeliveredOf } from '../hooks/sessions'
+import { applyPlan, caveatOf, ciTarget, ciTargets, isCiPending, isPushedContent, keyFile, parseLastWord, projectKey, statusOf, undeliveredOf } from '../hooks/sessions'
 
 const NOW = Date.parse('2026-10-17T12:00:00.000Z')
 const PROJECT = 'C:\\Users\\dev\\Projects\\Acme 商店後台'
@@ -782,4 +782,77 @@ test('GitHub is asked about a commit of this repository, else about its HEAD', a
   files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { lastAnswer: `${words}  `, turnAt: at, planAt: at })))
   await clock.advance(31_000)
   expect(await board()).toMatch(/\[等待 CI・未完成\] 「商品列表頁」/)
+})
+
+/** A repository from memory: each commit's parent and files (path to blob), its local and remote branch tips. */
+function fakeGit(commits: Record<string, { parent: string | null; files: Record<string, string> }>, heads: Record<string, string>, remotes: Record<string, string>) {
+  const chain = (id: string) => {
+    const ids: string[] = []
+    for (let at: string | null = id; at; at = commits[at]!.parent) ids.push(at)
+
+    return ids
+  }
+  const holds = (tip: string, id: string) => chain(tip).includes(id)
+  const differs = (a: string, b: string) => {
+    const fa = commits[a]!.files
+    const fb = commits[b]!.files
+    return [...new Set([...Object.keys(fa), ...Object.keys(fb)])].filter(p => fa[p] !== fb[p]).sort()
+  }
+  const paths = (args: string[]) => args.slice(args.indexOf('--') + 1)
+
+  return async (args: string[]): Promise<string | null> => {
+    const [cmd] = args
+    if (cmd === 'branch') return Object.keys(remotes).filter(r => holds(remotes[r]!, args[3]!)).join('\n')
+    if (cmd === 'for-each-ref' && args.includes('refs/remotes')) return Object.keys(remotes).join('\n')
+    if (cmd === 'for-each-ref') return Object.values(heads).filter(h => holds(h, args[2]!)).join('\n')
+    if (cmd === 'merge-base') return chain(args[1]!).find(id => holds(remotes[args[2]!] ?? args[2]!, id)) ?? null
+    if (cmd === '-c') return differs(args[5]!, args[6]!).join('\0')
+    if (cmd === 'ls-tree') {
+      const files = commits[remotes[args[3]!] ?? args[3]!]!.files
+      return paths(args).filter(p => files[p]).map(p => `100644 blob ${files[p]}\t${p}`).join('\0')
+    }
+    if (cmd === 'log') {
+      const [from, to] = args[3]!.split('..') as [string, string]
+      const wanted = paths(args)
+      return chain(remotes[to] ?? to)
+        .filter(id => !holds(from, id) && commits[id]!.parent && differs(commits[id]!.parent!, id).some(p => wanted.includes(p)))
+        .join('\n')
+    }
+    if (cmd === 'rev-list') {
+      const [from, to] = args[3]!.split('..') as [string, string]
+      return holds(to, from) ? chain(to).slice(0, chain(to).indexOf(from)).slice(0, 5).join('\n') : ''
+    }
+
+    return null
+  }
+}
+
+test('a commit counts as pushed once its content is on a remote branch: rebased, squashed or edited after', async () => {
+  const commits = {
+    base: { parent: null, files: { 'a.ts': 'a0', 'b.ts': 'b0' } },
+    // Two local commits, kept on a backup branch, pushed as one squash.
+    l1: { parent: 'base', files: { 'a.ts': 'a1', 'b.ts': 'b0' } },
+    l2: { parent: 'l1', files: { 'a.ts': 'a2', 'b.ts': 'b1' } },
+    squash: { parent: 'base', files: { 'a.ts': 'a2', 'b.ts': 'b1' } },
+    // Then the remote edited a.ts again.
+    later: { parent: 'squash', files: { 'a.ts': 'a3', 'b.ts': 'b1' } },
+    // Never pushed: a new file on top of the remote.
+    mine: { parent: 'later', files: { 'a.ts': 'a3', 'b.ts': 'b1', 'c.ts': 'c1' } },
+    // Half of it on the remote: a.ts as pushed, b.ts not.
+    half: { parent: 'base', files: { 'a.ts': 'a2', 'b.ts': 'bX' } },
+  }
+  const git = fakeGit(commits, { backup: 'l2', main: 'mine', other: 'half' }, { 'origin/main': 'later' })
+
+  expect(await isPushedContent(git, 'squash')).toBe(true)
+  // Its content is the squash's, though a.ts moved on since.
+  expect(await isPushedContent(git, 'l2')).toBe(true)
+  // An earlier commit of the squash: its a.ts was edited by l2, so only its descendant l2 matches.
+  expect(await isPushedContent(git, 'l1')).toBe(true)
+  expect(await isPushedContent(git, 'mine')).toBe(false)
+  expect(await isPushedContent(git, 'half')).toBe(false)
+
+  // The backup branch gone, nothing ties l1 to what was pushed: the safe answer is not pushed.
+  const bare = fakeGit(commits, { main: 'mine' }, { 'origin/main': 'later' })
+  expect(await isPushedContent(bare, 'l1')).toBe(false)
+  expect(await isPushedContent(bare, 'l2')).toBe(true)
 })

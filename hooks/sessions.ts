@@ -364,6 +364,90 @@ function isUndelivered(text: string, push: PushCheck | undefined): boolean {
   return !(isOnlyPush && push?.words === text && push.isPushed)
 }
 
+/** Runs git with these arguments in the session's folder: its standard output, or null when it failed. */
+export type Git = (args: string[]) => Promise<string | null>
+
+/** More files than this, and a commit's content is not compared (an argument list has its limits): it reads as not pushed. */
+const CONTENT_FILES = 200
+/** How many of a remote branch's commits that touched those files are compared, newest first. */
+const CONTENT_COMMITS = 20
+/** How many local branches holding a commit, and of its descendants on each, are tried, newest first. */
+const DESCENDANT_TIPS = 3
+const DESCENDANTS = 5
+
+/** Each file's blob in `commit`, from `git ls-tree -r -z`; a file absent there is absent here. */
+async function blobsOf(git: Git, commit: string, files: string[]): Promise<Map<string, string> | null> {
+  const out = await git(['ls-tree', '-r', '-z', commit, '--', ...files])
+  if (out === null) return null
+  const blobs = new Map<string, string>()
+  for (const entry of out.split('\0').filter(Boolean)) {
+    const tab = entry.indexOf('\t')
+    const [, , blob] = entry.slice(0, tab).split(' ')
+    if (tab > 0 && blob) blobs.set(entry.slice(tab + 1), blob)
+  }
+
+  return blobs
+}
+
+function isSameContent(a: Map<string, string>, b: Map<string, string>, files: string[]): boolean {
+  return files.every(f => a.get(f) === b.get(f))
+}
+
+/**
+ * Whether the files `sha` changed (since its merge-base with a remote branch) hold, at that branch's tip or at
+ * one of its commits since the base that touched them, exactly what they hold in `sha`: its content reached
+ * the remote, as itself, rebased, cherry-picked or as the last of several commits squashed into one.
+ */
+async function isContentOnRemote(git: Git, sha: string, remotes: string[]): Promise<boolean> {
+  for (const remote of remotes) {
+    const base = await git(['merge-base', sha, remote])
+    if (!base) continue
+    const files = ((await git(['-c', 'core.quotepath=off', 'diff', '--name-only', '-z', base, sha])) ?? '').split('\0').filter(Boolean)
+    // Nothing of its own beyond the base the remote already holds.
+    if (files.length === 0) return true
+    if (files.length > CONTENT_FILES) continue
+    const mine = await blobsOf(git, sha, files)
+    if (!mine) continue
+    const touched = ((await git(['log', '--format=%H', `-${CONTENT_COMMITS}`, `${base}..${remote}`, '--', ...files])) ?? '').split('\n').filter(Boolean)
+    for (const commit of [remote, ...touched]) {
+      const theirs = await blobsOf(git, commit, files)
+      if (theirs && isSameContent(mine, theirs, files)) return true
+    }
+  }
+
+  return false
+}
+
+/**
+ * Whether what `sha` changed has reached a remote branch: the commit itself is on one; or its content is
+ * (isContentOnRemote); or the content of one of its descendants on a local branch is, newest first. The last
+ * covers an earlier commit of several squashed into one: its lines may have been edited again by the later
+ * ones, so only the squash's last commit matches the pushed content, and that commit holds this one's work.
+ *
+ * Anything else reads as not pushed, even when the remote holds the work in another form (only part of it,
+ * or edited on top before any match): the safe way, since a work item wrongly kept undelivered shows and can
+ * be closed by hand, while one wrongly delivered disappears from the board.
+ */
+export async function isPushedContent(git: Git, sha: string): Promise<boolean> {
+  if (await git(['branch', '-r', '--contains', sha])) return true
+  const refs = (await git(['for-each-ref', '--format=%(refname:short)', 'refs/remotes'])) ?? ''
+  const remotes = refs.split('\n').map(r => r.trim()).filter(r => r && !r.endsWith('/HEAD') && r.includes('/'))
+  if (remotes.length === 0) return false
+  if (await isContentOnRemote(git, sha, remotes)) return true
+  const tips = ((await git(['for-each-ref', '--contains', sha, '--format=%(objectname)', 'refs/heads'])) ?? '').split('\n').filter(Boolean)
+  const tried = new Set<string>()
+  for (const tip of tips.slice(0, DESCENDANT_TIPS)) {
+    const after = ((await git(['rev-list', '--ancestry-path', `-${DESCENDANTS}`, `${sha}..${tip}`])) ?? '').split('\n').filter(Boolean)
+    for (const later of after) {
+      if (tried.has(later)) continue
+      tried.add(later)
+      if (await isContentOnRemote(git, later, remotes)) return true
+    }
+  }
+
+  return false
+}
+
 /** What a session still has to deliver, as people read it. */
 export function deliveryText(kinds: DeliveryKind[]): string {
   const name: Record<DeliveryKind, string> = { commit: 'commit', push: 'push', release: '發布／部署／上線' }

@@ -17,6 +17,7 @@ import {
   hasReport,
   isBehind,
   isCiPending,
+  isPushedContent,
   isScratch,
   itemCode,
   keyFile,
@@ -379,8 +380,9 @@ export async function verifyCi($: EngineInterface, list: Session[]) {
 // ── Asking git whether a commit the words left unpushed has been pushed since ──
 
 /**
- * Whether the push the words leave undone (and nothing else) has happened since: the commit they
- * name is on a remote-tracking branch in `cwd`. A push from this machine moves that branch; no fetch.
+ * Whether the push the words leave undone (and nothing else) has happened since: the commit they name, or
+ * its content (rebased, squashed), is on a remote-tracking branch in `cwd`. A push from this machine moves
+ * that branch; no fetch.
  */
 export async function checkPush($: EngineInterface, id: string, cwd: string, text: string): Promise<PushCheck | undefined> {
   const left = undeliveredOf(text)
@@ -389,8 +391,8 @@ export async function checkPush($: EngineInterface, id: string, cwd: string, tex
   const held = (await read($, pushChecks))[id]
   // Pushed stays pushed; not yet is asked again after a minute.
   if (held && held.words === text && (held.isPushed || now - held.checkedAt < 60_000)) return held
-  const out = await run($, ['git', 'branch', '-r', '--contains', left.sha], cwd, GIT_TIMEOUT_MS)
-  const check: PushCheck = { words: text, sha: left.sha, isPushed: !!out, checkedAt: now }
+  const isPushed = await isPushedContent(args => run($, ['git', ...args], cwd, GIT_TIMEOUT_MS), left.sha)
+  const check: PushCheck = { words: text, sha: left.sha, isPushed, checkedAt: now }
   await update($, pushChecks, all => ({ ...all, [id]: check }))
 
   return check
