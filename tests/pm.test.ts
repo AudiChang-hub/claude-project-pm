@@ -628,6 +628,36 @@ test('words that leave work undelivered, and words that only name it', () => {
   expect(named.filter(t => undeliveredOf(t))).toEqual([])
 })
 
+test("someone else's undone work, or work a session disowns, is not its own to deliver", () => {
+  const kinds = (text: string) => undeliveredOf(text)?.kinds ?? []
+  // A real session's report: its own release done, then an aside about another session's uncommitted changes.
+  const aside =
+    '2.4.1 已上線，CI 全綠，正式站唯讀驗證通過。另外補充：發版前的檢查在共用資料夾被另一個 Session（版本 2.4.2）未提交的修改擋下，我改在乾淨的 worktree 重跑才通過；那些未提交的修改我都沒有動。'
+  expect(kinds(aside)).toEqual([])
+  const idle = { id: 'x', title: 't', cwd: '', isRunning: false, lastActivityAt: new Date(NOW - 5 * 60000).toISOString(), isPinned: false, hasOpenPr: false }
+  expect(statusOf(idle, track('x', { lastAnswer: aside }) as never, undefined, NOW)).toBe('done')
+
+  const others = [
+    '其他 Session 還沒 commit 的修改都留著。',
+    '另個 Session 還沒 push。',
+    '版本 2.4.2 的未提交修改還在共用資料夾裡。',
+    '那些未提交的修改，我都沒有動。',
+    '共用資料夾裡有還沒 commit 的檔案，不是我的。',
+    "Another session's changes are not committed yet; I didn't touch them.",
+    'Those files are not committed, but they are not mine.',
+  ]
+  expect(others.filter(t => undeliveredOf(t))).toEqual([])
+
+  // Its own work still counts, before or after an aside, and a later word of the same kind still stands.
+  expect(kinds('我已部署 2.4.1，2.4.2 還沒 commit。')).toEqual(['commit'])
+  expect(kinds('已部署 2.4.1，但 2.4.2 還沒部署。')).toEqual(['release'])
+  expect(kinds('我還沒 push，別人的修改我沒碰。')).toEqual(['push'])
+  expect(kinds('我還沒 push，那些暫存檔我都沒動。')).toEqual(['push'])
+  expect(kinds('另一個 Session 的修改我沒動；我這次的修改還沒 commit。')).toEqual(['commit'])
+  expect(kinds('還有未提交的修改，等測試跑完再 commit。')).toEqual(['commit'])
+  expect(kinds('部署腳本還沒動手改，2.4.2 還沒部署。')).toEqual(['release'])
+})
+
 test('a session whose words leave its work undelivered is not ended, however ticked its list', ZH, async ($, on) => {
   const files: Files = new Map()
   const item = { id: 1, text: '商品圖片可貼連結上傳', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
@@ -736,6 +766,8 @@ test('CI named in quotes or in a rule is not CI still running', () => {
     '- HEAD 比回報晚時維持等待 CI。',
     // A name in code.
     'WAITING 和 CI_PENDING 都一樣。',
+    // Another session's CI.
+    '另一個 Session 的 CI 還在跑。',
     // The status in a list or a chain of statuses.
     '- 優先順序：待回覆 → CI 失敗／等待 CI → 背景執行 → 未完成 → 待發布 → 已結束。CI 通過後如果回報還說沒部署，會從等待 CI 轉成待發布。',
     '- 第三個指標改名「尚未完成」，把未完成、等待 CI、CI 失敗、待發布都算進去。',

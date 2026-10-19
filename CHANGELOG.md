@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions match `version` in `.claude-plugin/plugin.json`.
 
+## [Unreleased]
+
+### Fixed
+- A report that said its own release was done and then told of another session's uncommitted changes ("blocked by another session's (version N+1) uncommitted changes… I did not touch them") showed as *Not released*. Words about another session's work (另一個／另個／其他／別的 Session, another session, someone else), about something owned by someone named before 的 (版本 2.4.2 的未提交修改), or disowned (我都沒有動, 沒碰, 不是我的, not mine, I didn't touch, together with the clause just before it when that clause has no I of its own) no longer count, for delivery, CI and background work alike. They are set aside before anything is read; of what is left, each kind's last word still stands, so "deployed 2.4.1, 2.4.2 not committed yet" still reads as not released.
+
 ## [0.5.0] - 2026-10-19
 
 ### Added

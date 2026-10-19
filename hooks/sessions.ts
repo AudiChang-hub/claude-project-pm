@@ -123,12 +123,23 @@ function lastIndex(re: RegExp, text: string): number {
  * clauses about a rule, an example, a condition or someone else's work blanked; separators and offsets kept.
  */
 export function reportedText(text: string): string {
+  const parts = text.replace(QUOTED, quoted => ' '.repeat(quoted.length)).split(/([。！？!?；;，,\n]+|\.\s+)/)
   // Blanked to as many spaces, so an offset in it is one in `text`.
-  return text
-    .replace(QUOTED, quoted => ' '.repeat(quoted.length))
-    .split(/([。！？!?；;，,\n]+|\.\s+)/)
-    .map((part, i) => (i % 2 === 0 && ABOUT_A_RULE.test(part) ? ' '.repeat(part.length) : part))
-    .join('')
+  const blank = (i: number) => {
+    parts[i] = ' '.repeat(parts[i]!.length)
+  }
+  for (let i = 0; i < parts.length; i += 2) {
+    const part = parts[i]!
+    if (ABOUT_A_RULE.test(part)) blank(i)
+    else if (DISCLAIMER.test(part)) {
+      blank(i)
+      // 那些未提交的修改，我都沒有動: what is disclaimed often stands just before, in the same sentence,
+      // with no I of its own (我還沒 push，別人的修改我沒碰 keeps its first half).
+      if (i >= 2 && /^[，,]+$/.test(parts[i - 1]!) && !FIRST_PERSON.test(parts[i - 2]!)) blank(i - 2)
+    }
+  }
+
+  return parts.join('')
 }
 
 /** The latest turn says CI has not finished (and says nothing later about it passing). */
@@ -354,7 +365,18 @@ const AWAITING_GO = new RegExp(
  * (其他 Session 還沒提交的修改都原樣留著: a folder shared with other sessions).
  */
 const ABOUT_A_RULE =
-  /其他 ?Session|別的 ?Session|其他人|別人|他人|其餘|other sessions?|someone else|判|列為|列進|標成|標為|視為|字眼|說法|正則|regex|正例|反例|這類|例如|像是|顯示|不能是|不算|才算|當成|當作|被當|(?<![小同即當準及按暫])時\s*$|(?<![小同即當準及按暫])時(?:就|會|才|便|也|一樣|照樣|仍|都)|的時候|的話|如果|假如|只要|一旦|回報說|摘要寫|提到|e\.g\.|for example|such as|\bif\b|\bwhen\b/i
+  /另一個 ?Session|另個 ?Session|另外一個 ?Session|(?:另一個|另個|另外一個|另一|其他|別的|別個)\s*(?:Session|session|人|同事|版本|分支|專案)|其他人|別人|他人|其餘|another session|other sessions?|someone else|someone's|判|列為|列進|標成|標為|視為|字眼|說法|正則|regex|正例|反例|這類|例如|像是|顯示|不能是|不算|才算|當成|當作|被當|(?<![小同即當準及按暫])時\s*$|(?<![小同即當準及按暫])時(?:就|會|才|便|也|一樣|照樣|仍|都)|的時候|的話|如果|假如|只要|一旦|回報說|摘要寫|提到|e\.g\.|for example|such as|\bif\b|\bwhen\b/i
+/**
+ * A clause that disowns what it speaks of: 我都沒有動, 沒碰, 不是我的, 不屬於這次, not mine, I didn't touch.
+ * Its words, and the subject-less clause it disowns just before it, say nothing about this session's work.
+ */
+const DISCLAIMER =
+  /(?<![還尚仍])(?:都|也|並|完全)?沒(?:有)?(?:動|碰|改動)(?![手工])(?:過|到)?|沒碰|不是我的|不是這次的|不屬於(?:這次|本次|我)|與我無關|not mine|isn't mine|aren't mine|weren't mine|\bI (?:didn't|did not|haven't|have not) touch|left (?:them|it|those|that) (?:alone|untouched)|untouched/i
+/** A clause with its own I: what it says is this session's own. */
+const FIRST_PERSON = /我|自己|\bI\b|\bwe\b|\bmy\b|\bour\b/i
+/** What a possessive (X 的未提交修改) may name and still be this session's own: 我, this turn, now, here. */
+const OWN = /我|自己|本次|這次|這個 ?Session|這邊|目前|現在|本機|本地|手上|剩下|剩餘|\bmy\b|\bour\b|this session/i
+
 /** The commit the words name: the hash after "commit", else the first one that is not part of an id (local_…-9e0f1a2b3c4d). */
 function commitOf(text: string): string | null {
   const named = /\bcommit\s*(?:是|為|:|：|hash)?\s*`?([0-9a-f]{7,40})\b/i.exec(text)?.[1]
@@ -384,11 +406,18 @@ function verbsIn(segment: string): DeliveryKind[] {
  */
 export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: string | null } | null {
   const last = new Map<DeliveryKind, boolean>()
-  const plain = text.replace(NOTHING_LEFT, '').replace(QUOTED, ' ')
+  // Rules, examples, quotes, someone else's work and what a clause disowns are gone (reportedText) before
+  // anything is read: of what is left, a kind's last word stands.
+  const plain = reportedText(text.replace(NOTHING_LEFT, ''))
   for (const sentence of plain.split(/[。！？!?；;，,\n]+|\.\s+/)) {
-    if (ABOUT_A_RULE.test(sentence)) continue
+    if (!sentence.trim()) continue
     const said: { at: number; kind: DeliveryKind; isLeft: boolean }[] = []
-    for (const m of sentence.matchAll(NOT_DONE)) for (const kind of verbsIn(m[1] ?? m[2] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: true })
+    for (const m of sentence.matchAll(NOT_DONE)) {
+      // 版本 2.4.2 的未提交修改: undone, but someone else's, unless the owner named is this session.
+      const owner = /([^\s，,。]+(?:\s+[^\s，,。]+)?)\s*的\s*$/.exec(sentence.slice(0, m.index ?? 0))?.[1]
+      if (owner && !OWN.test(owner)) continue
+      for (const kind of verbsIn(m[1] ?? m[2] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: true })
+    }
     for (const m of sentence.matchAll(DONE)) for (const kind of verbsIn(m[1] ?? m[2] ?? m[3] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: false })
     for (const m of sentence.matchAll(AWAITING_GO)) said.push({ at: m.index ?? 0, kind: 'release', isLeft: true })
     for (const one of said.sort((a, b) => a.at - b.at)) last.set(one.kind, one.isLeft)
