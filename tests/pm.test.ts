@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { applyPlan, keyFile, projectKey, statusOf } from '../hooks/sessions'
+import { applyPlan, caveatOf, ciTarget, keyFile, projectKey, statusOf } from '../hooks/sessions'
 
 const NOW = Date.parse('2026-10-17T12:00:00.000Z')
 const PROJECT = 'C:\\Users\\dev\\Projects\\Acme 商店後台'
@@ -34,9 +34,18 @@ type Files = Map<string, string>
 /** The test host spells paths its own way: compare them by what follows the data folder. */
 const norm = (path: string) => path.replace(/\\/g, '/').replace(/^.*\/\.claude\/project-pm/, DIR)
 
-/** The desktop app and the disk, from memory: `self` is this session's id. */
-function world(on: On, self: string, files: Files, archived: string[] = []) {
+/** What a host command answers: null for a command that is not there (no gh, no repository). */
+type Host = (argv: readonly string[], cwd: string | undefined) => { exitCode: number; stdout: string } | null
+
+/** The desktop app, the disk and the host's commands, from memory: `self` is this session's id. */
+function world(on: On, self: string, files: Files, archived: string[] = [], host: Host = () => null) {
   let list = [...SESSIONS]
+  on('process.run', ($, e) => {
+    const out = host(e.argv, e.init?.cwd)
+    if (!out) throw new Error(`${e.argv[0]}: command not found`)
+
+    return { value: { ...out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
   mock.env(on, { USERPROFILE: 'C:\\home' })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: PROJECT }))
@@ -263,4 +272,134 @@ test('an empty track does not hide a transcript that says CI is still running', 
   expect(await ui.find({ key: 'card:local_open' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '等待 CI' })).toBeDefined()
   await ui.unmount()
+})
+
+test('a recap stands only for the turn that wrote it', async ($, on) => {
+  const files: Files = new Map()
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_me', files)
+  on('tool.call', { tool: 'mcp__ccd_turn__wrap_up' }, () => ({ result: 'ok' }))
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start(START)
+  const turn = (answer: string) => $.turn.complete({ answer, durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' })
+
+  await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', recap: '1.86.11 已推上 main，CI 還在跑，通過後才會打標籤和部署。' } as never)
+  await turn('已推上 main，我在背景等 CI。')
+  expect(JSON.parse(files.get(`${DIR}/sessions/local_me.json`)!).recap).toMatch(/CI 還在跑/)
+
+  // Woken later by a notification, the session answers without a wrap_up of its own (and no prompt.submit).
+  await clock.advance(30 * 60000)
+  await turn('已打標籤 v1.86.11 並部署到正式站。')
+  const kept = JSON.parse(files.get(`${DIR}/sessions/local_me.json`)!)
+  expect(kept.recap).toBe(null)
+  const idle = { id: 'local_me', title: '我', cwd: PROJECT, isRunning: false, lastActivityAt: new Date(NOW + 30 * 60000).toISOString(), isPinned: false, hasOpenPr: false }
+  expect(statusOf(idle, kept, undefined, NOW + 31 * 60000)).toBe('done')
+})
+
+test('a track that missed later turns gives way to the transcript', async ($, on) => {
+  const files: Files = new Map()
+  const item = { id: 1, text: '訂單總覽頁面', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
+  // Written when it pushed; the turns that saw CI pass and deployed never reached the file. The app saw them (11:50).
+  const pushedAt = Date.parse('2026-10-17T11:31:00.000Z')
+  files.set(
+    `${DIR}/sessions/local_open.json`,
+    JSON.stringify(
+      track('local_open', {
+        plan: [{ content: '等 CI 通過後打標籤', status: 'completed' }],
+        recap: '1.86.11 已推上 main（4dca77c）。CI 還在跑，通過後才會打標籤和部署；目前還沒部署。',
+        lastAnswer: '還沒完成：CI 還在跑，大約 25 分鐘，我在背景等結果。',
+        turnAt: pushedAt,
+        planAt: pushedAt,
+      }),
+    ),
+  )
+  const clock = mock.clock(on, { now: NOW })
+  const transcript = '[assistant] 「訂單總覽」已經上線，正式站現在是 1.86.11。\n[assistant] (called mcp__ccd_turn__wrap_up)\n[assistant] 已部署 1.86.11，正式站驗證通過。\n[result] done (success), 14 turns'
+  on('mcp.call', { tool: 'list_events' }, ($, e, next) =>
+    e.args?.session_id === 'local_open' ? { value: { content: [{ type: 'text' as const, text: transcript }], isError: false } } : next(e),
+  )
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+  await clock.advance(400)
+
+  const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(board).toMatch(/### \[已結束\] 商品列表頁 \(local_open\)/)
+  expect(board).not.toMatch(/等待 CI・未完成\] 「商品列表頁」/)
+  expect(board).not.toMatch(/\[需追蹤\] 「商品列表頁」/)
+  expect(board).toMatch(/最後回報：已部署 1.86.11，正式站驗證通過。/)
+
+  const closed = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done' } as never)) as { result?: unknown }).result)
+  expect(closed).toMatch(/已更新工作項目 T-01/)
+})
+
+test('GitHub decides whether CI the words left running is still running', async ($, on) => {
+  const files: Files = new Map()
+  const item = { id: 1, text: '訂單總覽頁面', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
+  const at = Date.parse('2026-10-17T11:50:00.000Z')
+  files.set(
+    `${DIR}/sessions/local_open.json`,
+    JSON.stringify(track('local_open', { lastAnswer: '已推上 main（`4dca77c`），CI 還在跑，通過後才會打標籤和部署。', turnAt: at, planAt: at })),
+  )
+  const FULL = '4dca77ca10fda0b742c442bc2623c01c470259d3'
+  let runs: object[] | null = [{ status: 'in_progress', conclusion: null }]
+  const asked: string[] = []
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files, [], (argv, cwd) => {
+    asked.push(`${argv.join(' ')} @ ${cwd}`)
+    if (argv[0] === 'git' && argv[1] === 'rev-parse') return { exitCode: 0, stdout: `${FULL}\n` }
+    if (argv[0] === 'gh' && runs) return { exitCode: 0, stdout: JSON.stringify(runs) }
+
+    return null
+  })
+  await $.session.start(START)
+  await clock.advance(400)
+  const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  const close = async () =>
+    String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done' } as never)) as { result?: unknown }).result)
+
+  // Still running on GitHub: the old guard stands.
+  expect(await board()).toMatch(/\[等待 CI・未完成\] 「商品列表頁」/)
+  expect(asked).toContain(`gh run list --commit ${FULL} --limit 20 --json status,conclusion @ ${PROJECT}`)
+  expect(await close()).toMatch(/無法將 T-01 標記為完成：負責的 Session「商品列表頁」CI 尚未跑完/)
+
+  // GitHub can't be asked: the words alone decide, as before.
+  runs = null
+  await clock.advance(61_000)
+  expect(await board()).toMatch(/\[等待 CI・未完成\] 「商品列表頁」/)
+
+  // Failed: something to handle, not something to wait on.
+  runs = [{ status: 'completed', conclusion: 'success' }, { status: 'completed', conclusion: 'failure' }]
+  await clock.advance(61_000)
+  const failed = await board()
+  expect(failed).toMatch(/\[CI 失敗・需處理\] 「商品列表頁」\(local_open\) GitHub 上的 CI（commit 4dca77c）失敗/)
+  expect(failed).not.toMatch(/等待 CI・未完成\] 「商品列表頁」/)
+  expect(await close()).toMatch(/無法將 T-01 標記為完成：負責的 Session「商品列表頁」GitHub 上的 CI 失敗/)
+
+  // Re-run and passed: done, and not asked again after that.
+  runs = [{ status: 'completed', conclusion: 'success' }]
+  await clock.advance(5 * 60_000 + 1000)
+  const passed = await board()
+  expect(passed).not.toMatch(/「商品列表頁」\(local_open\) (最後回報 CI|GitHub)/)
+  expect(passed).toMatch(/### \[已結束\] 商品列表頁/)
+  const before = asked.length
+  await clock.advance(10 * 60_000)
+  await board()
+  expect(asked.length).toBe(before)
+  expect(await close()).toMatch(/已更新工作項目 T-01/)
+})
+
+test('a recap that says nothing is left is not a caveat', () => {
+  const recap = (text: string) => caveatOf(track('x', { recap: text }) as never)
+  expect(recap('之後版號和發布接力都由 PM 管，我這邊沒有任何未提交的修改。')).toBe(null)
+  expect(recap('交接完成，沒有未推送的 commit。')).toBe(null)
+  expect(recap('欄位已移除，還沒部署。')).not.toBe(null)
+  expect(recap('改好了，但沒有提交。')).not.toBe(null)
+})
+
+test('the CI a session names: a run id, else a commit', () => {
+  expect(ciTarget('CI 還在跑：https://github.com/o/r/actions/runs/39031560867')).toEqual({ run: '39031560867' })
+  expect(ciTarget('1.86.11 已推上 main（`4dca77c`），CI 還在跑，1918 項全過')).toEqual({ sha: '4dca77c' })
+  expect(ciTarget('1.86.11 已推上 main，CI 還在跑')).toBe(null)
 })

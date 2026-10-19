@@ -1,9 +1,9 @@
 // Reading sessions into a project's board: who is working, who waits on you,
 // who stopped with steps left, and what the PM was asked to keep track of.
 
-import type { LastWord, LedgerItem, ProjectFile, Session, Step, Track } from '../types'
+import type { CiCheck, LastWord, LedgerItem, ProjectFile, Session, Step, Track } from '../types'
 
-export type Status = 'running' | 'asking' | 'open' | 'ci' | 'waiting' | 'done' | 'stale'
+export type Status = 'running' | 'asking' | 'failed' | 'open' | 'ci' | 'waiting' | 'done' | 'stale'
 
 /**
  * How each status reads and looks: `color` is a theme key (drawn right in light and dark),
@@ -11,12 +11,13 @@ export type Status = 'running' | 'asking' | 'open' | 'ci' | 'waiting' | 'done' |
  */
 export const STATUS: Record<Status, { label: string; tag: string; color: string; hex: string; rank: number }> = {
   asking: { label: '待回覆', tag: '待回覆', color: 'warning', hex: '#f59e0b', rank: 0 },
-  open: { label: '未完成', tag: '中斷・未完成', color: 'claude', hex: '#d97757', rank: 1 },
-  ci: { label: '等待 CI', tag: '等待 CI・未完成', color: 'permission', hex: '#8b5cf6', rank: 2 },
-  running: { label: '執行中', tag: '執行中', color: 'success', hex: '#22c55e', rank: 3 },
-  waiting: { label: '背景執行', tag: '背景執行', color: 'suggestion', hex: '#3b82f6', rank: 4 },
-  done: { label: '已結束', tag: '已結束', color: 'inactive', hex: '#9ca3af', rank: 5 },
-  stale: { label: '長期閒置', tag: '長期閒置', color: 'subtle', hex: '#6b7280', rank: 6 },
+  failed: { label: 'CI 失敗', tag: 'CI 失敗・需處理', color: 'error', hex: '#ef4444', rank: 1 },
+  open: { label: '未完成', tag: '中斷・未完成', color: 'claude', hex: '#d97757', rank: 2 },
+  ci: { label: '等待 CI', tag: '等待 CI・未完成', color: 'permission', hex: '#8b5cf6', rank: 3 },
+  running: { label: '執行中', tag: '執行中', color: 'success', hex: '#22c55e', rank: 4 },
+  waiting: { label: '背景執行', tag: '背景執行', color: 'suggestion', hex: '#3b82f6', rank: 5 },
+  done: { label: '已結束', tag: '已結束', color: 'inactive', hex: '#9ca3af', rank: 6 },
+  stale: { label: '長期閒置', tag: '長期閒置', color: 'subtle', hex: '#6b7280', rank: 7 },
 }
 
 export function isActive(status: Status): boolean {
@@ -30,6 +31,8 @@ export function itemCode(id: number): string {
 
 const WAITING_MINUTES = 45
 const STALE_DAYS = 3
+/** How far the app's last activity may run ahead of a track's last write before the track has missed a turn. */
+const BEHIND_MS = 2 * 60000
 
 /** Words a session leaves when its turn ends but work goes on: a background job, a CI run, a deploy. */
 const WAITING =
@@ -56,14 +59,69 @@ export function isCiPending(text: string): boolean {
   return pending >= 0 && pending > lastIndex(CI_PASSED, text)
 }
 
-/** What the session said in its latest turn: its recap and final answer. */
+/** What the session said in its latest turn: its recap and final answer, the later one last. */
 export function latestWords(track: Track): string {
-  return [track.recap ?? '', track.lastAnswer].filter(Boolean).join('\n')
+  const words = [track.recap ?? '', track.lastAnswer]
+  // A recap written after the last turn ended belongs to the turn still going: it is the newer word.
+  if ((track.recapAt ?? 0) > track.turnAt) words.reverse()
+
+  return words.filter(Boolean).join('\n')
+}
+
+/** The words statusOf reads for CI: the track's latest turn, else the transcript's last word. */
+export function ciWords(track: Track | undefined, word: LastWord | undefined): string {
+  return track ? latestWords(track) : (word?.said ?? '')
+}
+
+/** The CI a session's words name, the latest mention: a run id, else a commit. */
+export function ciTarget(text: string): { run: string } | { sha: string } | null {
+  const runs = [...text.matchAll(/(?:actions\/runs\/|\brun\s*(?:id\s*)?[#:：]?\s*)(\d{8,12})\b/gi)]
+  if (runs.length) return { run: runs.at(-1)![1]! }
+  // Seven to forty hex digits, with a digit and a letter: 4dca77c, not 1918 or "deadbeef".
+  const shas = [...text.matchAll(/(?<![0-9a-z])[0-9a-f]{7,40}(?![0-9a-z])/gi)].map(m => m[0]).filter(w => /\d/.test(w) && /[a-f]/i.test(w))
+
+  return shas.length ? { sha: shas.at(-1)!.toLowerCase() } : null
+}
+
+/** What GitHub's runs for a commit (or one run) come to: any still going is pending, any failed is failure. */
+export function ciVerdict(runs: { status?: string; conclusion?: string | null }[]): CiCheck['state'] {
+  if (runs.length === 0) return 'unknown'
+  if (runs.some(r => r.status !== 'completed')) return 'pending'
+  if (runs.some(r => !['success', 'skipped', 'neutral'].includes(String(r.conclusion)))) return 'failure'
+
+  return 'success'
+}
+
+/**
+ * Whether a track has missed the session's latest turns: the app saw activity well after the
+ * track's last write while the session sits idle (a module that lost its track for a while).
+ */
+export function isBehind(one: Session, track: Track): boolean {
+  return !one.isRunning && (Date.parse(one.lastActivityAt) || 0) - Math.max(track.turnAt, track.planAt) > BEHIND_MS
+}
+
+/**
+ * The tracks as they stand against the transcripts: a track behind its session takes the
+ * transcript's last word for its words (its recap and question were an older turn's) and keeps its task list.
+ */
+export function liveTracks(list: Session[], tracks: Record<string, Track>, words: Record<string, LastWord>): Record<string, Track> {
+  const live: Record<string, Track> = { ...tracks }
+  for (const one of list) {
+    const track = tracks[one.id]
+    const word = words[one.id]
+    if (!track || !isBehind(one, track) || !word || word.error || !word.said || word.activity !== one.lastActivityAt) continue
+    live[one.id] = { ...track, recap: null, recapAt: undefined, ask: word.isAsking ? word.said : null, lastAnswer: word.said }
+  }
+
+  return live
 }
 
 /** Words a recap uses for what is left: not committed, not verified, not deployed. */
 const CAVEAT =
   /(還沒|尚未|沒有|未)(完成|驗證|確認|測試|提交|commit|推|push|部署|合併|merge|處理|做)|not (yet )?(done|verified|tested|committed|pushed|deployed|merged)|still (needs|to do)|TODO/i
+
+/** A double negative that says nothing is left: 沒有任何未提交的修改, 沒有未推送的 commit. */
+const NOTHING_LEFT = /(沒有|没有|並無|并无|無|不再有)(任何|其他|別的|剩下|剩餘|留下)?[^。，,；;！!\n]{0,4}?(還沒|尚未|未)/g
 
 export type Project = { key: string; name: string; path: string; sessions: Session[] }
 
@@ -128,21 +186,35 @@ export function openSteps(track: Track | undefined): Step[] {
 }
 
 export function caveatOf(track: Track | undefined): string | null {
-  return track?.recap && CAVEAT.test(track.recap) ? track.recap : null
+  return track?.recap && CAVEAT.test(track.recap.replace(NOTHING_LEFT, '')) ? track.recap : null
 }
 
-export function statusOf(one: Session, track: Track | undefined, word: LastWord | undefined, now: number): Status {
+/**
+ * What the CI the words left running comes to, as GitHub last answered for those same words:
+ * `ci` while it runs or cannot be checked, `failed` once it failed, null when it passed or none is running.
+ */
+function ciStatus(text: string, ci: CiCheck | undefined): Status | null {
+  if (!isCiPending(text)) return null
+  const known = ci?.words === text ? ci.state : 'unknown'
+  if (known === 'success') return null
+
+  return known === 'failure' ? 'failed' : 'ci'
+}
+
+export function statusOf(one: Session, track: Track | undefined, word: LastWord | undefined, now: number, ci?: CiCheck): Status {
   if (one.isRunning) return 'running'
   const minutes = (now - (Date.parse(one.lastActivityAt) || 0)) / 60000
   if (track) {
     if (track.ask || /[?？]\s*$/.test(track.lastAnswer)) return 'asking'
     if (openSteps(track).length > 0) return 'open'
     // CI that has not finished is never done, however long ago the session stopped.
-    if (isCiPending(latestWords(track))) return 'ci'
+    const pending = ciStatus(latestWords(track), ci)
+    if (pending) return pending
     if (WAITING.test(track.lastAnswer) && minutes < WAITING_MINUTES) return 'waiting'
   } else {
     if (word?.isAsking) return 'asking'
-    if (word && isCiPending(word.said)) return 'ci'
+    const pending = word ? ciStatus(word.said, ci) : null
+    if (pending) return pending
     if (word?.isWaiting && minutes < WAITING_MINUTES) return 'waiting'
   }
 
@@ -263,6 +335,7 @@ export type BoardInput = {
   sessions: Session[]
   tracks: Record<string, Track>
   words: Record<string, LastWord>
+  ci?: Record<string, CiCheck>
   ledger: LedgerItem[]
   now: number
   isIncludingDone: boolean
@@ -270,15 +343,17 @@ export type BoardInput = {
 
 /** The board as the PM model reads it: what needs attention first, then every session. */
 export function boardText(input: BoardInput): string {
-  const { project, sessions, tracks, words, ledger, now } = input
+  const { project, sessions, words, ledger, now } = input
+  const tracks = liveTracks(sessions, input.tracks, words)
+  const ci = input.ci ?? {}
   const rows = sessions
-    .map(one => ({ one, track: tracks[one.id], word: words[one.id], status: statusOf(one, tracks[one.id], words[one.id], now) }))
+    .map(one => ({ one, track: tracks[one.id], word: words[one.id], status: statusOf(one, tracks[one.id], words[one.id], now, ci[one.id]) }))
     .sort((a, b) => STATUS[a.status].rank - STATUS[b.status].rank)
   const lines: string[] = []
   lines.push(`# 專案狀態報告：${project.name}`, `路徑：${project.path}`)
   const count = (s: Status) => rows.filter(r => r.status === s).length
   lines.push(
-    `Sessions ${rows.length}（不含 PM）｜待回覆 ${count('asking')}｜中斷・未完成 ${count('open')}｜執行中 ${count('running')}｜背景執行 ${count('waiting')}｜已結束 ${count('done')}｜長期閒置 ${count('stale')}`,
+    `Sessions ${rows.length}（不含 PM）｜待回覆 ${count('asking')}｜CI 失敗 ${count('failed')}｜等待 CI ${count('ci')}｜中斷・未完成 ${count('open')}｜執行中 ${count('running')}｜背景執行 ${count('waiting')}｜已結束 ${count('done')}｜長期閒置 ${count('stale')}`,
   )
 
   const counted = ledger.filter(item => item.status !== 'dropped')
@@ -292,9 +367,12 @@ export function boardText(input: BoardInput): string {
       const left = openSteps(r.track)
       attention.push(`- [中斷・未完成] ${name} 已停止，任務清單仍有 ${left.length} 項未完成：${left.map(s => s.content).join('；')}`)
     }
-    if (r.status === 'ci') attention.push(`- [等待 CI・未完成] ${name} 最後回報 CI 尚未跑完，不能視為完成：${clip(r.track ? latestWords(r.track) : (r.word?.said ?? ''), 200)}`)
+    if (r.status === 'ci') attention.push(`- [等待 CI・未完成] ${name} 最後回報 CI 尚未跑完，不能視為完成：${clip(ciWords(r.track, r.word), 200)}`)
+    if (r.status === 'failed') {
+      attention.push(`- [CI 失敗・需處理] ${name} GitHub 上的 CI（${ci[r.one.id]?.target || '最近一次'}）失敗，要修正後重跑：${clip(ciWords(r.track, r.word), 200)}`)
+    }
     const caveat = caveatOf(r.track)
-    if (caveat && r.status !== 'running' && r.status !== 'ci') attention.push(`- [需追蹤] ${name} 收尾摘要載明尚有未完成事項：${clip(caveat, 200)}`)
+    if (caveat && r.status !== 'running' && r.status !== 'ci' && r.status !== 'failed') attention.push(`- [需追蹤] ${name} 收尾摘要載明尚有未完成事項：${clip(caveat, 200)}`)
     if (r.one.hasOpenPr && r.status !== 'running') attention.push(`- [PR 開啟中] ${name}`)
   }
   const openLedger = ledger.filter(item => item.status === 'open')

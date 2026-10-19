@@ -97,6 +97,7 @@ export const register: Register = on => {
         ...t,
         recap: str(input.recap) ?? null,
         ask: str(input.ask) ?? null,
+        recapAt: now,
         plan: t.plan.map(s => ({ ...s, status: 'completed' as const })),
         planAt: now,
       }))
@@ -108,7 +109,13 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
       const now = await $.clock.now()
-      await changeMine($, t => ({ ...t, lastAnswer: clip(e.answer, 800), turnAt: now }))
+      // A turn that ended without its own wrap_up leaves no recap: the one there is an older turn's.
+      await changeMine($, t => ({
+        ...t,
+        lastAnswer: clip(e.answer, 800),
+        turnAt: now,
+        ...((t.recapAt ?? 0) > t.turnAt ? {} : { recap: null, ask: null }),
+      }))
       // The title is often given after the first turn.
       if (getMine() && !getMine()?.title) {
         try {

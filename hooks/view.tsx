@@ -4,8 +4,8 @@
 import { atom, read, update } from 'claude-code'
 import type { ElementConstructor, EngineInterface, RenderInputOf, RenderSurface, SvgProps } from 'claude-code'
 
-import type { LastWord, LedgerItem, Me, Notice, ProjectFile, Scope, Session, Sessions, Step, Track } from '../types'
-import { STATUS, ago, caveatOf, clip, groupProjects, isActive, itemCode, openSteps, projectKey, statusOf } from './sessions'
+import type { CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, Scope, Session, Sessions, Step, Track } from '../types'
+import { STATUS, ago, caveatOf, clip, groupProjects, isActive, itemCode, liveTracks, openSteps, projectKey, statusOf } from './sessions'
 import type { Project, Status } from './sessions'
 import { archive, claim, dismissBand, refresh, startPmSession } from './actions'
 
@@ -14,6 +14,7 @@ const me = atom({ plugin: 'project-pm', key: 'me' } as const, null as Me | null)
 const sessions = atom({ plugin: 'project-pm', key: 'sessions' } as const, { list: [], fetchedAt: 0, error: null } as Sessions)
 const tracks = atom({ plugin: 'project-pm', key: 'tracks' } as const, {} as Record<string, Track>)
 const lastWords = atom({ plugin: 'project-pm', key: 'lastWords' } as const, {} as Record<string, LastWord>)
+const ciChecks = atom({ plugin: 'project-pm', key: 'ciChecks' } as const, {} as Record<string, CiCheck>)
 const projects = atom({ plugin: 'project-pm', key: 'projects' } as const, {} as Record<string, ProjectFile>)
 const scope = atom({ plugin: 'project-pm', key: 'scope' } as const, 'project' as Scope)
 const confirm = atom({ plugin: 'project-pm', key: 'confirm' } as const, null as string | null)
@@ -94,8 +95,9 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const Svg = 'Svg' in els ? (els as unknown as { Svg: ElementConstructor<SvgProps> }).Svg : null
   const self = await read($, me)
   const state = await read($, sessions)
-  const all = await read($, tracks)
   const words = await read($, lastWords)
+  const all = liveTracks(state.list, await read($, tracks), words)
+  const ci = await read($, ciChecks)
   const files = await read($, projects)
   const view = await read($, scope)
   const asking = await read($, confirm)
@@ -122,7 +124,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const svg = (key: string, source: string, alt: string, size?: { width?: number; height?: number }, isInteractive = false) =>
     Svg ? <Svg key={key} source={source} alt={alt} width={size?.width} height={size?.height} isInteractive={isInteractive || undefined} /> : null
 
-  const statusOfOne = (one: Session) => statusOf(one, all[one.id], words[one.id], now)
+  const statusOfOne = (one: Session) => statusOf(one, all[one.id], words[one.id], now, ci[one.id])
   const groups = groupProjects(state.list)
   const isAll = view === 'all' || !self || self.isScratch
   const shown: Project[] = isAll
@@ -192,7 +194,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
       <Box flexDirection="row">
         {metric('kpi:running', count('running') + count('waiting'), '執行中', 'success')}
         {metric('kpi:asking', count('asking'), '待回覆', 'warning')}
-        {metric('kpi:open', count('open') + count('ci'), '未完成・待 CI', 'claude')}
+        {metric('kpi:open', count('open') + count('ci') + count('failed'), '未完成・待 CI', 'claude')}
       </Box>
     </Box>
   )

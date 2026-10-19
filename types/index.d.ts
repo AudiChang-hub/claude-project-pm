@@ -43,6 +43,18 @@ export type Track = {
   turnAt: number
   /** When the task list last changed, ms. */
   planAt: number
+  /** When wrap_up last wrote the recap, ms: a turn that ends after it without its own wrap_up drops it. */
+  recapAt?: number
+}
+
+/** What GitHub says about the CI a session's words left running. */
+export type CiCheck = {
+  /** The words it was checked for: other words check again. */
+  words: string
+  /** What was asked: `run 123`, `commit <sha>`; empty when nothing could be named. */
+  target: string
+  state: 'pending' | 'success' | 'failure' | 'unknown'
+  checkedAt: number
 }
 
 /** Something the person asked the PM for, kept until it is done. */
@@ -90,6 +102,7 @@ declare module 'claude-code' {
       sessions: Sessions
       tracks: Record<string, Track>
       lastWords: Record<string, LastWord>
+      ciChecks: Record<string, CiCheck>
       projects: Record<string, ProjectFile>
       scope: Scope
       confirm: string | null

@@ -4,18 +4,23 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, McpToolResult } from 'claude-code'
 
-import type { LastWord, LedgerItem, Me, Notice, ProjectFile, Session, Sessions, Track } from '../types'
+import type { CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, Session, Sessions, Track } from '../types'
 import {
   boardText,
+  ciTarget,
+  ciVerdict,
+  ciWords,
   clip,
   emptyProject,
   groupProjects,
   hasReport,
+  isBehind,
   isCiPending,
   isScratch,
   itemCode,
   keyFile,
   latestWords,
+  liveTracks,
   openSteps,
   parseLastWord,
   parseSessions,
@@ -31,6 +36,7 @@ const me = atom({ plugin: 'project-pm', key: 'me' } as const, null as Me | null)
 const sessions = atom({ plugin: 'project-pm', key: 'sessions' } as const, { list: [], fetchedAt: 0, error: null } as Sessions)
 const tracks = atom({ plugin: 'project-pm', key: 'tracks' } as const, {} as Record<string, Track>)
 const lastWords = atom({ plugin: 'project-pm', key: 'lastWords' } as const, {} as Record<string, LastWord>)
+const ciChecks = atom({ plugin: 'project-pm', key: 'ciChecks' } as const, {} as Record<string, CiCheck>)
 const projects = atom({ plugin: 'project-pm', key: 'projects' } as const, {} as Record<string, ProjectFile>)
 const confirm = atom({ plugin: 'project-pm', key: 'confirm' } as const, null as string | null)
 const busy = atom({ plugin: 'project-pm', key: 'busy' } as const, null as string | null)
@@ -43,6 +49,12 @@ export const PANE = 'project-pm'
 export const POLL_MS = 30_000
 export const STUCK_MS = 20_000
 export const WORDS_PER_ROUND = 8
+/** GitHub lookups per refresh, and how long each command may take: the board waits on them. */
+export const CI_CHECKS_PER_ROUND = 3
+export const GIT_TIMEOUT_MS = 4_000
+export const GH_TIMEOUT_MS = 8_000
+/** How soon an answer is asked again: a pass stands, a failure may be re-run, a running or unknown CI moves on. */
+const CI_RECHECK_MS: Record<CiCheck['state'], number> = { success: Infinity, failure: 5 * 60_000, pending: 60_000, unknown: 60_000 }
 /** Put in a new PM session's brief: the session that reads it claims its project. */
 export const CLAIM = '[project-pm:claim]'
 export const BOARD_TOOL = 'mcp__project-pm__board'
@@ -229,11 +241,12 @@ export async function readTracks($: EngineInterface, list: Session[]) {
   })
 }
 
-/** Reads the last word of untracked sessions that did something since they were last read. */
+/** Reads the last word of sessions untracked, or tracked but behind, that did something since they were last read. */
 export async function catchUp($: EngineInterface, list: Session[]) {
   const known = await read($, lastWords)
   const tracked = await read($, tracks)
-  const stale = list.filter(one => !tracked[one.id] && known[one.id]?.activity !== one.lastActivityAt).slice(0, WORDS_PER_ROUND)
+  const isUnread = (one: Session) => !tracked[one.id] || isBehind(one, tracked[one.id]!)
+  const stale = list.filter(one => isUnread(one) && known[one.id]?.activity !== one.lastActivityAt).slice(0, WORDS_PER_ROUND)
   if (stale.length === 0) return
   const fresh: Record<string, LastWord> = {}
   for (const one of stale) fresh[one.id] = await readLastWord($, one)
@@ -242,6 +255,100 @@ export async function catchUp($: EngineInterface, list: Session[]) {
 
     return { ...kept, ...fresh }
   })
+}
+
+// ── Asking GitHub about CI a session left running ──
+
+async function run($: EngineInterface, argv: string[], cwd: string, timeoutMs: number): Promise<string | null> {
+  try {
+    const out = await $.process.run(argv, { cwd, timeoutMs })
+
+    return out.exitCode === 0 ? out.stdout.trim() : null
+  } catch {
+    // No such folder, no git or gh, or too slow: GitHub stays unasked.
+    return null
+  }
+}
+
+/**
+ * What GitHub says about the CI `text` left running in `cwd`: the run it names, else the commit it
+ * names, else the folder's HEAD when that commit is no newer than the words (`saidAt`).
+ */
+export async function askCi($: EngineInterface, cwd: string, text: string, saidAt: number): Promise<Omit<CiCheck, 'words' | 'checkedAt'>> {
+  const named = ciTarget(text)
+  const unknown = (target = '') => ({ target, state: 'unknown' as const })
+  if (!cwd) return unknown()
+  if (named && 'run' in named) {
+    const out = await run($, ['gh', 'run', 'view', named.run, '--json', 'status,conclusion'], cwd, GH_TIMEOUT_MS)
+    if (out === null) return unknown(`run ${named.run}`)
+    try {
+      return { target: `run ${named.run}`, state: ciVerdict([JSON.parse(out)]) }
+    } catch {
+      return unknown(`run ${named.run}`)
+    }
+  }
+  let sha: string | null
+  if (named) {
+    sha = await run($, ['git', 'rev-parse', '--verify', '--quiet', `${named.sha}^{commit}`], cwd, GIT_TIMEOUT_MS)
+  } else {
+    const head = await run($, ['git', 'log', '-1', '--format=%H %ct'], cwd, GIT_TIMEOUT_MS)
+    const [full, at] = head?.split(' ') ?? []
+    // A HEAD committed after the words is not the commit they waited on.
+    sha = full && Number(at) * 1000 <= saidAt ? full : null
+  }
+  if (!sha) return unknown(named ? `commit ${named.sha}` : '')
+  const target = `commit ${sha.slice(0, 7)}`
+  const out = await run($, ['gh', 'run', 'list', '--commit', sha, '--limit', '20', '--json', 'status,conclusion'], cwd, GH_TIMEOUT_MS)
+  if (out === null) return unknown(target)
+  try {
+    const runs: unknown = JSON.parse(out)
+
+    return { target, state: Array.isArray(runs) ? ciVerdict(runs as { status?: string; conclusion?: string | null }[]) : 'unknown' }
+  } catch {
+    return unknown(target)
+  }
+}
+
+/** The check standing for these words, asking GitHub again when the last answer is too old to stand. */
+export async function checkCi($: EngineInterface, id: string, cwd: string, text: string, saidAt: number): Promise<CiCheck> {
+  const now = await $.clock.now()
+  const held = (await read($, ciChecks))[id]
+  if (held && held.words === text && now - held.checkedAt < CI_RECHECK_MS[held.state]) return held
+  const check: CiCheck = { ...(await askCi($, cwd, text, saidAt)), words: text, checkedAt: now }
+  await update($, ciChecks, all => ({ ...all, [id]: check }))
+
+  return check
+}
+
+let isCheckingCi = false
+
+/** Asks GitHub about the CI each idle session's latest words left running, a few per refresh. */
+export async function verifyCi($: EngineInterface, list: Session[]) {
+  if (isCheckingCi) return
+  isCheckingCi = true
+  try {
+    const all = liveTracks(list, await read($, tracks), await read($, lastWords))
+    const words = await read($, lastWords)
+    const held = await read($, ciChecks)
+    const now = await $.clock.now()
+    let asked = 0
+    for (const one of list) {
+      if (one.isRunning) continue
+      const text = ciWords(all[one.id], words[one.id])
+      if (!isCiPending(text)) continue
+      const known = held[one.id]
+      if (known && known.words === text && now - known.checkedAt < CI_RECHECK_MS[known.state]) continue
+      if (asked >= CI_CHECKS_PER_ROUND) break
+      asked += 1
+      await checkCi($, one.id, one.cwd, text, all[one.id]?.turnAt || Date.parse(one.lastActivityAt) || now)
+    }
+    // Checks for sessions gone from the list go too.
+    if (Object.keys(held).some(id => !list.some(one => one.id === id))) {
+      await update($, ciChecks, c => Object.fromEntries(Object.entries(c).filter(([id]) => list.some(one => one.id === id))))
+    }
+  } finally {
+    isCheckingCi = false
+  }
 }
 
 export async function readProjects($: EngineInterface, list: Session[]) {
@@ -263,13 +370,14 @@ export async function announce($: EngineInterface) {
   const self = await read($, me)
   if (!self?.isPm) return
   const state = await read($, sessions)
-  const all = await read($, tracks)
   const words = await read($, lastWords)
+  const all = liveTracks(state.list, await read($, tracks), words)
+  const ci = await read($, ciChecks)
   const now = await $.clock.now()
   const now_ = new Map<string, Status>()
   for (const one of state.list) {
     if (projectKey(one.cwd) !== self.projectKey) continue
-    now_.set(one.id, statusOf(one, all[one.id], words[one.id], now))
+    now_.set(one.id, statusOf(one, all[one.id], words[one.id], now, ci[one.id]))
   }
   const before = statusesBefore
   statusesBefore = now_
@@ -278,6 +386,7 @@ export async function announce($: EngineInterface) {
     if (before.get(id) === status) continue
     const title = state.list.find(s => s.id === id)?.title ?? id
     if (status === 'asking') $.ui.toast(`「${title}」待你回覆`)
+    if (status === 'failed') $.ui.toast(`「${title}」的 CI 失敗了`)
     if (status === 'open') $.ui.toast(`「${title}」已停止，仍有 ${openSteps(all[id]).length} 項步驟未完成`)
   }
 }
@@ -298,6 +407,7 @@ export async function refresh($: EngineInterface, isForced = false) {
     await readTracks($, list)
     await readProjects($, list)
     await catchUp($, list)
+    await verifyCi($, list)
     await announce($)
   } catch (err) {
     const message = reason(err)
@@ -321,7 +431,7 @@ export const ROLE = (self: Me) => `# 你是「${self.projectName}」專案的 PM
 1. 使用者問進度、問有沒有漏掉、或你要回報之前，先呼叫 ${BOARD_TOOL} 看最新看板，不要憑記憶回答。
 2. 使用者交代新工作：先用 ${LEDGER_TOOL}（action: "add"）登記為工作項目，再決定交給現有 Session（SendMessage，to 填它的 local_… id）或開新 Session（start_session），派出後用 ledger update 填上 owner。
 3. 不要自己動手改專案的程式碼；實作交給子 Session。使用者明確要你自己做時才例外。
-4. CI 還在跑、還沒部署完成的工作一律不算完成：負責 Session 狀態為「等待 CI」「執行中」「背景執行」「待回覆」或「未完成」時，ledger 會拒絕結案。
+4. CI 還在跑、還沒部署完成的工作一律不算完成：負責 Session 狀態為「等待 CI」「CI 失敗」「執行中」「背景執行」「待回覆」或「未完成」時，ledger 會拒絕結案。
 5. 一個工作項目只有在你確認對應 Session 真的做完（看板上沒有未完成步驟、收尾摘要沒提到還沒做的事，必要時用 list_events 看它的紀錄）之後，才用 ledger update 標成 done。
 6. 說「都完成了」之前，看板的「需要處理」必須是空的、工作項目沒有 open；不是的話，逐條列出還差什麼。
 7. 子 Session 在等使用者回覆時，把它的問題原文轉述給使用者，使用者回答後用 SendMessage 轉達回去。
@@ -332,7 +442,7 @@ export async function registerTools($: EngineInterface) {
   await $.tool.register({
     name: 'board',
     description:
-      '專案狀態報告：列出此專案所有子 Session 的狀態（執行中、待回覆、中斷・未完成、背景執行、已結束）、任務清單進度、最新指令與收尾摘要，以及工作項目和需要處理的事項。回報進度或判斷是否有遺漏前必須先呼叫。',
+      '專案狀態報告：列出此專案所有子 Session 的狀態（執行中、待回覆、CI 失敗、等待 CI、中斷・未完成、背景執行、已結束；CI 狀態會用 gh 向 GitHub 確認）、任務清單進度、最新指令與收尾摘要，以及工作項目和需要處理的事項。回報進度或判斷是否有遺漏前必須先呼叫。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -460,6 +570,7 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
   if (state.error && state.list.length === 0) return `讀不到 Session 清單：${state.error}`
   const all = await read($, tracks)
   const words = await read($, lastWords)
+  const ci = await read($, ciChecks)
   const files = await read($, projects)
   const now = await $.clock.now()
   const isIncludingDone = input.include_done === true
@@ -476,6 +587,7 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
         sessions: p.sessions,
         tracks: all,
         words,
+        ci,
         ledger: files[p.key]?.ledger ?? [],
         now,
         isIncludingDone,
@@ -487,17 +599,26 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
 /** Why the owner's work cannot be counted done yet, or null when nothing stands in the way. */
 async function ownerBlocker($: EngineInterface, ownerId: string): Promise<string | null> {
   await refresh($, true)
-  const one = (await read($, sessions)).list.find(s => s.id === ownerId)
+  const list = (await read($, sessions)).list
+  const one = list.find(s => s.id === ownerId)
+  const words = await read($, lastWords)
   const kept = (await read($, tracks))[ownerId] ?? (await readJson<Track>($, `${await dataDir($)}/sessions/${ownerId}.json`))
-  const track = hasReport(kept) ? kept : undefined
+  const track = hasReport(kept) ? (one ? liveTracks([one], { [ownerId]: kept }, words)[ownerId] : kept) : undefined
   const title = one?.title ?? track?.title ?? ownerId
   if (!one) {
-    return track && isCiPending(latestWords(track)) ? `負責的 Session「${title}」最後回報 CI 尚未跑完（${clip(latestWords(track), 120)}）。` : null
+    // Gone from the list (archived): its last words still count, and GitHub still answers for them.
+    if (!track || !isCiPending(latestWords(track))) return null
+    const check = await checkCi($, ownerId, track.cwd, latestWords(track), track.turnAt)
+    if (check.state === 'success') return null
+    const why = check.state === 'failure' ? `GitHub 上的 CI（${check.target}）失敗` : '最後回報 CI 尚未跑完'
+
+    return `負責的 Session「${title}」${why}（${clip(latestWords(track), 120)}）。`
   }
-  const status = statusOf(one, track, (await read($, lastWords))[ownerId], await $.clock.now())
-  const said = track ? latestWords(track) : ((await read($, lastWords))[ownerId]?.said ?? '')
+  const status = statusOf(one, track, words[ownerId], await $.clock.now(), (await read($, ciChecks))[ownerId])
+  const said = ciWords(track, words[ownerId])
   const why: Partial<Record<Status, string>> = {
     ci: 'CI 尚未跑完',
+    failed: 'GitHub 上的 CI 失敗',
     running: '仍在執行中',
     waiting: '仍有背景作業在跑',
     asking: '正在等使用者回覆',
