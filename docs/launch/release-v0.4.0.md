@@ -12,7 +12,7 @@ Then type `/pm` in a new session of your project.
 
 ## Highlights
 
-- **Not shipped is not done.** A new *Not released* (待發布) status: a session whose latest report says its work is not yet committed, pushed, released, deployed or live stays open however ticked its task list, is listed under "needs attention", notifies the PM and keeps its work item open. When only a push is left and the report names the commit, it clears by itself once that commit is on a remote branch.
+- **Not shipped is not done.** A new *Not released* (待發布) status: a session whose latest report says its work is not yet committed, pushed, released, deployed or live stays open however ticked its task list, is listed under "needs attention", notifies the PM and keeps its work item open. When only a push is left and the report names the commit, it clears by itself once that commit, or its content (rebased or squashed with others), is on a remote branch.
 - **Background work is waiting, not stopped.** A session tracks the commands it starts in the background until they report back (up to 6 hours), and shows as *In the background* meanwhile instead of *Unfinished*.
 - **CI is checked on GitHub.** When a session's report says CI is still running, the PM asks `gh` about the runs and commits it names (nearest the CI words first, only commits in that repository), then the folder's `HEAD`. A pass clears *Waiting on CI*; a failure shows as *CI failed*.
 - **Reports are read for what they say about the work.** Quoted status names, sentences about a rule or an example, conditions and other sessions' work no longer count as CI running, work in the background or work left undelivered.
@@ -25,6 +25,7 @@ Then type `/pm` in a new session of your project.
 - A session waiting on its own background tests or CI showed as *Unfinished* because its task list had steps left.
 - A report that merely named "background" or quoted 「等待 CI」 kept a finished session *In the background* or *Waiting on CI*, and the ledger would not close its item.
 - The commit checked on GitHub could be a hash quoted from another project or part of a session id.
+- A commit pushed rebased or squashed with others kept its session *Not released*: only the hash itself on a remote branch counted.
 - A session whose record was empty after a reload showed as ended even when its transcript said CI was still running.
 - A recap saying nothing was left (沒有任何未提交的修改, "there are no uncommitted changes") was flagged as unfinished work.
 
