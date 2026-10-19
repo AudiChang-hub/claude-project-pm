@@ -1,11 +1,13 @@
 # Launch kit
 
 Drafts and steps for making the repository public-facing. Each step is a public action, run only
-after the owner has approved it. Steps 1–3 are done; the posts have not been made.
+after the owner has approved it. Steps 1–3 are done for v0.4.0; v0.5.0 (step 4) is prepared, not
+released; the posts have not been made.
 
 | File | What it is | Status |
 | --- | --- | --- |
 | [repo-metadata.md](repo-metadata.md) | Repository description, topics and the `gh` command that sets them | Applied 2026-10-19 |
+| [release-v0.5.0.md](release-v0.5.0.md) | Release notes for `v0.5.0`: the English and Traditional Chinese interface | Ready, not released |
 | [release-v0.4.0.md](release-v0.4.0.md) | Release notes for `v0.4.0`, as published (before the English UI) | Published 2026-10-19 |
 | [reddit-claudeai.md](reddit-claudeai.md) | r/ClaudeAI post: a first-person share (mentions the English and Traditional Chinese UI), with a Traditional Chinese reading copy | Two spots for the owner's own words |
 | [awesome-claude-code.md](awesome-claude-code.md) | Notes for the awesome-claude-code "Recommend a Resource" web form | On or after 2026-10-31, by the owner |
@@ -18,17 +20,26 @@ after the owner has approved it. Steps 1–3 are done; the posts have not been m
 2. ~~**Description and topics**~~ (see [repo-metadata.md](repo-metadata.md)). Done 2026-10-19.
 
 3. ~~**Tag and release**~~ `v0.3.2` and `v0.4.0` are published; `v0.4.0` is the latest
-   (https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.4.0). For a later release,
-   bump `.claude-plugin/plugin.json`, then:
+   (https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.4.0).
+
+4. **Push and release `v0.5.0`** (the English interface; `.claude-plugin/plugin.json` is already
+   0.5.0). Push first and wait for CI to pass, then:
 
    ```bash
-   gh release create v<version> --repo AudiChang-hub/claude-project-pm --target main --title "v<version>" --notes-file docs/launch/release-v<version>.md
+   git push origin main
    ```
 
-4. **r/ClaudeAI**, after the release that ships the English interface (the draft mentions it): fill in the two `[In your own words: …]` spots in
+   ```bash
+   gh release create v0.5.0 --repo AudiChang-hub/claude-project-pm --target main --title "v0.5.0" --notes-file docs/launch/release-v0.5.0.md
+   ```
+
+   For later releases: bump `.claude-plugin/plugin.json`, write `docs/launch/release-v<version>.md`,
+   and run the same command with that version.
+
+5. **r/ClaudeAI**, after `v0.5.0` is out (the draft mentions the English interface): fill in the two `[In your own words: …]` spots in
    [reddit-claudeai.md](reddit-claudeai.md), check the subreddit's rules and flair, then post by hand.
 
-5. **awesome-claude-code**, on or after **2026-10-31** (14 days after the first commit, 2026-10-17):
+6. **awesome-claude-code**, on or after **2026-10-31** (14 days after the first commit, 2026-10-17):
    the owner fills in the web form by hand; pull requests and `gh` submissions are not accepted.
    See [awesome-claude-code.md](awesome-claude-code.md).
 

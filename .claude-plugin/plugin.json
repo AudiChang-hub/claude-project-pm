@@ -1,6 +1,6 @@
 {
   "name": "project-pm",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "One PM session per project: a live board of every Claude Code session (waiting on you, stopped mid-plan, CI still running) and a ledger of the work you asked for, so nothing slips.",
   "author": { "name": "billy", "url": "https://github.com/AudiChang-hub" },
   "license": "MIT",
