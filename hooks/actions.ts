@@ -585,6 +585,7 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
       boardText({
         project: { name: p.name, path: p.path },
         sessions: p.sessions,
+        everyone: state.list,
         tracks: all,
         words,
         ci,

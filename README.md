@@ -65,6 +65,8 @@ claude plugin install project-pm --marketplace AudiChang-hub/claude-project-pm
 - 每個專案一份檔案，記錄 PM 與工作項目：`~/.claude/project-pm/projects/<專案>-<hash>.json`。
 - 所有資料都存在本機，不會傳到任何外部服務。Session 清單、紀錄讀取與封存，都是透過桌面版內建的 `ccd_session_mgmt` 工具完成。
 - Mod 安裝前就開著的 Session 沒有追蹤紀錄，看板只會顯示它們最後一則訊息。
+- 工作項目的負責 Session 可以在別的專案資料夾工作（例如修 Mod 的 Session），看板會顯示它的標題和狀態；只有封存或找不到時才標「負責人失聯」。
+- 執行 `/reload-plugins` 後，PM 的 `board`／`ledger` 工具會在 PM 的下一輪（下一則訊息或通知叫醒）重新註冊，不必重開 Session。
 
 ## 開發
 

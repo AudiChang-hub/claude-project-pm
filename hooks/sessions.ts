@@ -333,6 +333,8 @@ const STEP_MARK: Record<Step['status'], string> = { completed: '[x]', in_progres
 export type BoardInput = {
   project: { name: string; path: string }
   sessions: Session[]
+  /** Every listed (unarchived) session, of any project: an owner elsewhere is still there. */
+  everyone?: Session[]
   tracks: Record<string, Track>
   words: Record<string, LastWord>
   ci?: Record<string, CiCheck>
@@ -344,7 +346,8 @@ export type BoardInput = {
 /** The board as the PM model reads it: what needs attention first, then every session. */
 export function boardText(input: BoardInput): string {
   const { project, sessions, words, ledger, now } = input
-  const tracks = liveTracks(sessions, input.tracks, words)
+  const everyone = input.everyone ?? sessions
+  const tracks = liveTracks(everyone, input.tracks, words)
   const ci = input.ci ?? {}
   const rows = sessions
     .map(one => ({ one, track: tracks[one.id], word: words[one.id], status: statusOf(one, tracks[one.id], words[one.id], now, ci[one.id]) }))
@@ -376,10 +379,20 @@ export function boardText(input: BoardInput): string {
     if (r.one.hasOpenPr && r.status !== 'running') attention.push(`- [PR 開啟中] ${name}`)
   }
   const openLedger = ledger.filter(item => item.status === 'open')
-  const known = new Set(sessions.map(s => s.id))
+  const known = new Set(everyone.map(s => s.id))
   for (const item of openLedger) {
     if (!item.owner) attention.push(`- [未指派] 工作項目 ${itemCode(item.id)}「${item.text}」尚未指派負責 Session`)
     else if (!known.has(item.owner)) attention.push(`- [負責人失聯] 工作項目 ${itemCode(item.id)}「${item.text}」的負責 Session ${item.owner} 已不在清單中（可能已封存），需確認是否完成`)
+  }
+  const inProject = new Set(sessions.map(s => s.id))
+  /** An owner as the ledger shows it: its title and status, and whether it works from another project's folder. */
+  const ownerText = (id: string | null) => {
+    if (!id) return '未指派'
+    const one = everyone.find(s => s.id === id)
+    if (!one) return `${id}（已不在清單中）`
+    const status = statusOf(one, tracks[id], words[id], now, ci[id])
+
+    return `${one.title}（${STATUS[status].tag}${inProject.has(id) ? '' : '・其他專案的 Session'}）`
   }
   lines.push('', '## 需要處理', attention.length ? attention.join('\n') : '（無）')
 
@@ -387,8 +400,7 @@ export function boardText(input: BoardInput): string {
   const shown = input.isIncludingDone ? ledger : openLedger
   if (shown.length === 0) lines.push(openLedger.length === 0 && ledger.length > 0 ? '（全部完成）' : '（無）')
   for (const item of shown) {
-    const owner = item.owner ? (sessions.find(s => s.id === item.owner)?.title ?? item.owner) : '未指派'
-    lines.push(`- ${itemCode(item.id)} (id ${item.id}) [${item.status}] ${item.text}｜負責：${owner}${item.note ? `｜備註：${item.note}` : ''}`)
+    lines.push(`- ${itemCode(item.id)} (id ${item.id}) [${item.status}] ${item.text}｜負責：${ownerText(item.owner)}${item.note ? `｜備註：${item.note}` : ''}`)
   }
 
   lines.push('', '## Sessions')

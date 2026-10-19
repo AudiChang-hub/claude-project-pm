@@ -1,5 +1,5 @@
 import { atom, read } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import type { Me } from '../types'
 
@@ -31,28 +31,43 @@ import { renderBand, renderPane } from './view'
 // The engine reads each module's state refs from its own source: these name the same values as the other modules'.
 const me = atom({ plugin: 'project-pm', key: 'me' } as const, null as Me | null)
 
+/** Whether this copy of the module has done its start-up: a reload starts a fresh copy. */
+let isStarted = false
+
+/**
+ * The commands, the PM's tools and the polling timer. `session.start` does it at the session's
+ * start; /reload-plugins loads a fresh copy without one (and the engine drops the old copy's
+ * tools), so the first hook to run in that copy does it instead.
+ */
+async function start($: EngineInterface, isOpeningPane: boolean) {
+  if (isStarted) return
+  isStarted = true
+  await $.command.register({ name: 'pm', description: '指定此 Session 為專案 PM（/pm off 卸任）' })
+  await $.command.register({ name: 'board', description: '開啟或收合專案看板' })
+  try {
+    const self = await identify($)
+    if (self?.isPm) {
+      await registerTools($)
+      if (isOpeningPane) void $.ui.open({ id: PANE, title: `${self.projectName} · PM` })
+    }
+  } catch (err) {
+    $.ui.log(`project-pm: ${reason(err)}`)
+  }
+  $.clock.every(POLL_MS, () => void refresh($))
+  refreshSoon($, 300)
+}
+
 // ── Hooks ──
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'pm', description: '指定此 Session 為專案 PM（/pm off 卸任）' })
-    await $.command.register({ name: 'board', description: '開啟或收合專案看板' })
-    try {
-      const self = await identify($)
-      if (self?.isPm) {
-        await registerTools($)
-        void $.ui.open({ id: PANE, title: `${self.projectName} · PM` })
-      }
-    } catch (err) {
-      $.ui.log(`project-pm: ${reason(err)}`)
-    }
-    $.clock.every(POLL_MS, () => void refresh($))
-    refreshSoon($, 300)
+    await start($, true)
 
     return next(e)
   })
 
   on('prompt.submit', async ($, e, next) => {
+    await start($, false)
     if (e.text.includes(CLAIM)) {
       try {
         await claim($)
@@ -143,6 +158,7 @@ export const register: Register = on => {
   }).catch(() => ({ deny: 'project-pm：工作項目寫入失敗，請再試一次。' }))
 
   on('prompt.compose', async ($, e, next) => {
+    await start($, false)
     const composed = await next(e)
     const self = await read($, me)
     if (!self?.isPm) return composed
@@ -151,6 +167,7 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'pm' }, async ($, e) => {
+    await start($, false)
     if (/^\s*(off|卸任|取消)\s*$/i.test(e.args)) return { text: await release($) }
     const text = await claim($)
     const self = await read($, me)
@@ -165,6 +182,7 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'board' }, async $ => {
+    await start($, false)
     if ((await $.ui.panes()).some(pane => pane.id === PANE)) {
       await $.ui.close({ id: PANE })
 

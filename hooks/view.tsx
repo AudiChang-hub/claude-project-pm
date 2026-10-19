@@ -364,8 +364,10 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   }
 
   const ledgerRow = ({ project, item }: { project: Project; item: LedgerItem }) => {
-    const owner = item.owner ? project.sessions.find(s => s.id === item.owner) : undefined
-    const ownerText = !item.owner ? '尚未指派' : owner ? `負責　${owner.title}` : '負責 Session 已不在清單中'
+    // An owner working from another project's folder is still there: only one gone from the list is lost.
+    const owner = item.owner ? state.list.find(s => s.id === item.owner) : undefined
+    const elsewhere = owner && !project.sessions.includes(owner) ? '・其他專案' : ''
+    const ownerText = !item.owner ? '尚未指派' : owner ? `負責　${owner.title}・${STATUS[statusOfOne(owner)].label}${elsewhere}` : '負責 Session 已不在清單中'
 
     return (
       <Box key={`ledger:${project.key}:${item.id}`} flexDirection="row" columnGap="sm" alignItems="flex-start" paddingY="xs">

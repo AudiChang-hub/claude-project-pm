@@ -38,7 +38,7 @@ const norm = (path: string) => path.replace(/\\/g, '/').replace(/^.*\/\.claude\/
 type Host = (argv: readonly string[], cwd: string | undefined) => { exitCode: number; stdout: string } | null
 
 /** The desktop app, the disk and the host's commands, from memory: `self` is this session's id. */
-function world(on: On, self: string, files: Files, archived: string[] = [], host: Host = () => null) {
+function world(on: On, self: string, files: Files, archived: string[] = [], host: Host = () => null, tools: string[] = []) {
   let list = [...SESSIONS]
   on('process.run', ($, e) => {
     const out = host(e.argv, e.init?.cwd)
@@ -50,7 +50,11 @@ function world(on: On, self: string, files: Files, archived: string[] = [], host
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: PROJECT }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
-  on('tool.register', ($, e) => ({ value: { tool: `mcp__project-pm__${e.name}` } }))
+  on('tool.register', ($, e) => {
+    tools.push(e.name)
+
+    return { value: { tool: `mcp__project-pm__${e.name}` } }
+  })
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.panes', () => ({ value: [] }))
   on('fs.exists', ($, e) => ({ value: files.has(norm(e.path)) || [...files.keys()].some(k => k.startsWith(`${norm(e.path)}/`)) }))
@@ -402,4 +406,53 @@ test('the CI a session names: a run id, else a commit', () => {
   expect(ciTarget('CI 還在跑：https://github.com/o/r/actions/runs/39031560867')).toEqual({ run: '39031560867' })
   expect(ciTarget('1.86.11 已推上 main（`4dca77c`），CI 還在跑，1918 項全過')).toEqual({ sha: '4dca77c' })
   expect(ciTarget('1.86.11 已推上 main，CI 還在跑')).toBe(null)
+})
+
+test('an owner working from another project is not lost; only one gone from the list is', async ($, on) => {
+  const files: Files = new Map()
+  const item = (id: number, owner: string) => ({ id, text: `項目 ${id}`, owner, status: 'open', note: '', createdAt: NOW, updatedAt: NOW })
+  files.set(
+    PROJECT_FILE,
+    JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item(1, 'local_other'), item(2, 'local_gone')], nextId: 3 }),
+  )
+  mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+
+  const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(board).not.toMatch(/T-01「項目 1」的負責 Session/)
+  expect(board).toMatch(/T-01 \(id 1\) \[open\] 項目 1｜負責：別的專案（已結束・其他專案的 Session）/)
+  expect(board).toMatch(/\[負責人失聯\] 工作項目 T-02「項目 2」的負責 Session local_gone 已不在清單中/)
+  expect(board).toMatch(/T-02 \(id 2\) \[open\] 項目 2｜負責：local_gone（已不在清單中）/)
+
+  const ui = await $.ui.mount({
+    plugin: 'project-pm',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: 'project-pm',
+    props: { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 40 } },
+  } as never)
+  expect(await ui.find({ type: 'Text', text: '負責　別的專案・已結束・其他專案' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '負責 Session 已不在清單中' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('after /reload-plugins the PM gets its tools back on its next turn', async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  mock.clock(on, { now: NOW })
+  const registered: string[] = []
+  world(on, 'local_pm', files, [], undefined, registered)
+  on('prompt.compose', () => ({ sections: [] }))
+
+  // A reloaded copy of the module: no session.start, so nothing was registered yet.
+  expect(registered).toEqual([])
+  const COMPOSE = { model: 'claude-opus-5-5', promptModel: 'claude-opus-5-5', surfaces: ['desktop'] as const, tools: [], outputStyle: null, traits: [] }
+  const composed = await $.prompt.compose(COMPOSE)
+  expect(registered).toEqual(['board', 'ledger'])
+  expect(composed.sections.map(s => s.id)).toContain('project-pm:role')
+
+  // Once per copy: later turns register nothing again.
+  await $.prompt.compose(COMPOSE)
+  expect(registered).toEqual(['board', 'ledger'])
 })
