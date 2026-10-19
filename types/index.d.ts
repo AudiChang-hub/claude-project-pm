@@ -45,6 +45,17 @@ export type Track = {
   planAt: number
   /** When wrap_up last wrote the recap, ms: a turn that ends after it without its own wrap_up drops it. */
   recapAt?: number
+  /** Background commands the session started and has not been notified of yet. */
+  background?: BackgroundTask[]
+}
+
+/** A command a session runs in the background (run_in_background, or moved there), until its task-notification. */
+export type BackgroundTask = {
+  id: string
+  /** What it runs: the command's description, else the command. */
+  label: string
+  /** When it started, ms. */
+  at: number
 }
 
 /** What GitHub says about the CI a session's words left running. */

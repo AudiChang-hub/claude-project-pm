@@ -395,6 +395,7 @@ export async function refresh($: EngineInterface, isForced = false) {
   const self = await read($, me)
   const isPaneOpen = (await $.ui.panes()).some(pane => pane.id === PANE)
   if (!isForced && !self?.isPm && !isPaneOpen) return
+  await ensureTools($)
   const started = Date.now()
   if (fetchingSince && started - fetchingSince < STUCK_MS) return
   fetchingSince = started
@@ -437,6 +438,23 @@ export const ROLE = (self: Me) => `# 你是「${self.projectName}」專案的 PM
 7. 子 Session 在等使用者回覆時，把它的問題原文轉述給使用者，使用者回答後用 SendMessage 轉達回去。
 8. 封存 Session 前先確認它沒有未完成步驟、沒有開著的 PR，並問過使用者。
 9. 提到 Session 時用 [標題](#local_…) 連結它。`
+
+/**
+ * Puts the PM's tools back when the engine has dropped them: a reload of the module (/reload-plugins,
+ * or a change to the mod's folder, reloaded just before one of its commands runs) drops the tools the
+ * copy before it registered, sometimes after the new copy registered them again.
+ */
+export async function ensureTools($: EngineInterface) {
+  const self = await read($, me)
+  if (!self?.isPm) return
+  try {
+    const names = new Set((await $.tool.list()).map(t => t.name))
+    if (names.has(BOARD_TOOL) && names.has(LEDGER_TOOL)) return
+    await registerTools($)
+  } catch (err) {
+    $.ui.log(`project-pm: 無法重新註冊 PM 工具：${reason(err)}`)
+  }
+}
 
 export async function registerTools($: EngineInterface) {
   await $.tool.register({

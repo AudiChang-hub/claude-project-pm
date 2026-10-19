@@ -50,11 +50,13 @@ function world(on: On, self: string, files: Files, archived: string[] = [], host
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: PROJECT }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
+  // `tools` holds what the engine has registered now: a test empties it where the engine drops them.
   on('tool.register', ($, e) => {
     tools.push(e.name)
 
     return { value: { tool: `mcp__project-pm__${e.name}` } }
   })
+  on('tool.list', () => ({ value: tools.map(name => ({ name: `mcp__project-pm__${name}`, description: name, mcp: true })) }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.panes', () => ({ value: [] }))
   on('fs.exists', ($, e) => ({ value: files.has(norm(e.path)) || [...files.keys()].some(k => k.startsWith(`${norm(e.path)}/`)) }))
@@ -454,5 +456,96 @@ test('after /reload-plugins the PM gets its tools back on its next turn', async 
 
   // Once per copy: later turns register nothing again.
   await $.prompt.compose(COMPOSE)
+  expect(registered).toEqual(['board', 'ledger'])
+})
+
+test('a session waiting on its own background commands is running in the background, not stopped', async ($, on) => {
+  const files: Files = new Map()
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_me', files)
+  on('tool.call', { tool: 'mcp__ccd_turn__update_plan' }, () => ({ result: 'ok' }))
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bxq91e4je' } }))
+  on('turn.complete', () => ({ text: '' }))
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(START)
+  const file = () => JSON.parse(files.get(`${DIR}/sessions/local_me.json`)!)
+
+  await $.tool.call({
+    tool: 'mcp__ccd_turn__update_plan',
+    items: [
+      { content: '在乾淨 worktree 跑完整 sales 與前端測試', status: 'in_progress' },
+      { content: 'push 並等 CI 全部 success', status: 'pending' },
+    ],
+  } as never)
+  await $.tool.call({ tool: 'Bash', command: 'python -m unittest discover', description: 'Run full sales test suite', run_in_background: true } as never)
+  await $.turn.complete({
+    answer: '完整 sales 測試、前端測試與 context 測試正在乾淨 worktree 裡背景執行，完成後依結果修正或推送。',
+    durationMs: 1,
+    isAborted: false,
+    turnId: 't',
+    reason: 'answer',
+  })
+  expect(file().background).toEqual([{ id: 'bxq91e4je', label: 'Run full sales test suite', at: NOW }])
+
+  // Two hours on, the suite still running: past the words' 45 minutes, and still not "stopped midway".
+  const at = (minutes: number) => ({ id: 'local_me', title: '我', cwd: PROJECT, isRunning: false, lastActivityAt: new Date(NOW).toISOString(), isPinned: false, hasOpenPr: false, at: NOW + minutes * 60000 })
+  const later = at(120)
+  expect(statusOf(later, file(), undefined, later.at)).toBe('waiting')
+
+  // Its notification comes in: it is over, and the open steps speak again.
+  await clock.advance(120 * 60000)
+  await $.prompt.submit({
+    text: '<task-notification> <task-id>bxq91e4je</task-id> <status>completed</status> <summary>Background command "Run full sales test suite" completed (exit code 0)</summary> </task-notification>',
+  } as never)
+  expect(file().background).toEqual([])
+  expect(statusOf(later, file(), undefined, later.at + 60000)).toBe('open')
+})
+
+test('words of background work keep a session with open steps off the stopped list', async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  const at = Date.parse('2026-10-17T11:50:00.000Z')
+  files.set(
+    `${DIR}/sessions/local_open.json`,
+    JSON.stringify(
+      track('local_open', {
+        plan: [{ content: '跑完整測試', status: 'in_progress' }, { content: 'push', status: 'pending' }],
+        lastAnswer: '完整 sales 測試、前端測試與 context 測試正在乾淨 worktree 裡背景執行，完成後依結果修正或推送。',
+        turnAt: at,
+        planAt: at,
+      }),
+    ),
+  )
+  mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+
+  const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(board).toMatch(/### \[背景執行\] 商品列表頁 \(local_open\)/)
+  expect(board).not.toMatch(/\[中斷・未完成\] 「商品列表頁」/)
+})
+
+test('the PM gets its tools back whenever the engine has dropped them', async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  const clock = mock.clock(on, { now: NOW })
+  const registered: string[] = []
+  world(on, 'local_pm', files, [], undefined, registered)
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(START)
+  expect(registered).toEqual(['board', 'ledger'])
+
+  // /board right after the mod's folder changed: the engine reloads the module and drops its tools.
+  registered.length = 0
+  await $.prompt.submit({ text: '看板怎麼樣了？' } as never)
+  expect(registered).toEqual(['board', 'ledger'])
+
+  // Dropped again between turns: the poll puts them back too.
+  registered.length = 0
+  await clock.advance(31_000)
+  expect(registered).toEqual(['board', 'ledger'])
+
+  // Present: nothing registered again.
+  await $.prompt.submit({ text: '還有別的嗎？' } as never)
   expect(registered).toEqual(['board', 'ledger'])
 })

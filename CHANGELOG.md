@@ -5,6 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions match `version` in `.claude-plugin/plugin.json`.
 
+## [Unreleased]
+
+### Added
+- A session records the commands it starts in the background (`run_in_background`, or moved there), from their `backgroundTaskId` until their task notification (or `TaskStop`). While one has not reported back, the session shows as *In the background*, however long the command takes (up to 6 hours, since a session whose process ended never hears back), and the board lists them under the session.
+
+### Fixed
+- A session that ended its turn to wait on its own background work (tests running, CI to watch) showed as *Unfinished* and was listed under "needs attention" whenever its task list had steps left: open steps were checked before anything else. Running CI and background work now come first; words of background work count for 45 minutes in a session without the record.
+- The PM lost its `board` and `ledger` tools for good when the engine dropped them after the module's start-up had already run, as when the mod's folder changed and `/board` reloaded it. The PM now checks its tools on every turn and every poll, and registers them again when they are missing.
+
 ## [0.3.2] - 2026-10-19
 
 ### Added

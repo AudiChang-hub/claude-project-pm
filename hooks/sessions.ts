@@ -1,7 +1,7 @@
 // Reading sessions into a project's board: who is working, who waits on you,
 // who stopped with steps left, and what the PM was asked to keep track of.
 
-import type { CiCheck, LastWord, LedgerItem, ProjectFile, Session, Step, Track } from '../types'
+import type { BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, Session, Step, Track } from '../types'
 
 export type Status = 'running' | 'asking' | 'failed' | 'open' | 'ci' | 'waiting' | 'done' | 'stale'
 
@@ -33,6 +33,8 @@ const WAITING_MINUTES = 45
 const STALE_DAYS = 3
 /** How far the app's last activity may run ahead of a track's last write before the track has missed a turn. */
 const BEHIND_MS = 2 * 60000
+/** How long a background command counts as running without its notification: a session whose process ended never gets one. */
+const BACKGROUND_HOURS = 6
 
 /** Words a session leaves when its turn ends but work goes on: a background job, a CI run, a deploy. */
 const WAITING =
@@ -110,7 +112,8 @@ export function liveTracks(list: Session[], tracks: Record<string, Track>, words
     const track = tracks[one.id]
     const word = words[one.id]
     if (!track || !isBehind(one, track) || !word || word.error || !word.said || word.activity !== one.lastActivityAt) continue
-    live[one.id] = { ...track, recap: null, recapAt: undefined, ask: word.isAsking ? word.said : null, lastAnswer: word.said }
+    // Its background list missed the notifications those turns got too.
+    live[one.id] = { ...track, recap: null, recapAt: undefined, ask: word.isAsking ? word.said : null, lastAnswer: word.said, background: [] }
   }
 
   return live
@@ -181,6 +184,24 @@ export function hasReport(track: Track | null | undefined): track is Track {
   return !!track && (track.plan.length > 0 || !!track.lastAnswer || !!track.recap || !!track.ask)
 }
 
+/** The background tasks a notification in `text` reports as over: completed, failed, killed or stopped. */
+export function finishedTasks(text: string): string[] {
+  const ids: string[] = []
+  for (const m of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
+    const body = m[1] ?? ''
+    const id = /<task-id>\s*([^<\s]+)\s*<\/task-id>/.exec(body)?.[1]
+    const status = /<status>\s*([^<\s]+)\s*<\/status>/.exec(body)?.[1] ?? ''
+    if (id && !/^(running|pending|started|in_progress)$/i.test(status)) ids.push(id)
+  }
+
+  return ids
+}
+
+/** The background commands a session started and has not heard back from (within BACKGROUND_HOURS of their start). */
+export function backgroundOf(track: Track | undefined, now: number): BackgroundTask[] {
+  return (track?.background ?? []).filter(t => now - t.at < BACKGROUND_HOURS * 3600000)
+}
+
 export function openSteps(track: Track | undefined): Step[] {
   return track ? track.plan.filter(s => s.status !== 'completed') : []
 }
@@ -206,11 +227,15 @@ export function statusOf(one: Session, track: Track | undefined, word: LastWord 
   const minutes = (now - (Date.parse(one.lastActivityAt) || 0)) / 60000
   if (track) {
     if (track.ask || /[?？]\s*$/.test(track.lastAnswer)) return 'asking'
-    if (openSteps(track).length > 0) return 'open'
     // CI that has not finished is never done, however long ago the session stopped.
     const pending = ciStatus(latestWords(track), ci)
     if (pending) return pending
+    // A session that ended its turn to wait on its own background work has not stopped midway,
+    // whatever its task list still holds: while the work runs (its notification not yet in), however long that takes.
+    if (backgroundOf(track, now).length > 0) return 'waiting'
+    // Words alone say the same for a while: a session that never came back has stopped after all.
     if (WAITING.test(track.lastAnswer) && minutes < WAITING_MINUTES) return 'waiting'
+    if (openSteps(track).length > 0) return 'open'
   } else {
     if (word?.isAsking) return 'asking'
     const pending = word ? ciStatus(word.said, ci) : null
@@ -418,6 +443,8 @@ export function boardText(input: BoardInput): string {
       if (r.track.recap) lines.push(`收尾摘要：${clip(r.track.recap, 300)}`)
       else if (r.track.lastAnswer) lines.push(`最後回報：${clip(r.track.lastAnswer, 300)}`)
       if (r.track.ask) lines.push(`待決策問題：${r.track.ask}`)
+      const background = backgroundOf(r.track, now)
+      if (background.length) lines.push(`背景工作 ${background.length} 項執行中：${background.map(t => `${clip(t.label, 80)}（${ago(t.at, now)}開始）`).join('；')}`)
     } else {
       lines.push(`（無追蹤紀錄：此 Session 在 Mod 安裝前開啟）最後訊息：${r.word?.error ? `讀取失敗：${r.word.error}` : (r.word?.said ?? '讀取中')}`)
     }

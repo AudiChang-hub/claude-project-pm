@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Me } from '../types'
 
-import { applyPlan, clip, planFromTodos } from './sessions'
+import { applyPlan, clip, finishedTasks, planFromTodos } from './sessions'
 import {
   BOARD_TOOL,
   CLAIM,
@@ -15,6 +15,7 @@ import {
   board,
   changeMine,
   claim,
+  ensureTools,
   getMine,
   identify,
   ledger,
@@ -37,7 +38,8 @@ let isStarted = false
 /**
  * The commands, the PM's tools and the polling timer. `session.start` does it at the session's
  * start; /reload-plugins loads a fresh copy without one (and the engine drops the old copy's
- * tools), so the first hook to run in that copy does it instead.
+ * tools), so the first hook to run in that copy does it instead. Tools the engine drops later
+ * (a change to the mod's folder reloads it before a command of it runs) come back by ensureTools.
  */
 async function start($: EngineInterface, isOpeningPane: boolean) {
   if (isStarted) return
@@ -62,12 +64,15 @@ async function start($: EngineInterface, isOpeningPane: boolean) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await start($, true)
+    // A new process: background commands of the one before it ended with it.
+    await changeMine($, t => (t.background?.length ? { ...t, background: [] } : t))
 
     return next(e)
   })
 
   on('prompt.submit', async ($, e, next) => {
     await start($, false)
+    await ensureTools($)
     if (e.text.includes(CLAIM)) {
       try {
         await claim($)
@@ -77,6 +82,9 @@ export const register: Register = on => {
     }
     // A new turn starts: last turn's recap and question no longer stand (a background wake-up included).
     if (!e.command) await changeMine($, t => ({ ...t, ask: null, recap: null, ...(e.isMeta ? {} : { lastPrompt: clip(e.text, 400) }) }))
+    // A background command's notification: it has finished, one way or another.
+    const finished = finishedTasks(e.text)
+    if (finished.length) await changeMine($, t => ({ ...t, background: (t.background ?? []).filter(b => !finished.includes(b.id)) }))
     refreshSoon($, 500)
 
     return next(e)
@@ -89,6 +97,29 @@ export const register: Register = on => {
       const now = await $.clock.now()
       await changeMine($, t => ({ ...t, plan: applyPlan(t.plan, input), planAt: now }))
     }
+
+    return result
+  }).catch(($, e, next) => next(e))
+
+  // A command run in the background (asked for, or moved there) runs on after the turn: the session waits on it.
+  on('tool.call', { tool: ['Bash', 'PowerShell'] }, async ($, e, next) => {
+    const result = await next(e)
+    // Bash and PowerShell both answer `backgroundTaskId` when the command runs on in the background.
+    const id = (result.result as { backgroundTaskId?: string } | undefined)?.backgroundTaskId
+    if (e.agentId === undefined && id) {
+      const now = await $.clock.now()
+      const label = clip(e.description || e.command, 120)
+      await changeMine($, t => ({ ...t, background: [...(t.background ?? []).filter(b => b.id !== id), { id, label, at: now }] }))
+    }
+
+    return result
+  }).catch(($, e, next) => next(e))
+
+  on('tool.call', { tool: 'TaskStop' }, async ($, e, next) => {
+    const result = await next(e)
+    const input = e as unknown as Record<string, unknown>
+    const id = str(input.task_id) ?? str(input.shell_id)
+    if (id && result.deny === undefined) await changeMine($, t => ({ ...t, background: (t.background ?? []).filter(b => b.id !== id) }))
 
     return result
   }).catch(($, e, next) => next(e))
@@ -159,6 +190,7 @@ export const register: Register = on => {
 
   on('prompt.compose', async ($, e, next) => {
     await start($, false)
+    await ensureTools($)
     const composed = await next(e)
     const self = await read($, me)
     if (!self?.isPm) return composed

@@ -62,10 +62,10 @@ Requires the **Claude Code desktop app (Code tab)**; see [Requirements](#require
 | --- | --- |
 | Waiting on you (待回覆) | The session ended its turn with a question for you. |
 | CI failed (CI 失敗) | Its last words left CI running, and GitHub reports that run failed. |
-| Unfinished (未完成) | It stopped with steps of its task list still open. |
+| Unfinished (未完成) | It stopped with steps of its task list still open, and nothing it waits on is still running. |
 | Waiting on CI (等待 CI) | Its last words say CI has not finished, and GitHub has not said it passed. |
 | Running (執行中) | The session is working right now. |
-| In the background (背景執行) | It said work goes on in the background (for up to 45 minutes). |
+| In the background (背景執行) | A command it started in the background (`run_in_background`, or moved there) has not reported back yet, for up to 6 hours; or, for a session without that record, it said work goes on in the background (for up to 45 minutes). Open steps on its task list do not make it *Unfinished* meanwhile. |
 | Ended (已結束) / Idle (長期閒置) | Nothing left; idle for more than 3 days. Hidden behind a toggle. |
 
 At the top: a completion ring and three counters (running, waiting on you, unfinished or waiting on CI). Switch between **this project** and **all projects**.
@@ -120,7 +120,7 @@ The board, the PM's instructions and its tool output are currently in Traditiona
 - Each project has one file for its PM and ledger: `~/.claude/project-pm/projects/<project>-<hash>.json`.
 - The mod itself sends nothing anywhere. Listing, reading and archiving sessions go through the desktop app's built-in tools. To check CI it runs `git` and `gh` in the session's folder, so `gh` contacts GitHub with your own login, as it would if you ran it yourself.
 - Sessions opened before the install keep no record; the board shows their last message, read from the transcript.
-- After `/reload-plugins`, the PM's `board` and `ledger` tools come back on its next turn (your next message or a notification); no need to restart the session.
+- When the engine drops the PM's `board` and `ledger` tools (after `/reload-plugins`, or when the mod's folder changed and a command of it such as `/board` reloads it), they come back on the PM's next turn (your next message or a notification) or within 30 seconds while the PM is idle; no need to restart the session.
 
 ## Development
 
