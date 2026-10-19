@@ -2,7 +2,7 @@
 
 Project PM gives each project one PM session. You talk to the PM; it keeps a live board of every other session in the project and a ledger of everything you asked for, and it will not call the work done while a session is waiting on you, stopped halfway, still running in the background, waiting on CI, or not yet pushed or released.
 
-This is the first tagged release. It needs the Claude Code desktop app (Code tab) and a Claude Code version that supports function-hook mods (tested with 2.1.299). It was built with Claude Code, and its own development is run the way it works: one PM session hands each task to a sub-session and checks it before closing it.
+It follows v0.3.2. It needs the Claude Code desktop app (Code tab) and a Claude Code version that supports function-hook mods (tested with 2.1.299). It was built with Claude Code, and its own development is run the way it works: one PM session hands each task to a sub-session and checks it before closing it.
 
 ```
 /plugin install project-pm --marketplace AudiChang-hub/claude-project-pm
@@ -17,8 +17,6 @@ Then type `/pm` in a new session of your project.
 - **CI is checked on GitHub.** When a session's report says CI is still running, the PM asks `gh` about the runs and commits it names (nearest the CI words first, only commits in that repository), then the folder's `HEAD`. A pass clears *Waiting on CI*; a failure shows as *CI failed*.
 - **Reports are read for what they say about the work.** Quoted status names, sentences about a rule or an example, conditions and other sessions' work no longer count as CI running, work in the background or work left undelivered.
 - **The PM keeps its tools.** If the engine drops the PM's `board` and `ledger` tools (after `/reload-plugins`, or when the mod's folder changes), they come back on its next turn or within 30 seconds.
-- **Owners stay in sight.** A session that owns an open work item stays on the board whatever its status, even when it works from another project's folder.
-- **Docs and CI.** English README with screenshots (Traditional Chinese in `README.zh-TW.md`), and GitHub Actions running `claude plugin validate .` and `claude plugin test .`.
 
 ## Fixed
 
@@ -26,8 +24,6 @@ Then type `/pm` in a new session of your project.
 - A report that merely named "background" or quoted 「等待 CI」 kept a finished session *In the background* or *Waiting on CI*, and the ledger would not close its item.
 - The commit checked on GitHub could be a hash quoted from another project or part of a session id.
 - A commit pushed rebased or squashed with others kept its session *Not released*: only the hash itself on a remote branch counted.
-- A session whose record was empty after a reload showed as ended even when its transcript said CI was still running.
-- A recap saying nothing was left (沒有任何未提交的修改, "there are no uncommitted changes") was flagged as unfinished work.
 
 ## Known limitations
 

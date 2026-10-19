@@ -1,5 +1,7 @@
 # Repository metadata
 
+> **Applied 2026-10-19**: the description and all five topics below are set on GitHub.
+
 ## Description
 
 > One PM session per project for Claude Code: a live board of every session (waiting on you, stopped mid-plan, CI still running) and a ledger of the work you asked for.

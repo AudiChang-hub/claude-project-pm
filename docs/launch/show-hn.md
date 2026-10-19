@@ -1,7 +1,7 @@
 # Show HN draft
 
 > **On hold: not posting for now** (decided 2026-10-19). Kept for later. If it is revived, update it
-> to the current features first (the *not released* status, background work, and v0.4.0) and give
+> to the current features first (the *not released* status, background work; v0.4.0 is out) and give
 > the first comment the same plain, built-with-Claude-Code framing as the r/ClaudeAI draft.
 
 Rules checked against https://news.ycombinator.com/showhn.html: it must be something people can
