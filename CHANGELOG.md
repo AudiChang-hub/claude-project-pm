@@ -12,6 +12,7 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ### Fixed
 - A session that ended its turn to wait on its own background work (tests running, CI to watch) showed as *Unfinished* and was listed under "needs attention" whenever its task list had steps left: open steps were checked before anything else. Running CI and background work now come first; words of background work count for 45 minutes in a session without the record.
+- Any report that named the word 背景 ("background"), or quoted the status 「等待 CI」, read as work still going on, so a session that had finished everything showed as *In the background* for 45 minutes and the ledger would not close its item. Words now count only when they say the work is under way (正在…背景執行, 在背景跑, 背景執行中, 等 CI 通過後, "still running in the background", "Waiting for CI to finish") or what follows once it ends.
 - The PM lost its `board` and `ledger` tools for good when the engine dropped them after the module's start-up had already run, as when the mod's folder changed and `/board` reloaded it. The PM now checks its tools on every turn and every poll, and registers them again when they are missing.
 
 ## [0.3.2] - 2026-10-19

@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { applyPlan, caveatOf, ciTarget, keyFile, projectKey, statusOf } from '../hooks/sessions'
+import { applyPlan, caveatOf, ciTarget, keyFile, parseLastWord, projectKey, statusOf } from '../hooks/sessions'
 
 const NOW = Date.parse('2026-10-17T12:00:00.000Z')
 const PROJECT = 'C:\\Users\\dev\\Projects\\Acme 商店後台'
@@ -548,4 +548,39 @@ test('the PM gets its tools back whenever the engine has dropped them', async ($
   // Present: nothing registered again.
   await $.prompt.submit({ text: '還有別的嗎？' } as never)
   expect(registered).toEqual(['board', 'ledger'])
+})
+
+test('only words of work still going on read as waiting, not words that name it', () => {
+  const waits = (text: string) => parseLastWord(`[assistant] ${text}\n[result] done (success), 1 turns`, '').isWaiting
+  const going = [
+    // The DMIS session's own words while its suite ran.
+    '完整 sales 測試、前端測試與 context 測試正在乾淨 worktree 裡背景執行，完成後依結果修正或推送。',
+    '還在背景跑，大約 20 分鐘。',
+    '我在背景等結果。',
+    '已丟到背景跑，跑完會通知 PM。',
+    '完整測試背景執行中。',
+    '1.86.11 已推上 main，等 CI 通過後我會部署。',
+    '等測試跑完再打標籤。',
+    "Waiting for CI to finish (~21 minutes); I'll tag and deploy once it's green.",
+    'The full suite is still running in the background.',
+    "I'll tag the release once the checks pass.",
+  ]
+  const named = [
+    // Sentences of a report about the background fix itself, its tasks all done and nothing running.
+    '「背景」這個說法其實有抓到，45 分鐘的時間門檻也不是原因。',
+    '判斷順序改成先看 CI、再看背景工作、最後才看任務清單。',
+    'Session 會記下自己丟到背景跑的指令，直到收到「已結束」的通知才移除。',
+    '它在 14:10 把完整測試丟到背景跑，14:10:15 結束那一輪，當時任務清單還有 4 步沒完成。',
+    '背景偵測只對重新載入之後才開始跑的指令有效。',
+    '子代理和監看類的背景工作還沒有追蹤。',
+    '修正了背景判斷的誤判，任務 5/5 全部完成。',
+    // The status's name, quoted.
+    '**「訂單總覽頁面」一直卡在「等待 CI」的原因**',
+    'CI 已通過就不算「等待 CI」。',
+    '不用等測試跑完，已經全部通過。',
+    '| Waiting on CI (等待 CI) | Its last words say CI has not finished. |',
+    'A command it started in the background has not reported back yet, for up to 6 hours.',
+  ]
+  expect(going.filter(t => !waits(t))).toEqual([])
+  expect(named.filter(waits)).toEqual([])
 })

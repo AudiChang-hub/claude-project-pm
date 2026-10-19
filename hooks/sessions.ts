@@ -36,9 +36,37 @@ const BEHIND_MS = 2 * 60000
 /** How long a background command counts as running without its notification: a session whose process ended never gets one. */
 const BACKGROUND_HOURS = 6
 
-/** Words a session leaves when its turn ends but work goes on: a background job, a CI run, a deploy. */
-const WAITING =
-  /背景|等.{0,16}(CI|部署|測試|建置|build|跑完|完成|結果)|跑完.{0,8}(會|再|就)|完成後.{0,8}(會|再|就)|自動接著|(waiting|wait) (for|on)|in the background|once (it|the) .{0,30}(finish|pass|complete)/i
+/**
+ * Words a session leaves when its turn ends but work goes on: a background job, a CI run, a deploy.
+ * Each says the work is under way or what comes once it ends; a word merely named (背景偵測, the
+ * status 「等待 CI」, a command "started in the background" that a report describes) is not enough.
+ */
+const WAITING = new RegExp(
+  [
+    // 正在乾淨 worktree 裡背景執行 / 還在背景跑
+    /(正在|還在|仍在|持續)[^。\n「」]{0,20}?背景(裡|中)?(執行|跑|進行|處理|運行|監看|盯)(?!的)/,
+    // 我在背景等結果 / 已丟到背景跑 / 先放到背景執行: the speaker's own, not 「它把測試丟到背景跑」 or 丟到背景跑的指令
+    /(我|已|已經|先|會)[^。\n「」]{0,10}?(在|丟到|丟進|放到|放進|移到|轉到)背景(裡|中)?(執行|跑|進行|處理|等|監看|盯|運行)(?!的)/,
+    // 背景執行中 / 背景跑著
+    /背景(執行|跑|處理|運行)(中|著)/,
+    // 背景…完成後 / 背景跑完之後
+    /背景[^。\n「」]{0,20}?(完成|跑完|結束)(後|之後)/,
+    // 等 CI 通過 / 等測試跑完: not the status named in quotes or brackets (「等待 CI」, (等待 CI)), not 不用等, not 等級 or 相等
+    /(?<![「『"'(（\[【相平同對均高]|不用|不必|不需要|無需|別|不要)等(?![級等於同])[^。\n「」]{0,16}?(CI|部署|測試|建置|build|跑完|完成|結果)/,
+    // 跑完會通知 / 完成後再推送
+    /(跑完|完成後)[^。\n「」]{0,8}?(會|再|就)/,
+    /自動接著/,
+    // "Waiting for CI to finish", "I'm still waiting on the checks": not a table's "Waiting on CI (等待 CI)"
+    /(^|[.!?]\s+|\n\s*)(waiting|wait) (for|on)\b|\b(I'm|I am|I'll|I will|still|now|currently|am|are|is)\s+(waiting|wait)\s+(for|on)\b/,
+    // "tests are running in the background", "still in the background": not "a command started in the background"
+    /\b(running|runs|still|now|keeps?|continues?|moved)\b[^.\n]{0,40}\bin(to)? the background|\bin the background\b[^.\n]{0,20}\b(now|still|running)\b/,
+    // "I'll tag it once the checks pass" / "once it finishes, I'll deploy"
+    /\b(I'll|I will|will)\b[^.\n]{0,60}\bonce (it|the|they)\b[^.\n]{0,30}(finish|pass|complete)|\bonce (it|the|they)\b[^.\n]{0,30}(finish|pass|complete)\w*,? I('ll| will)\b/,
+  ]
+    .map(r => r.source)
+    .join('|'),
+  'i',
+)
 
 /** Words that say CI (or the checks a release waits on) has not finished yet. */
 const CI_PENDING =
