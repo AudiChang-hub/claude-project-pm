@@ -2,24 +2,41 @@
 // who stopped with steps left, and what the PM was asked to keep track of.
 
 import type { BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, PushCheck, Session, Step, Track } from '../types'
+import { t } from './messages'
 
 export type Status = 'running' | 'asking' | 'failed' | 'open' | 'unreleased' | 'ci' | 'waiting' | 'done' | 'stale'
 
-/**
- * How each status reads and looks: `color` is a theme key (drawn right in light and dark),
- * `hex` the same hue for SVG marks, `tag` what the PM model reads on its board.
- */
-export const STATUS: Record<Status, { label: string; tag: string; color: string; hex: string; rank: number }> = {
-  asking: { label: '待回覆', tag: '待回覆', color: 'warning', hex: '#f59e0b', rank: 0 },
-  failed: { label: 'CI 失敗', tag: 'CI 失敗・需處理', color: 'error', hex: '#ef4444', rank: 1 },
-  open: { label: '未完成', tag: '中斷・未完成', color: 'claude', hex: '#d97757', rank: 2 },
-  unreleased: { label: '待發布', tag: '待發布・未完成', color: 'planMode', hex: '#0d9488', rank: 3 },
-  ci: { label: '等待 CI', tag: '等待 CI・未完成', color: 'permission', hex: '#8b5cf6', rank: 4 },
-  running: { label: '執行中', tag: '執行中', color: 'success', hex: '#22c55e', rank: 5 },
-  waiting: { label: '背景執行', tag: '背景執行', color: 'suggestion', hex: '#3b82f6', rank: 6 },
-  done: { label: '已結束', tag: '已結束', color: 'inactive', hex: '#9ca3af', rank: 7 },
-  stale: { label: '長期閒置', tag: '長期閒置', color: 'subtle', hex: '#6b7280', rank: 8 },
+/** How each status looks: `color` is a theme key (drawn right in light and dark), `hex` the same hue for SVG marks. */
+const LOOK: Record<Status, { color: string; hex: string; rank: number }> = {
+  asking: { color: 'warning', hex: '#f59e0b', rank: 0 },
+  failed: { color: 'error', hex: '#ef4444', rank: 1 },
+  open: { color: 'claude', hex: '#d97757', rank: 2 },
+  unreleased: { color: 'planMode', hex: '#0d9488', rank: 3 },
+  ci: { color: 'permission', hex: '#8b5cf6', rank: 4 },
+  running: { color: 'success', hex: '#22c55e', rank: 5 },
+  waiting: { color: 'suggestion', hex: '#3b82f6', rank: 6 },
+  done: { color: 'inactive', hex: '#9ca3af', rank: 7 },
+  stale: { color: 'subtle', hex: '#6b7280', rank: 8 },
 }
+
+/**
+ * How each status reads and looks: `label` on the pane, `tag` what the PM model reads on its board,
+ * both in the language the mod speaks now (messages.ts).
+ */
+export const STATUS = Object.fromEntries(
+  (Object.keys(LOOK) as Status[]).map(status => [
+    status,
+    {
+      ...LOOK[status],
+      get label() {
+        return t(`status.${status}.label`)
+      },
+      get tag() {
+        return t(`status.${status}.tag`)
+      },
+    },
+  ]),
+) as Record<Status, { label: string; tag: string; color: string; hex: string; rank: number }>
 
 export function isActive(status: Status): boolean {
   return status !== 'done' && status !== 'stale'
@@ -245,9 +262,9 @@ export function isScratch(cwd: string): boolean {
 }
 
 export function projectName(cwd: string): string {
-  if (isScratch(cwd)) return '臨時資料夾'
+  if (isScratch(cwd)) return t('project.scratch')
 
-  return projectPath(cwd).split(/[\\/]/).filter(Boolean).at(-1) ?? '未分類'
+  return projectPath(cwd).split(/[\\/]/).filter(Boolean).at(-1) ?? t('project.unsorted')
 }
 
 export function projectKey(cwd: string): string {
@@ -476,9 +493,7 @@ export async function isPushedContent(git: Git, sha: string): Promise<boolean> {
 
 /** What a session still has to deliver, as people read it. */
 export function deliveryText(kinds: DeliveryKind[]): string {
-  const name: Record<DeliveryKind, string> = { commit: 'commit', push: 'push', release: '發布／部署／上線' }
-
-  return kinds.map(k => name[k]).join('、')
+  return kinds.map(k => t(`delivery.${k}`)).join(t('list.joiner'))
 }
 
 export function caveatOf(track: Track | undefined): string | null {
@@ -526,14 +541,14 @@ export function statusOf(one: Session, track: Track | undefined, word: LastWord 
 
 export function ago(iso: string | number, now: number): string {
   const at = typeof iso === 'number' ? iso : Date.parse(iso)
-  if (!Number.isFinite(at) || at === 0) return '不明'
+  if (!Number.isFinite(at) || at === 0) return t('time.unknown')
   const min = Math.max(0, Math.round((now - at) / 60000))
-  if (min < 1) return '剛剛'
-  if (min < 60) return `${min} 分鐘前`
+  if (min < 1) return t('time.now')
+  if (min < 60) return t('time.minutes', { n: min })
   const hours = Math.round(min / 60)
-  if (hours < 24) return `${hours} 小時前`
+  if (hours < 24) return t('time.hours', { n: hours })
 
-  return `${Math.round(hours / 24)} 天前`
+  return t('time.days', { n: Math.round(hours / 24) })
 }
 
 export function clip(text: string, max: number): string {
@@ -545,7 +560,7 @@ export function clip(text: string, max: number): string {
 /** Parses list_sessions' JSON text; archived sessions are left out. */
 export function parseSessions(text: string): Session[] {
   const rows: unknown = JSON.parse(text)
-  if (!Array.isArray(rows)) throw new Error('list_sessions 回傳的不是陣列')
+  if (!Array.isArray(rows)) throw new Error(t('error.notArray'))
 
   return rows.flatMap(row => {
     if (typeof row !== 'object' || row === null) return []
@@ -555,7 +570,7 @@ export function parseSessions(text: string): Session[] {
     return [
       {
         id: o.sessionId,
-        title: typeof o.title === 'string' && o.title ? o.title : '（未命名）',
+        title: typeof o.title === 'string' && o.title ? o.title : t('session.untitled'),
         cwd: typeof o.cwd === 'string' ? o.cwd : '',
         isRunning: o.isRunning === true,
         lastActivityAt: typeof o.lastActivityAt === 'string' ? o.lastActivityAt : '',
@@ -658,58 +673,71 @@ export function boardText(input: BoardInput): string {
     .map(one => ({ one, track: tracks[one.id], word: words[one.id], status: statusOf(one, tracks[one.id], words[one.id], now, ci[one.id], push[one.id]) }))
     .sort((a, b) => STATUS[a.status].rank - STATUS[b.status].rank)
   const lines: string[] = []
-  lines.push(`# 專案狀態報告：${project.name}`, `路徑：${project.path}`)
+  lines.push(t('board.title', { project: project.name }), t('board.path', { path: project.path }))
   const count = (s: Status) => rows.filter(r => r.status === s).length
   lines.push(
-    `Sessions ${rows.length}（不含 PM）｜待回覆 ${count('asking')}｜CI 失敗 ${count('failed')}｜等待 CI ${count('ci')}｜待發布 ${count('unreleased')}｜中斷・未完成 ${count('open')}｜執行中 ${count('running')}｜背景執行 ${count('waiting')}｜已結束 ${count('done')}｜長期閒置 ${count('stale')}`,
+    t('board.counts', {
+      total: rows.length,
+      asking: count('asking'),
+      failed: count('failed'),
+      ci: count('ci'),
+      unreleased: count('unreleased'),
+      open: count('open'),
+      running: count('running'),
+      waiting: count('waiting'),
+      done: count('done'),
+      stale: count('stale'),
+    }),
   )
 
   const counted = ledger.filter(item => item.status !== 'dropped')
-  if (counted.length) lines.push(`工作項目完成 ${counted.filter(i => i.status === 'done').length}/${counted.length}（專案進度以工作項目為準；Session 收尾時會把自己的任務清單全部勾選，不代表工作已完成）`)
+  if (counted.length) lines.push(t('board.progress', { done: counted.filter(i => i.status === 'done').length, total: counted.length }))
 
   const attention: string[] = []
   for (const r of rows) {
-    const name = `「${r.one.title}」(${r.one.id})`
-    if (r.status === 'asking') attention.push(`- [待回覆] ${name} 等待使用者決策：${clip(r.track?.ask ?? r.track?.lastAnswer ?? r.word?.said ?? '', 200)}`)
+    const name = t('board.name', { title: r.one.title, id: r.one.id })
+    if (r.status === 'asking') attention.push(t('board.attention.asking', { name, said: clip(r.track?.ask ?? r.track?.lastAnswer ?? r.word?.said ?? '', 200) }))
     if (r.status === 'open') {
       const left = openSteps(r.track)
-      attention.push(`- [中斷・未完成] ${name} 已停止，任務清單仍有 ${left.length} 項未完成：${left.map(s => s.content).join('；')}`)
+      attention.push(t('board.attention.open', { name, n: left.length, steps: left.map(s => s.content).join(t('list.steps')) }))
     }
-    if (r.status === 'ci') attention.push(`- [等待 CI・未完成] ${name} 最後回報 CI 尚未跑完，不能視為完成：${clip(ciWords(r.track, r.word), 200)}`)
+    if (r.status === 'ci') attention.push(t('board.attention.ci', { name, said: clip(ciWords(r.track, r.word), 200) }))
     if (r.status === 'unreleased') {
       const words = ciWords(r.track, r.word)
-      attention.push(`- [待發布・未完成] ${name} 最後回報尚未交付（${deliveryText(undeliveredOf(words)?.kinds ?? [])}），不能視為完成：${clip(words, 200)}`)
+      attention.push(t('board.attention.unreleased', { name, kinds: deliveryText(undeliveredOf(words)?.kinds ?? []), said: clip(words, 200) }))
     }
     if (r.status === 'failed') {
-      attention.push(`- [CI 失敗・需處理] ${name} GitHub 上的 CI（${ci[r.one.id]?.target || '最近一次'}）失敗，要修正後重跑：${clip(ciWords(r.track, r.word), 200)}`)
+      const target = ci[r.one.id]?.target || t('board.attention.failedTarget')
+      attention.push(t('board.attention.failed', { name, target, said: clip(ciWords(r.track, r.word), 200) }))
     }
     const caveat = caveatOf(r.track)
-    if (caveat && !['running', 'ci', 'failed', 'unreleased'].includes(r.status)) attention.push(`- [需追蹤] ${name} 收尾摘要載明尚有未完成事項：${clip(caveat, 200)}`)
-    if (r.one.hasOpenPr && r.status !== 'running') attention.push(`- [PR 開啟中] ${name}`)
+    if (caveat && !['running', 'ci', 'failed', 'unreleased'].includes(r.status)) attention.push(t('board.attention.caveat', { name, said: clip(caveat, 200) }))
+    if (r.one.hasOpenPr && r.status !== 'running') attention.push(t('board.attention.pr', { name }))
   }
   const openLedger = ledger.filter(item => item.status === 'open')
   const known = new Set(everyone.map(s => s.id))
   for (const item of openLedger) {
-    if (!item.owner) attention.push(`- [未指派] 工作項目 ${itemCode(item.id)}「${item.text}」尚未指派負責 Session`)
-    else if (!known.has(item.owner)) attention.push(`- [負責人失聯] 工作項目 ${itemCode(item.id)}「${item.text}」的負責 Session ${item.owner} 已不在清單中（可能已封存），需確認是否完成`)
+    if (!item.owner) attention.push(t('board.attention.unassigned', { code: itemCode(item.id), text: item.text }))
+    else if (!known.has(item.owner)) attention.push(t('board.attention.lost', { code: itemCode(item.id), text: item.text, owner: item.owner }))
   }
   const inProject = new Set(sessions.map(s => s.id))
   /** An owner as the ledger shows it: its title and status, and whether it works from another project's folder. */
   const ownerText = (id: string | null) => {
-    if (!id) return '未指派'
+    if (!id) return t('board.owner.unassigned')
     const one = everyone.find(s => s.id === id)
-    if (!one) return `${id}（已不在清單中）`
+    if (!one) return t('board.owner.gone', { id })
     const status = statusOf(one, tracks[id], words[id], now, ci[id], push[id])
 
-    return `${one.title}（${STATUS[status].tag}${inProject.has(id) ? '' : '・其他專案的 Session'}）`
+    return t('board.owner.status', { title: one.title, tag: STATUS[status].tag, elsewhere: inProject.has(id) ? '' : t('board.owner.elsewhere') })
   }
-  lines.push('', '## 需要處理', attention.length ? attention.join('\n') : '（無）')
+  lines.push('', t('board.section.attention'), attention.length ? attention.join('\n') : t('board.none'))
 
-  lines.push('', '## 工作項目')
+  lines.push('', t('board.section.items'))
   const shown = input.isIncludingDone ? ledger : openLedger
-  if (shown.length === 0) lines.push(openLedger.length === 0 && ledger.length > 0 ? '（全部完成）' : '（無）')
+  if (shown.length === 0) lines.push(openLedger.length === 0 && ledger.length > 0 ? t('board.allDone') : t('board.none'))
   for (const item of shown) {
-    lines.push(`- ${itemCode(item.id)} (id ${item.id}) [${item.status}] ${item.text}｜負責：${ownerText(item.owner)}${item.note ? `｜備註：${item.note}` : ''}`)
+    const note = item.note ? t('board.itemNote', { note: item.note }) : ''
+    lines.push(t('board.item', { code: itemCode(item.id), id: item.id, status: item.status, text: item.text, owner: ownerText(item.owner), note }))
   }
 
   lines.push('', '## Sessions')
@@ -718,23 +746,30 @@ export function boardText(input: BoardInput): string {
     const isOwner = openLedger.some(item => item.owner === r.one.id)
     if (!input.isIncludingDone && !isActive(r.status) && !caveatOf(r.track) && !r.one.hasOpenPr && !isOwner) continue
     listed += 1
-    const flags = [r.one.hasOpenPr ? 'PR 開啟中' : '', r.one.isPinned ? '已釘選' : ''].filter(Boolean).join('、')
+    const flags = [r.one.hasOpenPr ? t('board.flag.pr') : '', r.one.isPinned ? t('board.flag.pinned') : ''].filter(Boolean).join(t('list.joiner'))
     lines.push(`### [${STATUS[r.status].tag}] ${r.one.title} (${r.one.id})`)
-    lines.push(`最後活動 ${ago(r.one.lastActivityAt, now)}${flags ? `｜${flags}` : ''}`)
+    lines.push(t('board.lastActive', { ago: ago(r.one.lastActivityAt, now), flags: flags ? t('board.flags', { flags }) : '' }))
     if (r.track) {
-      if (r.track.plan.length) lines.push(`任務 ${r.track.plan.filter(s => s.status === 'completed').length}/${r.track.plan.length}：${r.track.plan.map(s => `${STEP_MARK[s.status]} ${s.content}`).join(' / ')}`)
-      if (r.track.lastPrompt) lines.push(`最新指令：${clip(r.track.lastPrompt, 160)}`)
-      if (r.track.recap) lines.push(`收尾摘要：${clip(r.track.recap, 300)}`)
-      else if (r.track.lastAnswer) lines.push(`最後回報：${clip(r.track.lastAnswer, 300)}`)
-      if (r.track.ask) lines.push(`待決策問題：${r.track.ask}`)
+      if (r.track.plan.length) {
+        const steps = r.track.plan.map(s => `${STEP_MARK[s.status]} ${s.content}`).join(' / ')
+        lines.push(t('board.tasks', { done: r.track.plan.filter(s => s.status === 'completed').length, total: r.track.plan.length, steps }))
+      }
+      if (r.track.lastPrompt) lines.push(t('board.prompt', { text: clip(r.track.lastPrompt, 160) }))
+      if (r.track.recap) lines.push(t('board.recap', { text: clip(r.track.recap, 300) }))
+      else if (r.track.lastAnswer) lines.push(t('board.answer', { text: clip(r.track.lastAnswer, 300) }))
+      if (r.track.ask) lines.push(t('board.ask', { text: r.track.ask }))
       const background = backgroundOf(r.track, now)
-      if (background.length) lines.push(`背景工作 ${background.length} 項執行中：${background.map(t => `${clip(t.label, 80)}（${ago(t.at, now)}開始）`).join('；')}`)
+      if (background.length) {
+        const tasks = background.map(task => t('board.backgroundTask', { label: clip(task.label, 80), ago: ago(task.at, now) })).join(t('list.steps'))
+        lines.push(t('board.background', { n: background.length, tasks }))
+      }
     } else {
-      lines.push(`（無追蹤紀錄：此 Session 在 Mod 安裝前開啟）最後訊息：${r.word?.error ? `讀取失敗：${r.word.error}` : (r.word?.said ?? '讀取中')}`)
+      const said = r.word?.error ? t('board.readFailed', { error: r.word.error }) : (r.word?.said ?? t('board.reading'))
+      lines.push(t('board.untracked', { said }))
     }
   }
   const hidden = rows.length - listed
-  if (hidden > 0) lines.push('', `另有 ${hidden} 個已結束且無待辦的 Session 未列出；以 include_done: true 檢視全部。`)
+  if (hidden > 0) lines.push('', t('board.hidden', { n: hidden }))
 
   return lines.join('\n')
 }

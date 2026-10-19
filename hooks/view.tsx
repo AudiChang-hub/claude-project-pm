@@ -8,6 +8,7 @@ import type { CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck,
 import { STATUS, ago, caveatOf, clip, groupProjects, isActive, itemCode, liveTracks, openSteps, projectKey, statusOf } from './sessions'
 import type { Project, Status } from './sessions'
 import { archive, claim, dismissBand, refresh, startPmSession } from './actions'
+import { t } from './messages'
 
 // The engine reads each module's state refs from its own source: these name the same values as the other modules'.
 const me = atom({ plugin: 'project-pm', key: 'me' } as const, null as Me | null)
@@ -77,13 +78,13 @@ export async function renderBand<R>($: EngineInterface, e: RenderInputOf<'AboveP
     <Box flexDirection="row" flexWrap="wrap" columnGap="sm" rowGap="xs" alignItems="center">
       <Text size="footnote">
         <Text color="claude" weight="semibold">
-          專案 PM
+          {t('band.title')}
         </Text>
-        <Text dimColor>{`　「${self.projectName}」尚未指派 PM`}</Text>
+        <Text dimColor>{t('band.noPm', { project: self.projectName })}</Text>
       </Text>
-      <Button key="pm:start" variant="primary" label={isStarting ? '建立中…' : '建立 PM Session'} onPress={() => (isStarting ? undefined : startPmSession($))} />
-      <Button key="pm:here" variant="secondary" label="由此 Session 擔任" onPress={() => void claim($)} />
-      <Button key="pm:no" plain dimColor label="略過" onPress={() => dismissBand($)} />
+      <Button key="pm:start" variant="primary" label={isStarting ? t('band.starting') : t('band.start')} onPress={() => (isStarting ? undefined : startPmSession($))} />
+      <Button key="pm:here" variant="secondary" label={t('band.claim')} onPress={() => void claim($)} />
+      <Button key="pm:no" plain dimColor label={t('band.skip')} onPress={() => dismissBand($)} />
     </Box>
   )
 }
@@ -111,14 +112,14 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   if (state.fetchedAt === 0 && !state.error) {
     return (
       <Text size="footnote" dimColor>
-        正在同步 Session…
+        {t('pane.syncing')}
       </Text>
     )
   }
   if (state.error && state.list.length === 0) {
     return (
       <Text size="footnote" color="error" wrap="wrap">
-        {`無法讀取 Session 清單：${state.error}`}
+        {t('pane.cannotRead', { error: state.error })}
       </Text>
     )
   }
@@ -152,12 +153,12 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const count = (s: Status) => everyone.filter(one => statusOfOne(one) === s).length
   const pmFile: ProjectFile | undefined = !isAll && self ? files[self.projectKey] : undefined
   const role = isAll
-    ? `${shown.length} 個專案`
+    ? t('pane.projects', { n: shown.length })
     : pmFile?.pmId
       ? pmFile.pmId === self?.id
-        ? 'PM：本 Session'
-        : 'PM：已指派'
-      : 'PM：未指派'
+        ? t('pane.pmSelf')
+        : t('pane.pmOther')
+      : t('pane.pmNone')
 
   const metric = (key: string, value: number, label: string, color: string) => (
     <Box key={key} flexDirection="column" width="33%" paddingX="sm">
@@ -173,30 +174,30 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const progress = (
     <Box key="kpi" flexDirection="column" rowGap="sm" borderStyle="round" borderDimColor paddingX="md" paddingY="sm">
       <Box flexDirection="row" alignItems="center" columnGap="md">
-        {svg('ring', ringSvg(ratio), hasRatio ? `完成率 ${Math.round(ratio * 100)}%` : '尚無資料', { width: 42, height: 42 })}
+        {svg('ring', ringSvg(ratio), hasRatio ? t('pane.ratio', { percent: Math.round(ratio * 100) }) : t('pane.noData'), { width: 42, height: 42 })}
         <Box flexDirection="column" flexGrow={1} flexShrink={1}>
           <Text size="title" weight="semibold" tabular>
             {hasRatio ? `${Math.round(ratio * 100)}%` : '—'}
           </Text>
           <Text size="caption" dimColor wrap="truncate-end">
             {isByItems
-              ? `工作項目完成 ${itemsDone}/${items.length}`
+              ? t('pane.itemsDone', { done: itemsDone, total: items.length })
               : steps.length
-                ? `Session 步驟完成 ${stepsDone}/${steps.length}（尚無工作項目）`
-                : '尚無工作項目'}
+                ? t('pane.stepsDone', { done: stepsDone, total: steps.length })
+                : t('pane.noItems')}
           </Text>
           {isByItems && (ledgers.length > 0 || unassigned > 0) && (
             <Text size="caption" wrap="truncate-end">
-              <Text dimColor>{`${ledgers.length} 項進行中`}</Text>
-              {unassigned > 0 && <Text color="warning">{`　·　${unassigned} 項未指派`}</Text>}
+              <Text dimColor>{t('pane.itemsOpen', { n: ledgers.length })}</Text>
+              {unassigned > 0 && <Text color="warning">{t('pane.itemsUnassigned', { n: unassigned })}</Text>}
             </Text>
           )}
         </Box>
       </Box>
       <Box flexDirection="row">
-        {metric('kpi:running', count('running') + count('waiting'), '執行中', 'success')}
-        {metric('kpi:asking', count('asking'), '待回覆', 'warning')}
-        {metric('kpi:open', count('open') + count('ci') + count('failed') + count('unreleased'), '尚未完成', 'claude')}
+        {metric('kpi:running', count('running') + count('waiting'), t('pane.kpiRunning'), 'success')}
+        {metric('kpi:asking', count('asking'), t('pane.kpiAsking'), 'warning')}
+        {metric('kpi:open', count('open') + count('ci') + count('failed') + count('unreleased'), t('pane.kpiOpen'), 'claude')}
       </Box>
     </Box>
   )
@@ -206,18 +207,18 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
       <Box flexDirection="row" justifyContent="space-between" alignItems="flex-start" columnGap="sm">
         <Box flexDirection="column" flexShrink={1}>
           <Text size="caption" weight="medium" color="claude">
-            {isAll ? 'PORTFOLIO' : 'PROJECT'}
+            {isAll ? t('pane.portfolio') : t('pane.project')}
           </Text>
           <Text size="heading" weight="semibold" wrap="truncate-end">
-            {isAll ? '全部專案' : (shown[0]?.name ?? '')}
+            {isAll ? t('pane.allProjects') : (shown[0]?.name ?? '')}
           </Text>
           <Text size="caption" dimColor tabular wrap="truncate-end">
-            {`${everyone.length} Sessions　·　${role}`}
+            {t('pane.sessionsCount', { n: everyone.length, role })}
           </Text>
         </Box>
         <Box flexDirection="row" columnGap="xs" flexShrink={0}>
-          <Button key="scope:project" label="本專案" variant={view === 'project' ? 'primary' : 'secondary'} onPress={() => update($, scope, () => 'project')} />
-          <Button key="scope:all" label="全部" variant={view === 'all' ? 'primary' : 'secondary'} onPress={() => update($, scope, () => 'all')} />
+          <Button key="scope:project" label={t('pane.scopeProject')} variant={view === 'project' ? 'primary' : 'secondary'} onPress={() => update($, scope, () => 'project')} />
+          <Button key="scope:all" label={t('pane.scopeAll')} variant={view === 'all' ? 'primary' : 'secondary'} onPress={() => update($, scope, () => 'all')} />
         </Box>
       </Box>
       {progress}
@@ -248,10 +249,10 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
     asking === one.id ? (
       <Box key={`confirm:${one.id}`} flexDirection="row" flexWrap="wrap" columnGap="sm" rowGap="xs" alignItems="center">
         <Text size="caption" color="warning">
-          {warn ? `確定封存？${warn}` : '確定封存此 Session？'}
+          {warn ? t('pane.confirmArchiveWarn', { warn }) : t('pane.confirmArchive')}
         </Text>
-        <Button key={`yes:${one.id}`} variant="primary" label="封存" onPress={() => archive($, one)} />
-        <Button key={`no:${one.id}`} variant="secondary" label="取消" onPress={() => update($, confirm, () => null)} />
+        <Button key={`yes:${one.id}`} variant="primary" label={t('pane.archive')} onPress={() => archive($, one)} />
+        <Button key={`no:${one.id}`} variant="secondary" label={t('pane.cancel')} onPress={() => update($, confirm, () => null)} />
       </Box>
     ) : status === 'running' ? null : (
       <Box key={`actions:${one.id}`} flexDirection="row" display="none" hover={{ scope: `card:${one.id}`, display: 'flex' }}>
@@ -259,18 +260,22 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
           key={`archive:${one.id}`}
           plain
           dimColor
-          label={working === one.id ? '封存中…' : '封存'}
+          label={working === one.id ? t('pane.archiving') : t('pane.archive')}
           onPress={() => (working ? undefined : update($, confirm, () => one.id))}
         />
       </Box>
     )
 
   const summaryOf = (track: Track | undefined, one: Session) => {
-    if (track) return track.ask ? `問題：${track.ask}` : track.recap || track.lastAnswer || (track.lastPrompt ? `指令：${track.lastPrompt}` : '尚無回報')
-    const word = words[one.id]
-    if (word?.error) return `無法讀取紀錄：${word.error}`
+    if (track) {
+      if (track.ask) return t('pane.question', { text: track.ask })
 
-    return word ? word.said || '尚無回報' : '讀取中…'
+      return track.recap || track.lastAnswer || (track.lastPrompt ? t('pane.instruction', { text: track.lastPrompt }) : t('pane.noReport'))
+    }
+    const word = words[one.id]
+    if (word?.error) return t('pane.cannotReadTranscript', { error: word.error })
+
+    return word ? word.said || t('pane.noReport') : t('pane.reading')
   }
 
   const card = (one: Session) => {
@@ -283,14 +288,14 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
     const summary = summaryOf(track, one)
     const isPm = files[projectKey(one.cwd)]?.pmId === one.id
     const meta = [
-      plan.length ? `步驟 ${plan.length - left.length}/${plan.length}` : '',
-      one.hasOpenPr ? 'PR 開啟中' : '',
+      plan.length ? t('pane.steps', { done: plan.length - left.length, total: plan.length }) : '',
+      one.hasOpenPr ? t('pane.prOpen') : '',
       isPm ? 'PM' : '',
-      track ? '' : '無追蹤紀錄',
+      track ? '' : t('pane.untracked'),
     ].filter(Boolean)
-    const warn = [left.length ? `尚有 ${left.length} 項步驟未完成` : '', one.hasOpenPr ? 'PR 仍開啟' : '', one.isPinned ? '已釘選' : '']
+    const warn = [left.length ? t('pane.warnSteps', { n: left.length }) : '', one.hasOpenPr ? t('pane.warnPr') : '', one.isPinned ? t('pane.warnPinned') : '']
       .filter(Boolean)
-      .join('、')
+      .join(t('list.joiner'))
     const current = left.find(s => s.status === 'in_progress') ?? left[0]
 
     return (
@@ -321,16 +326,16 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
           </Text>
           {meta.length > 0 && <Text dimColor>{`　·　${meta.join('　·　')}`}</Text>}
         </Text>
-        {plan.length > 0 && svg(`steps:${one.id}`, stepsSvg(plan, look.hex), `步驟 ${plan.length - left.length}/${plan.length}`)}
+        {plan.length > 0 && svg(`steps:${one.id}`, stepsSvg(plan, look.hex), t('pane.steps', { done: plan.length - left.length, total: plan.length }))}
         {current && (
           <Text size="footnote" wrap="truncate-end" color={status === 'open' ? 'claude' : undefined}>
-            {`▸ ${current.content}${left.length > 1 ? `　（另 ${left.length - 1} 項）` : ''}`}
+            {`▸ ${current.content}${left.length > 1 ? t('pane.moreSteps', { n: left.length - 1 }) : ''}`}
           </Text>
         )}
         {caveat ? (
           <Text size="footnote" wrap="truncate-end">
             <Text color="warning" weight="medium">
-              需追蹤
+              {t('pane.caveat')}
             </Text>
             <Text dimColor>{`　${clip(caveat, 160)}`}</Text>
           </Text>
@@ -360,7 +365,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
             {ago(one.lastActivityAt, now)}
           </Text>
         </Box>
-        {archiveControls(one, status, one.hasOpenPr ? 'PR 仍開啟' : '')}
+        {archiveControls(one, status, one.hasOpenPr ? t('pane.warnPr') : '')}
       </Box>
     )
   }
@@ -368,8 +373,12 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const ledgerRow = ({ project, item }: { project: Project; item: LedgerItem }) => {
     // An owner working from another project's folder is still there: only one gone from the list is lost.
     const owner = item.owner ? state.list.find(s => s.id === item.owner) : undefined
-    const elsewhere = owner && !project.sessions.includes(owner) ? '・其他專案' : ''
-    const ownerText = !item.owner ? '尚未指派' : owner ? `負責　${owner.title}・${STATUS[statusOfOne(owner)].label}${elsewhere}` : '負責 Session 已不在清單中'
+    const elsewhere = owner && !project.sessions.includes(owner) ? t('pane.elsewhere') : ''
+    const ownerText = !item.owner
+      ? t('pane.ownerNone')
+      : owner
+        ? t('pane.owner', { title: owner.title, status: STATUS[statusOfOne(owner)].label, elsewhere })
+        : t('pane.ownerGone')
 
     return (
       <Box key={`ledger:${project.key}:${item.id}`} flexDirection="row" columnGap="sm" alignItems="flex-start" paddingY="xs">
@@ -407,13 +416,13 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
               {project.name}
             </Text>
             <Text size="caption" dimColor tabular>
-              {`${live.length} 進行中　·　${rest.length} 已結束${files[project.key]?.pmId ? '　·　PM' : ''}`}
+              {t('pane.projectCounts', { live: live.length, ended: rest.length, pm: files[project.key]?.pmId ? t('pane.projectPm') : '' })}
             </Text>
           </Box>
         )}
         {live.length === 0 && (
           <Text size="footnote" dimColor>
-            {project.sessions.length ? '沒有進行中的 Session。' : '此專案目前沒有其他 Session。'}
+            {project.sessions.length ? t('pane.noLive') : t('pane.noSessions')}
           </Text>
         )}
         {live.map(card)}
@@ -439,14 +448,14 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
       {canClaim && (
         <Box key="claim" flexDirection="row" flexWrap="wrap" columnGap="sm" alignItems="center" marginTop="sm">
           <Text size="footnote" dimColor>
-            此專案尚未指派 PM
+            {t('pane.noPm')}
           </Text>
-          <Button key="claim" variant="secondary" label="由此 Session 擔任" onPress={() => void claim($)} />
+          <Button key="claim" variant="secondary" label={t('band.claim')} onPress={() => void claim($)} />
         </Box>
       )}
-      {ledgers.length > 0 && sectionTitle('h:ledger', '工作項目', `${ledgers.length} 項進行中`)}
+      {ledgers.length > 0 && sectionTitle('h:ledger', t('pane.items'), t('pane.itemsOpen', { n: ledgers.length }))}
       {ledgers.map(ledgerRow)}
-      {sectionTitle('h:sessions', 'SESSIONS', `${liveTotal} 進行中　·　${endedTotal} 已結束`)}
+      {sectionTitle('h:sessions', t('pane.sessions'), t('pane.sessionsMeta', { live: liveTotal, ended: endedTotal }))}
       {shown.map(sessionsBlock)}
       {endedTotal > 0 && (
         <Box key="ended-toggle" flexDirection="row">
@@ -454,16 +463,16 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
             key="ended:toggle"
             plain
             dimColor
-            label={isEndedOpen ? `收合已結束的 Session` : `顯示已結束的 Session（${endedTotal}）`}
+            label={isEndedOpen ? t('pane.hideEnded') : t('pane.showEnded', { n: endedTotal })}
             onPress={() => update($, isEndedShown, v => !v)}
           />
         </Box>
       )}
       <Box key="footer" flexDirection="row" justifyContent="space-between" alignItems="center" marginTop="sm">
         <Text size="caption" dimColor tabular>
-          {`同步於 ${ago(state.fetchedAt, now)}　·　每 30 秒自動更新`}
+          {t('pane.synced', { ago: ago(state.fetchedAt, now) })}
         </Text>
-        <Button key="refresh" plain dimColor label="重新同步" onPress={() => refresh($, true)} />
+        <Button key="refresh" plain dimColor label={t('pane.refresh')} onPress={() => refresh($, true)} />
       </Box>
     </Box>
   )

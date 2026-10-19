@@ -7,6 +7,9 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+### Added
+- English. The board, its cards and counters, the band above the prompt, the commands' replies, the toasts, the PM's instructions and the `board` and `ledger` tools (descriptions and output, the ledger's refusals included) speak English or Traditional Chinese. The language follows the system (`Intl`'s locale: the display language on Windows; any Chinese locale, Simplified included, reads Traditional Chinese, everything else English) unless the new `language` option says `en` or `zh-TW`. `/pm lang en|zh-TW|auto` switches at once and saves the option, the same `/config` row (`project-pm.language`) and settings.json `pluginConfigs` entry a person can set by hand. Reading sessions' reports in English and Chinese is unchanged, and so are the files the mod keeps.
+
 ### Fixed
 - A cancelled CI run counted as a failure, so a session that called off one commit's run and pushed a fix showed as *CI failed* after the fix passed. A cancelled run is now left out when its workflow ran again on the same commit; a workflow whose runs were all cancelled never finished, so the commit has not passed either and a newer commit, the folder's `HEAD` or the words decide (the words of CI still to run keep it *Waiting on CI*).
 - When a report named several commits, an older one could answer for the newer one. A named commit that another named commit holds is now skipped, a failed or cancelled run named by id hands over its commit to the same rule, and each commit is asked together with the remote branch tips that hold it, the better answer standing (passed, then running, then failed): a fix that passed clears the commit it fixed, and a fix still running keeps it waiting.

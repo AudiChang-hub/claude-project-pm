@@ -5,5 +5,14 @@
   "author": { "name": "billy", "url": "https://github.com/AudiChang-hub" },
   "license": "MIT",
   "repository": "https://github.com/AudiChang-hub/claude-project-pm",
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "The language of the board, the PM instructions and the tools: auto follows the system (any Chinese locale reads Traditional Chinese), en, or zh-TW. /pm lang sets it too.",
+      "default": "auto",
+      "options": ["auto", "en", "zh-TW"]
+    }
+  }
 }

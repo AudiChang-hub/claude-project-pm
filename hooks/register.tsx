@@ -27,6 +27,7 @@ import {
   str,
   textOf,
 } from './actions'
+import { getLang, resolveLang, setLang, systemLocale, t } from './messages'
 import { renderBand, renderPane } from './view'
 
 // The engine reads each module's state refs from its own source: these name the same values as the other modules'.
@@ -34,6 +35,38 @@ const me = atom({ plugin: 'project-pm', key: 'me' } as const, null as Me | null)
 
 /** Whether this copy of the module has done its start-up: a reload starts a fresh copy. */
 let isStarted = false
+
+/** The `/config` row of the `language` option (plugin.json `userConfig`): auto, en or zh-TW. */
+const LANGUAGE_ROW = 'project-pm.language'
+
+async function registerCommands($: EngineInterface) {
+  await $.command.register({ name: 'pm', description: t('command.pm') })
+  await $.command.register({ name: 'board', description: t('command.board') })
+}
+
+/**
+ * `/pm lang <en|zh-TW|auto>`: speaks it from now on, and saves it as the `language` option, the same
+ * `/config` row and settings.json `pluginConfigs` entry a person sets by hand (the engine then reloads
+ * the module with it). Words the engine already holds, the commands' and the tools' descriptions, are
+ * given again in the new language.
+ */
+async function changeLanguage($: EngineInterface, wanted: string): Promise<string> {
+  const value = /^(en|english|英)/i.test(wanted) ? 'en' : /^(zh|中|繁|tw)/i.test(wanted) ? 'zh-TW' : /^(auto|system|系統|自動)/i.test(wanted) ? 'auto' : null
+  if (!value) return t('lang.usage', { lang: getLang() })
+  setLang(resolveLang(value, systemLocale()))
+  await registerCommands($)
+  if ((await read($, me))?.isPm) await registerTools($)
+  let failure: string | null = null
+  try {
+    const result = await $.config.set({ key: LANGUAGE_ROW, value })
+    if ('deny' in result && result.deny) failure = result.deny
+  } catch (err) {
+    failure = reason(err)
+  }
+  if (failure !== null) return t('lang.notSaved', { lang: getLang(), reason: failure })
+
+  return value === 'auto' ? t('lang.setAuto', { lang: getLang() }) : t('lang.set', { lang: getLang() })
+}
 
 /**
  * The commands, the PM's tools and the polling timer. `session.start` does it at the session's
@@ -44,13 +77,12 @@ let isStarted = false
 async function start($: EngineInterface, isOpeningPane: boolean) {
   if (isStarted) return
   isStarted = true
-  await $.command.register({ name: 'pm', description: '指定此 Session 為專案 PM（/pm off 卸任）' })
-  await $.command.register({ name: 'board', description: '開啟或收合專案看板' })
+  await registerCommands($)
   try {
     const self = await identify($)
     if (self?.isPm) {
       await registerTools($)
-      if (isOpeningPane) void $.ui.open({ id: PANE, title: `${self.projectName} · PM` })
+      if (isOpeningPane) void $.ui.open({ id: PANE, title: t('pane.titlePm', { project: self.projectName }) })
     }
   } catch (err) {
     $.ui.log(`project-pm: ${reason(err)}`)
@@ -61,7 +93,11 @@ async function start($: EngineInterface, isOpeningPane: boolean) {
 
 // ── Hooks ──
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  // The `language` option when it names one, else the system's (messages.ts): read once per load,
+  // and a change to the option reloads the module.
+  setLang(resolveLang(options.language, systemLocale()))
+
   on('session.start', async ($, e, next) => {
     await start($, true)
     // A new process: background commands of the one before it ended with it.
@@ -179,14 +215,14 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: BOARD_TOOL }, async ($, e) => ({ result: await board($, e as unknown as Record<string, unknown>) })).catch(() => ({
-    deny: 'project-pm：專案看板讀取失敗，請稍後再試，或改用 list_sessions / list_events。',
+    deny: t('command.denyBoard'),
   }))
   on('tool.call', { tool: LEDGER_TOOL }, async ($, e) => {
     const text = await ledger($, e as unknown as Record<string, unknown>)
     refreshSoon($)
 
     return { result: text }
-  }).catch(() => ({ deny: 'project-pm：工作項目寫入失敗，請再試一次。' }))
+  }).catch(() => ({ deny: t('command.denyLedger') }))
 
   on('prompt.compose', async ($, e, next) => {
     await start($, false)
@@ -201,6 +237,8 @@ export const register: Register = on => {
   on('command.run', { command: 'pm' }, async ($, e) => {
     await start($, false)
     if (/^\s*(off|卸任|取消)\s*$/i.test(e.args)) return { text: await release($) }
+    const lang = /^\s*(?:lang|language|語言)(?:\s+(\S+))?\s*$/i.exec(e.args)
+    if (lang) return { text: await changeLanguage($, lang[1] ?? '') }
     const text = await claim($)
     const self = await read($, me)
     if (!self?.isPm) return { text }
@@ -208,7 +246,7 @@ export const register: Register = on => {
     return {
       text,
       context: [
-        `${ROLE(self)}\n\n使用者剛用 /pm 把這個 Session 設成 PM。先呼叫 ${BOARD_TOOL}，用幾句話報告專案現況：哪些 Session 在等使用者回覆、哪些停下但還有步驟、工作項目有沒有沒完成的。`,
+        `${ROLE(self)}\n\n${t('role.justClaimed', { board: BOARD_TOOL })}`,
       ],
     }
   })
@@ -218,13 +256,13 @@ export const register: Register = on => {
     if ((await $.ui.panes()).some(pane => pane.id === PANE)) {
       await $.ui.close({ id: PANE })
 
-      return { text: '已收合專案看板，再次執行 /board 可重新開啟。' }
+      return { text: t('command.boardClosed') }
     }
     const self = await identify($)
-    await $.ui.open({ id: PANE, title: self ? `${self.projectName} · 專案看板` : '專案看板' })
+    await $.ui.open({ id: PANE, title: self ? t('pane.titleBoard', { project: self.projectName }) : t('pane.titleBoardNone') })
     void refresh($, true)
 
-    return { text: '已開啟專案看板。' }
+    return { text: t('command.boardOpened') }
   })
 
   // ── Drawing ──

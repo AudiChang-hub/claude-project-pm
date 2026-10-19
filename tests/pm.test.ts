@@ -2,8 +2,12 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { applyPlan, betterCi, caveatOf, ciTarget, ciTargets, ciVerdict, isCiPending, isPushedContent, keyFile, parseLastWord, projectKey, statusOf, undeliveredOf } from '../hooks/sessions'
+import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hooks/messages'
+import type { Lang, MessageKey } from '../hooks/messages'
 
 const NOW = Date.parse('2026-10-17T12:00:00.000Z')
+/** The tests that read the mod's words read them in Traditional Chinese, whatever the machine's language. */
+const ZH = { options: { language: 'zh-TW' } } as const
 const PROJECT = 'C:\\Users\\dev\\Projects\\Acme 商店後台'
 const DIR = 'C:/home/.claude/project-pm'
 const PROJECT_FILE = `${DIR}/projects/${keyFile(projectKey(PROJECT))}.json`
@@ -98,7 +102,7 @@ function world(on: On, self: string, files: Files, archived: string[] = [], host
 
 const START = { cwd: PROJECT, surface: 'desktop', isInteractive: true } as const
 
-test('a session keeps its own task list and recap on disk', async ($, on) => {
+test('a session keeps its own task list and recap on disk', ZH, async ($, on) => {
   const files: Files = new Map()
   mock.clock(on, { now: NOW })
   world(on, 'local_me', files)
@@ -118,7 +122,7 @@ test('a session keeps its own task list and recap on disk', async ($, on) => {
   expect(end.plan.every((s: { status: string }) => s.status === 'completed')).toBe(true)
 })
 
-test('the PM board puts what is left first, and the ledger tracks what was asked', async ($, on) => {
+test('the PM board puts what is left first, and the ledger tracks what was asked', ZH, async ($, on) => {
   const files: Files = new Map()
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
   files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { plan: [{ content: '畫表格', status: 'completed' }, { content: '加篩選', status: 'pending' }] })))
@@ -145,7 +149,7 @@ test('the PM board puts what is left first, and the ledger tracks what was asked
   expect(assigned).not.toMatch(/尚未指派負責/)
 })
 
-test('the pane shows the project, and archives after a confirm', async ($, on) => {
+test('the pane shows the project, and archives after a confirm', ZH, async ($, on) => {
   const files: Files = new Map()
   const archived: string[] = []
   const item = (id: number, status: string) => ({ id, text: `項目 ${id}`, owner: 'local_open', status, note: '', createdAt: NOW, updatedAt: NOW })
@@ -207,7 +211,7 @@ test('work whose CI is still running is never done', () => {
   expect(said('已修好返回鍵。')).toBe('done')
 })
 
-test('the ledger will not close an item while its session waits on CI', async ($, on) => {
+test('the ledger will not close an item while its session waits on CI', ZH, async ($, on) => {
   const files: Files = new Map()
   const item = { id: 1, text: '列表頁加匯出 CSV', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
@@ -228,7 +232,7 @@ test('the ledger will not close an item while its session waits on CI', async ($
   expect(JSON.parse(files.get(PROJECT_FILE)!).ledger[0].status).toBe('done')
 })
 
-test('a session the app did not know at its start is tracked once it is known', async ($, on) => {
+test('a session the app did not know at its start is tracked once it is known', ZH, async ($, on) => {
   const files: Files = new Map()
   const clock = mock.clock(on, { now: NOW })
   let isKnown = false
@@ -248,7 +252,7 @@ test('a session the app did not know at its start is tracked once it is known', 
   expect(kept.plan).toEqual([{ content: '合併欄位', status: 'in_progress' }])
 })
 
-test('an empty track does not hide a transcript that says CI is still running', async ($, on) => {
+test('an empty track does not hide a transcript that says CI is still running', ZH, async ($, on) => {
   const files: Files = new Map()
   const item = { id: 1, text: '合併重複的出貨日期欄位', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
@@ -280,7 +284,7 @@ test('an empty track does not hide a transcript that says CI is still running', 
   await ui.unmount()
 })
 
-test('a recap stands only for the turn that wrote it', async ($, on) => {
+test('a recap stands only for the turn that wrote it', ZH, async ($, on) => {
   const files: Files = new Map()
   const clock = mock.clock(on, { now: NOW })
   world(on, 'local_me', files)
@@ -302,7 +306,7 @@ test('a recap stands only for the turn that wrote it', async ($, on) => {
   expect(statusOf(idle, kept, undefined, NOW + 31 * 60000)).toBe('done')
 })
 
-test('a track that missed later turns gives way to the transcript', async ($, on) => {
+test('a track that missed later turns gives way to the transcript', ZH, async ($, on) => {
   const files: Files = new Map()
   const item = { id: 1, text: '商品總覽頁面', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
@@ -339,7 +343,7 @@ test('a track that missed later turns gives way to the transcript', async ($, on
   expect(closed).toMatch(/已更新工作項目 T-01/)
 })
 
-test('GitHub decides whether CI the words left running is still running', async ($, on) => {
+test('GitHub decides whether CI the words left running is still running', ZH, async ($, on) => {
   const files: Files = new Map()
   const item = { id: 1, text: '商品總覽頁面', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
@@ -410,7 +414,7 @@ test('the CI a session names: a run id, else a commit', () => {
   expect(ciTarget('2.4.0 已推上 main，CI 還在跑')).toBe(null)
 })
 
-test('an owner working from another project is not lost; only one gone from the list is', async ($, on) => {
+test('an owner working from another project is not lost; only one gone from the list is', ZH, async ($, on) => {
   const files: Files = new Map()
   const item = (id: number, owner: string) => ({ id, text: `項目 ${id}`, owner, status: 'open', note: '', createdAt: NOW, updatedAt: NOW })
   files.set(
@@ -439,7 +443,7 @@ test('an owner working from another project is not lost; only one gone from the 
   await ui.unmount()
 })
 
-test('after /reload-plugins the PM gets its tools back on its next turn', async ($, on) => {
+test('after /reload-plugins the PM gets its tools back on its next turn', ZH, async ($, on) => {
   const files: Files = new Map()
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
   mock.clock(on, { now: NOW })
@@ -459,7 +463,7 @@ test('after /reload-plugins the PM gets its tools back on its next turn', async 
   expect(registered).toEqual(['board', 'ledger'])
 })
 
-test('a session waiting on its own background commands is running in the background, not stopped', async ($, on) => {
+test('a session waiting on its own background commands is running in the background, not stopped', ZH, async ($, on) => {
   const files: Files = new Map()
   const clock = mock.clock(on, { now: NOW })
   world(on, 'local_me', files)
@@ -501,7 +505,7 @@ test('a session waiting on its own background commands is running in the backgro
   expect(statusOf(later, file(), undefined, later.at + 60000)).toBe('open')
 })
 
-test('words of background work keep a session with open steps off the stopped list', async ($, on) => {
+test('words of background work keep a session with open steps off the stopped list', ZH, async ($, on) => {
   const files: Files = new Map()
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
   const at = Date.parse('2026-10-17T11:50:00.000Z')
@@ -525,7 +529,7 @@ test('words of background work keep a session with open steps off the stopped li
   expect(board).not.toMatch(/\[中斷・未完成\] 「商品列表頁」/)
 })
 
-test('the PM gets its tools back whenever the engine has dropped them', async ($, on) => {
+test('the PM gets its tools back whenever the engine has dropped them', ZH, async ($, on) => {
   const files: Files = new Map()
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
   const clock = mock.clock(on, { now: NOW })
@@ -624,7 +628,7 @@ test('words that leave work undelivered, and words that only name it', () => {
   expect(named.filter(t => undeliveredOf(t))).toEqual([])
 })
 
-test('a session whose words leave its work undelivered is not ended, however ticked its list', async ($, on) => {
+test('a session whose words leave its work undelivered is not ended, however ticked its list', ZH, async ($, on) => {
   const files: Files = new Map()
   const item = { id: 1, text: '商品圖片可貼連結上傳', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
@@ -659,7 +663,7 @@ test('a session whose words leave its work undelivered is not ended, however tic
   expect(await close({ force: true, note: '使用者確認 2.4.2 已上線' })).toMatch(/已更新工作項目 T-01/)
 })
 
-test('a commit kept here until the PM confirms is undelivered until git shows it pushed', async ($, on) => {
+test('a commit kept here until the PM confirms is undelivered until git shows it pushed', ZH, async ($, on) => {
   const files: Files = new Map()
   const item = { id: 1, text: '收緊背景判斷', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
@@ -751,7 +755,7 @@ test('the CI a report names: nearest its own CI words first, never part of an id
   expect(ciTargets('CI 還在跑：https://github.com/o/r/actions/runs/41022337760，前一次是 run 39030000001。').runs[0]).toBe('41022337760')
 })
 
-test('GitHub is asked about a commit of this repository, else about its HEAD', async ($, on) => {
+test('GitHub is asked about a commit of this repository, else about its HEAD', ZH, async ($, on) => {
   const files: Files = new Map()
   const at = Date.parse('2026-10-17T11:50:00.000Z')
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
@@ -881,7 +885,7 @@ test('a cancelled run is no failure: left out when its workflow ran again, else 
   expect(betterCi('unknown', 'failure')).toBe('failure')
 })
 
-test('a fix pushed after a cancelled or failed commit is what CI waits on', async ($, on) => {
+test('a fix pushed after a cancelled or failed commit is what CI waits on', ZH, async ($, on) => {
   const files: Files = new Map()
   const item = { id: 1, text: '商品列表頁加匯出 CSV', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
@@ -969,4 +973,112 @@ test('a fix pushed after a cancelled or failed commit is what CI waits on', asyn
   expect(shown).not.toMatch(/CI 失敗・需處理\] 「商品列表頁」/)
   const refused = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done' } as never)) as { result?: unknown }).result)
   expect(refused).toMatch(/無法將 T-01 標記為完成：負責的 Session「商品列表頁」CI 尚未跑完/)
+})
+
+test('both languages say every message, with the same values to fill in', () => {
+  const keys = (lang: Lang) => Object.keys(MESSAGES[lang]).sort()
+  expect(keys('en')).toEqual(keys('zh-TW'))
+  const mismatched = keys('en').filter(key => {
+    const k = key as MessageKey
+    return placeholders(MESSAGES.en[k]).join() !== placeholders(MESSAGES['zh-TW'][k]).join()
+  })
+  expect(mismatched).toEqual([])
+  expect(keys('en').filter(key => !MESSAGES.en[key as MessageKey].trim() || !MESSAGES['zh-TW'][key as MessageKey].trim())).toEqual([])
+})
+
+test('the language: the option when it names one, else the system, any Chinese reading Traditional', () => {
+  expect(resolveLang('auto', 'zh-TW')).toBe('zh-TW')
+  expect(resolveLang(undefined, 'zh-Hant-HK')).toBe('zh-TW')
+  expect(resolveLang('auto', 'zh-HK')).toBe('zh-TW')
+  // Simplified Chinese reads Traditional rather than English.
+  expect(resolveLang('auto', 'zh-CN')).toBe('zh-TW')
+  expect(resolveLang('auto', 'zh-Hans-SG')).toBe('zh-TW')
+  expect(resolveLang('auto', 'en-US')).toBe('en')
+  expect(resolveLang('auto', 'ja-JP')).toBe('en')
+  expect(resolveLang('auto', '')).toBe('en')
+  expect(resolveLang('en', 'zh-TW')).toBe('en')
+  expect(resolveLang('zh-TW', 'en-US')).toBe('zh-TW')
+  expect(resolveLang('fr', 'fr-FR')).toBe('en')
+
+  const was = getLang()
+  setLang('en')
+  expect(t('time.hours', { n: 1 })).toBe('1 hour ago')
+  expect(t('time.days', { n: 3 })).toBe('3 days ago')
+  expect(t('board.hidden', { n: 1 })).toMatch(/^1 more ended session with nothing left is not listed/)
+  setLang('zh-TW')
+  expect(t('time.hours', { n: 1 })).toBe('1 小時前')
+  setLang(was)
+})
+
+test('in English: the board, the ledger and the pane', { options: { language: 'en' } }, async ($, on) => {
+  const files: Files = new Map()
+  const item = (id: number, status: string, owner: string | null) => ({ id, text: `Item ${id}`, owner, status, note: '', createdAt: NOW, updatedAt: NOW })
+  files.set(
+    PROJECT_FILE,
+    JSON.stringify({ key: projectKey(PROJECT), name: 'Acme shop admin', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item(1, 'done', 'local_open'), item(2, 'open', 'local_ask'), item(3, 'open', null)], nextId: 4 }),
+  )
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { plan: [{ content: 'Draw the table', status: 'completed' }, { content: 'Add filters', status: 'pending' }] })))
+  files.set(`${DIR}/sessions/local_ask.json`, JSON.stringify(track('local_ask', { lastAnswer: 'Pushed to main; CI is still running.' })))
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+  await clock.advance(400)
+
+  const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(board).toMatch(/^# Project status: /)
+  expect(board).toMatch(/## Needs attention/)
+  expect(board).toMatch(/- \[Stopped · unfinished\] "商品列表頁" \(local_open\) stopped with 1 step left on its task list: Add filters/)
+  expect(board).toMatch(/- \[Waiting on CI · unfinished\] "移除舊版優惠欄位" \(local_ask\) last said CI has not finished/)
+  expect(board).toMatch(/- \[Unassigned\] Work item T-03 "Item 3" has no owning session yet/)
+  expect(board).toMatch(/Last active 10 min ago/)
+  // Only the data stays as it was written: the sessions' titles, the project's folder, a transcript's words.
+  expect(board.replace(/商品列表頁|移除舊版優惠欄位|金流對帳|Acme 商店後台|已修好。/g, '')).not.toMatch(/[一-鿿]/)
+
+  const refused = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 2, status: 'done' } as never)) as { result?: unknown }).result)
+  expect(refused).toMatch(/^Cannot mark T-02 done: The owning session "移除舊版優惠欄位" is waiting on CI \(last report: /)
+  expect(refused).toMatch(/pass force: true/)
+
+  const ui = await $.ui.mount({
+    plugin: 'project-pm',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: 'project-pm',
+    props: { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 40 } },
+  } as never)
+  expect(await ui.find({ type: 'Text', text: 'Work items done 1/3' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Waiting on CI' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Unfinished' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Not finished' })).toBeDefined()
+  await ui.press({ key: 'archive:local_open' })
+  expect(await ui.find({ type: 'Text', text: 'Archive it? 1 step left' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('/pm lang switches the language and saves it as the option', { options: { language: 'zh-TW' } }, async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  mock.clock(on, { now: NOW })
+  const saved: { key: string; value: unknown }[] = []
+  let refusal: string | null = null
+  on('config.set', ($, e) => {
+    if (refusal) return { deny: refusal }
+    saved.push({ key: e.key, value: e.value })
+
+    return { value: e.value }
+  })
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+  const pm = async (args: string) => String(((await $.command.run({ command: 'pm', args } as never)) as { text?: unknown }).text)
+  const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+
+  expect(await board()).toMatch(/^# 專案狀態報告：/)
+  expect(await pm('lang en')).toBe('The board now speaks en.')
+  expect(saved).toEqual([{ key: 'project-pm.language', value: 'en' }])
+  expect(await board()).toMatch(/^# Project status: /)
+
+  expect(await pm('lang')).toBe('Usage: /pm lang en, /pm lang zh-TW or /pm lang auto (follow the system). Now: en.')
+
+  refusal = 'locked by policy'
+  expect(await pm('lang zh-TW')).toBe('看板語言已在這個 Session 改為 zh-TW，但無法存進設定（locked by policy）；下次啟動會恢復原設定。')
+  expect(await board()).toMatch(/^# 專案狀態報告：/)
 })

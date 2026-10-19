@@ -34,6 +34,7 @@ import {
   undeliveredOf,
 } from './sessions'
 import type { CiRun, Project, Status } from './sessions'
+import { t } from './messages'
 
 // The engine reads each module's state refs from its own source: these name the same values as the other modules'.
 const me = atom({ plugin: 'project-pm', key: 'me' } as const, null as Me | null)
@@ -118,7 +119,7 @@ export async function saveMine($: EngineInterface) {
   try {
     await $.fs.write(`${await dataDir($)}/sessions/${track.id}.json`, JSON.stringify(track))
   } catch (err) {
-    $.ui.log(`project-pm: 寫不進 Session 紀錄：${reason(err)}`)
+    $.ui.log(t('log.cannotWrite', { reason: reason(err) }))
   }
 }
 
@@ -207,7 +208,7 @@ export async function readLastWord($: EngineInterface, one: Session): Promise<La
   try {
     const result = await $.mcp.call(MGMT, 'list_events', { session_id: one.id, limit: 12 })
     const text = textOf(result)
-    if (result.isError) return { said: '', isAsking: false, isWaiting: false, activity: one.lastActivityAt, error: text || '讀不到紀錄' }
+    if (result.isError) return { said: '', isAsking: false, isWaiting: false, activity: one.lastActivityAt, error: text || t('error.noTranscript') }
 
     return parseLastWord(text, one.lastActivityAt)
   } catch (err) {
@@ -491,10 +492,10 @@ export async function announce($: EngineInterface) {
   for (const [id, status] of now_) {
     if (before.get(id) === status) continue
     const title = state.list.find(s => s.id === id)?.title ?? id
-    if (status === 'asking') $.ui.toast(`「${title}」待你回覆`)
-    if (status === 'failed') $.ui.toast(`「${title}」的 CI 失敗了`)
-    if (status === 'unreleased') $.ui.toast(`「${title}」已停下，但回報尚未交付`)
-    if (status === 'open') $.ui.toast(`「${title}」已停止，仍有 ${openSteps(all[id]).length} 項步驟未完成`)
+    if (status === 'asking') $.ui.toast(t('toast.asking', { title }))
+    if (status === 'failed') $.ui.toast(t('toast.failed', { title }))
+    if (status === 'unreleased') $.ui.toast(t('toast.unreleased', { title }))
+    if (status === 'open') $.ui.toast(t('toast.open', { title, n: openSteps(all[id]).length }))
   }
 }
 
@@ -509,7 +510,7 @@ export async function refresh($: EngineInterface, isForced = false) {
   try {
     const result = await $.mcp.call(MGMT, 'list_sessions', { limit: 100 })
     const text = textOf(result)
-    if (result.isError) throw new Error(text || '讀取 Session 清單失敗')
+    if (result.isError) throw new Error(text || t('error.listFailed'))
     const list = parseSessions(text)
     await update($, sessions, () => ({ list, fetchedAt: started, error: null }))
     await readTracks($, list)
@@ -532,20 +533,8 @@ export function refreshSoon($: EngineInterface, ms = 0) {
 
 // ── Being the PM ──
 
-export const ROLE = (self: Me) => `# 你是「${self.projectName}」專案的 PM
-
-這個 Session 是專案「${self.projectName}」（${self.projectPath}）的 PM。使用者只跟你說話，靠你確保這個專案沒有任何工作遺漏。你的工作是掌握狀況、派工、追蹤、驗收，不是自己寫程式。
-
-規則：
-1. 使用者問進度、問有沒有漏掉、或你要回報之前，先呼叫 ${BOARD_TOOL} 看最新看板，不要憑記憶回答。
-2. 使用者交代新工作：先用 ${LEDGER_TOOL}（action: "add"）登記為工作項目，再決定交給現有 Session（SendMessage，to 填它的 local_… id）或開新 Session（start_session），派出後用 ledger update 填上 owner。
-3. 不要自己動手改專案的程式碼；實作交給子 Session。使用者明確要你自己做時才例外。
-4. CI 還在跑、還沒部署完成的工作一律不算完成：負責 Session 狀態為「等待 CI」「CI 失敗」「待發布」「執行中」「背景執行」「待回覆」或「未完成」時，ledger 會拒絕結案。
-5. 一個工作項目只有在你確認對應 Session 真的做完（看板上沒有未完成步驟、收尾摘要沒提到還沒做的事，必要時用 list_events 看它的紀錄）之後，才用 ledger update 標成 done。
-6. 說「都完成了」之前，看板的「需要處理」必須是空的、工作項目沒有 open；不是的話，逐條列出還差什麼。
-7. 子 Session 在等使用者回覆時，把它的問題原文轉述給使用者，使用者回答後用 SendMessage 轉達回去。
-8. 封存 Session 前先確認它沒有未完成步驟、沒有開著的 PR，並問過使用者。
-9. 提到 Session 時用 [標題](#local_…) 連結它。`
+/** The PM's instructions, in the language the mod speaks now. */
+export const ROLE = (self: Me) => t('role.text', { project: self.projectName, path: self.projectPath, board: BOARD_TOOL, ledger: LEDGER_TOOL })
 
 /**
  * Puts the PM's tools back when the engine has dropped them: a reload of the module (/reload-plugins,
@@ -556,42 +545,40 @@ export async function ensureTools($: EngineInterface) {
   const self = await read($, me)
   if (!self?.isPm) return
   try {
-    const names = new Set((await $.tool.list()).map(t => t.name))
+    const names = new Set((await $.tool.list()).map(tool => tool.name))
     if (names.has(BOARD_TOOL) && names.has(LEDGER_TOOL)) return
     await registerTools($)
   } catch (err) {
-    $.ui.log(`project-pm: 無法重新註冊 PM 工具：${reason(err)}`)
+    $.ui.log(t('log.cannotRegister', { reason: reason(err) }))
   }
 }
 
 export async function registerTools($: EngineInterface) {
   await $.tool.register({
     name: 'board',
-    description:
-      '專案狀態報告：列出此專案所有子 Session 的狀態（執行中、待回覆、CI 失敗、等待 CI、待發布、中斷・未完成、背景執行、已結束；CI 狀態會用 gh 向 GitHub 確認）、任務清單進度、最新指令與收尾摘要，以及工作項目和需要處理的事項。回報進度或判斷是否有遺漏前必須先呼叫。',
+    description: t('tool.board.description'),
     inputSchema: {
       type: 'object',
       properties: {
-        scope: { type: 'string', enum: ['project', 'all'], description: 'project（預設）只看這個專案；all 看所有專案。' },
-        include_done: { type: 'boolean', description: '一併列出已結束且無待辦的 Session 與已完成的工作項目。預設 false。' },
+        scope: { type: 'string', enum: ['project', 'all'], description: t('tool.board.scope') },
+        include_done: { type: 'boolean', description: t('tool.board.includeDone') },
       },
     },
     isDeferred: false,
   })
   await $.tool.register({
     name: 'ledger',
-    description:
-      '專案 PM 的工作項目清單：使用者交代的每件工作都要登記在這裡，直到確認完成。顯示編號為 T-01 形式，操作時 id 填數字。add 新增（text 必填，owner 可填負責的 local_… Session id）；update 改 owner、status（open / done / dropped）或 note；list 列出全部。',
+    description: t('tool.ledger.description'),
     inputSchema: {
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['add', 'update', 'list'] },
-        id: { type: 'number', description: 'update 時要修改的工作項目 id（T-03 填 3）' },
-        text: { type: 'string', description: '工作項目內容（add 必填；update 時可改寫）' },
-        owner: { type: 'string', description: '負責的 Session id（local_…）；空字串表示取消指派' },
+        id: { type: 'number', description: t('tool.ledger.id') },
+        text: { type: 'string', description: t('tool.ledger.text') },
+        owner: { type: 'string', description: t('tool.ledger.owner') },
         status: { type: 'string', enum: ['open', 'done', 'dropped'] },
-        note: { type: 'string', description: '備註：進度、驗收結果、為什麼放棄' },
-        force: { type: 'boolean', description: '負責 Session 仍在等 CI 或未完成時，強制結案。只有使用者明確確認時才能用，且 note 必填。' },
+        note: { type: 'string', description: t('tool.ledger.note') },
+        force: { type: 'boolean', description: t('tool.ledger.force') },
       },
       required: ['action'],
     },
@@ -601,30 +588,28 @@ export async function registerTools($: EngineInterface) {
 
 export async function claim($: EngineInterface): Promise<string> {
   const self = await identify($)
-  if (!self?.id) return '無法取得此 Session 的 id（可能不在桌面版中），無法擔任 PM。'
-  if (self.isScratch) return '此 Session 位於臨時資料夾，不屬於任何專案，無法擔任 PM。'
+  if (!self?.id) return t('claim.noId')
+  if (self.isScratch) return t('claim.scratch')
   const project = await loadProject($, self.projectKey, self.projectName, self.projectPath)
   const before = project.pmId
   await saveProject($, { ...project, pmId: self.id, isDismissed: false })
   await update($, me, m => (m ? { ...m, isPm: true } : m))
   await registerTools($)
   statusesBefore = null
-  await $.ui.open({ id: PANE, title: `${self.projectName} · PM` })
+  await $.ui.open({ id: PANE, title: t('pane.titlePm', { project: self.projectName }) })
   refreshSoon($)
 
-  return before && before !== self.id
-    ? `此 Session 已接任「${self.projectName}」的 PM（原 PM：${before}）。`
-    : `此 Session 已擔任「${self.projectName}」的 PM。`
+  return before && before !== self.id ? t('claim.tookOver', { project: self.projectName, before }) : t('claim.done', { project: self.projectName })
 }
 
 export async function release($: EngineInterface): Promise<string> {
   const self = await read($, me)
-  if (!self?.isPm) return '此 Session 目前不是 PM。'
+  if (!self?.isPm) return t('release.notPm')
   const project = await loadProject($, self.projectKey, self.projectName, self.projectPath)
   if (project.pmId === self.id) await saveProject($, { ...project, pmId: null })
   await update($, me, m => (m ? { ...m, isPm: false } : m))
 
-  return `此 Session 已卸任「${self.projectName}」的 PM；工作項目保留於專案中，由下一任 PM 接手。`
+  return t('release.done', { project: self.projectName })
 }
 
 export async function startPmSession($: EngineInterface) {
@@ -637,19 +622,19 @@ export async function startPmSession($: EngineInterface) {
       context: 'fresh',
       title: `${self.projectName} · PM`,
       name: 'pm',
-      prompt: `${CLAIM} 你是「${self.projectName}」專案的 PM。先呼叫 ${BOARD_TOOL} 看所有 Session 的狀態，再用幾句話向使用者報告：哪些在等他回覆、哪些停下但任務清單還有步驟、工作項目有沒有沒完成的。`,
-      background: `使用者希望每個專案都有一個 PM Session：使用者只跟 PM 說話，PM 追蹤專案「${self.projectName}」（${self.projectPath}）裡所有子 Session 的工作狀態與工作項目，確保沒有工作遺漏。project-pm Mod 會在這個 Session 讀到開頭的標記時把它設成 PM，並提供看板與工作項目工具。`,
+      prompt: t('start.prompt', { claim: CLAIM, project: self.projectName, board: BOARD_TOOL }),
+      background: t('start.background', { project: self.projectName, path: self.projectPath }),
       use_worktree: false,
     }
     // From a worktree, the PM still sits at the repository itself.
     if (mine && mine.cwd.replace(/[\\/]+$/, '') !== self.projectPath) args.cwd = self.projectPath
     const result = await $.mcp.call(STARTER, 'start_session', args)
     const text = textOf(result)
-    if (result.isError) throw new Error(text || '開不了新 Session')
-    await update($, notice, () => ({ tone: 'good', text: `已建立 PM Session「${self.projectName} · PM」，可在側欄開啟。` }))
+    if (result.isError) throw new Error(text || t('error.cannotStart'))
+    await update($, notice, () => ({ tone: 'good', text: t('notice.pmCreated', { project: self.projectName }) }))
     await update($, isBandHidden, () => true)
   } catch (err) {
-    await update($, notice, () => ({ tone: 'bad', text: `無法自動建立 PM Session（${reason(err)}）。請手動開啟新 Session 並執行 /pm。` }))
+    await update($, notice, () => ({ tone: 'bad', text: t('notice.pmFailed', { reason: reason(err) }) }))
   } finally {
     await update($, busy, () => null)
   }
@@ -667,16 +652,16 @@ export async function archive($: EngineInterface, one: Session) {
   await update($, busy, () => one.id)
   await update($, confirm, () => null)
   try {
-    const result = await $.mcp.call(MGMT, 'archive_session', { session_id: one.id, reason: `專案 PM：封存「${one.title}」` })
+    const result = await $.mcp.call(MGMT, 'archive_session', { session_id: one.id, reason: t('archive.reason', { title: one.title }) })
     const text = textOf(result)
     if (result.isError || /not archived|refus|declin|denied|still working|cancel/i.test(text)) {
-      await update($, notice, () => ({ tone: 'bad', text: `「${one.title}」未封存：${text || '封存要求遭拒'}` }))
+      await update($, notice, () => ({ tone: 'bad', text: t('notice.notArchived', { title: one.title, why: text || t('archive.refused') }) }))
     } else {
       await update($, sessions, s => ({ ...s, list: s.list.filter(e => e.id !== one.id) }))
-      await update($, notice, () => ({ tone: 'good', text: `已封存「${one.title}」，可於側欄的封存區復原。` }))
+      await update($, notice, () => ({ tone: 'good', text: t('notice.archived', { title: one.title }) }))
     }
   } catch (err) {
-    await update($, notice, () => ({ tone: 'bad', text: `「${one.title}」未封存：${reason(err)}` }))
+    await update($, notice, () => ({ tone: 'bad', text: t('notice.notArchived', { title: one.title, why: reason(err) }) }))
   } finally {
     await update($, busy, () => null)
   }
@@ -693,7 +678,7 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
   const self = await identify($)
   await refresh($, true)
   const state = await read($, sessions)
-  if (state.error && state.list.length === 0) return `讀不到 Session 清單：${state.error}`
+  if (state.error && state.list.length === 0) return t('board.cannotRead', { error: state.error })
   const all = await read($, tracks)
   const words = await read($, lastWords)
   const ci = await read($, ciChecks)
@@ -741,48 +726,53 @@ async function ownerBlocker($: EngineInterface, ownerId: string): Promise<string
     if (isCiPending(said)) {
       const check = await checkCi($, ownerId, track.cwd, said, track.turnAt)
       if (check.state !== 'success') {
-        const why = check.state === 'failure' ? `GitHub 上的 CI（${check.target}）失敗` : '最後回報 CI 尚未跑完'
+        const why = check.state === 'failure' ? t('blocker.ciFailedOn', { target: check.target }) : t('blocker.ciRunning')
 
-        return `負責的 Session「${title}」${why}（${clip(said, 120)}）。`
+        return t('blocker.quoted', { title, why, said: clip(said, 120) })
       }
     }
     const left = undeliveredOf(said)
     if (!left || (await checkPush($, ownerId, track.cwd, said))?.isPushed) return null
 
-    return `負責的 Session「${title}」最後回報尚未交付（${deliveryText(left.kinds)}）（${clip(said, 120)}）。`
+    return t('blocker.quoted', { title, why: t('blocker.undelivered', { kinds: deliveryText(left.kinds) }), said: clip(said, 120) })
   }
   await checkPush($, ownerId, one.cwd, ciWords(track, words[ownerId]))
   const status = statusOf(one, track, words[ownerId], await $.clock.now(), (await read($, ciChecks))[ownerId], (await read($, pushChecks))[ownerId])
   const said = ciWords(track, words[ownerId])
-  const why: Partial<Record<Status, string>> = {
-    ci: 'CI 尚未跑完',
-    failed: 'GitHub 上的 CI 失敗',
-    unreleased: '最後回報尚未交付（未 commit、push 或發布）',
-    running: '仍在執行中',
-    waiting: '仍有背景作業在跑',
-    asking: '正在等使用者回覆',
-    open: '任務清單仍有未完成步驟',
-  }
+  const blocking: Partial<Record<Status, true>> = { ci: true, failed: true, unreleased: true, running: true, waiting: true, asking: true, open: true }
+  if (!blocking[status]) return null
+  const why = t(`blocker.why.${status as 'ci' | 'failed' | 'unreleased' | 'running' | 'waiting' | 'asking' | 'open'}`)
 
-  return why[status] ? `負責的 Session「${title}」${why[status]}${said ? `（最後回報：${clip(said, 120)}）` : ''}。` : null
+  return said ? t('blocker.lastReport', { title, why, said: clip(said, 120) }) : t('blocker.plain', { title, why })
 }
 
 export function ledgerText(items: LedgerItem[]): string {
-  if (items.length === 0) return '目前沒有工作項目。'
+  if (items.length === 0) return t('ledger.empty')
 
-  return items.map(i => `${itemCode(i.id)} (id ${i.id}) [${i.status}] ${i.text}｜負責：${i.owner ?? '未指派'}${i.note ? `｜備註：${i.note}` : ''}`).join('\n')
+  return items
+    .map(i =>
+      t('ledger.row', {
+        code: itemCode(i.id),
+        id: i.id,
+        status: i.status,
+        text: i.text,
+        owner: i.owner ?? t('ledger.unassigned'),
+        note: i.note ? t('board.itemNote', { note: i.note }) : '',
+      }),
+    )
+    .join('\n')
 }
 
 export async function ledger($: EngineInterface, input: Record<string, unknown>): Promise<string> {
   const self = await identify($)
-  if (!self || self.isScratch) return '此 Session 不屬於任何專案，沒有工作項目。'
+  if (!self || self.isScratch) return t('ledger.noProject')
   const project = await loadProject($, self.projectKey, self.projectName, self.projectPath)
   const now = await $.clock.now()
   const action = str(input.action)
   if (action === 'list') return ledgerText(project.ledger)
   if (action === 'add') {
     const text = str(input.text)?.trim()
-    if (!text) return 'add 需要 text。'
+    if (!text) return t('ledger.needText')
     const item: LedgerItem = {
       id: project.nextId,
       text,
@@ -794,18 +784,18 @@ export async function ledger($: EngineInterface, input: Record<string, unknown>)
     }
     await saveProject($, { ...project, ledger: [...project.ledger, item], nextId: project.nextId + 1 })
 
-    return `已新增工作項目 ${itemCode(item.id)}（id ${item.id}）。\n\n${ledgerText([...project.ledger, item])}`
+    return `${t('ledger.added', { code: itemCode(item.id), id: item.id })}\n\n${ledgerText([...project.ledger, item])}`
   }
   if (action === 'update') {
     const id = typeof input.id === 'number' ? input.id : Number(input.id)
     const item = project.ledger.find(i => i.id === id)
-    if (!item) return `找不到工作項目 id ${String(input.id)}。\n\n${ledgerText(project.ledger)}`
+    if (!item) return `${t('ledger.notFound', { id: String(input.id) })}\n\n${ledgerText(project.ledger)}`
     const status = str(input.status)
     if (status === 'done' && item.status !== 'done') {
       const owner = input.owner === undefined ? item.owner : str(input.owner) || null
       const blocker = owner ? await ownerBlocker($, owner) : null
       if (blocker && !(input.force === true && str(input.note)?.trim())) {
-        return `無法將 ${itemCode(id)} 標記為完成：${blocker}\n確認 CI 通過、部署完成後再結案；若使用者已明確確認可結案，帶 force: true 並在 note 寫明確認內容。\n\n${ledgerText(project.ledger)}`
+        return `${t('ledger.refused', { code: itemCode(id), blocker })}\n\n${ledgerText(project.ledger)}`
       }
     }
     const changed: LedgerItem = {
@@ -819,9 +809,9 @@ export async function ledger($: EngineInterface, input: Record<string, unknown>)
     const list = project.ledger.map(i => (i.id === id ? changed : i))
     await saveProject($, { ...project, ledger: list })
 
-    return `已更新工作項目 ${itemCode(id)}。\n\n${ledgerText(list)}`
+    return `${t('ledger.updated', { code: itemCode(id) })}\n\n${ledgerText(list)}`
   }
 
-  return 'action 要是 add、update 或 list。'
+  return t('ledger.badAction')
 }
 
