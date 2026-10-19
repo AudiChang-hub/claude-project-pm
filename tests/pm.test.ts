@@ -212,3 +212,23 @@ test('the ledger will not close an item while its session waits on CI', async ($
   await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done', force: true, note: '使用者確認 CI 已在 GitHub 上通過' } as never)
   expect(JSON.parse(files.get(PROJECT_FILE)!).ledger[0].status).toBe('done')
 })
+
+test('a session the app did not know at its start is tracked once it is known', async ($, on) => {
+  const files: Files = new Map()
+  const clock = mock.clock(on, { now: NOW })
+  let isKnown = false
+  // Registered ahead of the world's own mcp.call hook: get_session fails until the app has registered the session.
+  on('mcp.call', { tool: 'get_session' }, ($, e, next) =>
+    isKnown ? next(e) : { value: { content: [{ type: 'text' as const, text: 'session not found' }], isError: true } },
+  )
+  world(on, 'local_late', files)
+  on('tool.call', { tool: 'mcp__ccd_turn__update_plan' }, () => ({ result: 'ok' }))
+  await $.session.start(START)
+  expect(files.has(`${DIR}/sessions/local_late.json`)).toBe(false)
+
+  isKnown = true
+  await clock.advance(31_000)
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', items: [{ content: '合併欄位', status: 'in_progress' }] } as never)
+  const kept = JSON.parse(files.get(`${DIR}/sessions/local_late.json`)!)
+  expect(kept.plan).toEqual([{ content: '合併欄位', status: 'in_progress' }])
+})

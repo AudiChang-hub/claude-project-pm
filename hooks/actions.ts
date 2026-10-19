@@ -104,7 +104,22 @@ export async function saveMine($: EngineInterface) {
   }
 }
 
+/** When this session last asked the app who it is, so an unknown session asks again at most every 30 s. */
+let identifiedAt = 0
+
 export async function changeMine($: EngineInterface, change: (track: Track) => Track) {
+  if (!mine) {
+    // A session the app did not know yet at its start (or a module that just reloaded) asks again.
+    const now = await $.clock.now()
+    if (now - identifiedAt >= 30_000) {
+      identifiedAt = now
+      try {
+        await identify($)
+      } catch (err) {
+        $.ui.log(`project-pm: ${reason(err)}`)
+      }
+    }
+  }
   if (!mine) return
   mine = change(mine)
   await saveMine($)
@@ -112,9 +127,25 @@ export async function changeMine($: EngineInterface, change: (track: Track) => T
 
 // ── Who this session is ──
 
+/**
+ * Loads this session's track into the module. `me` is the host's and outlives a
+ * reload of the module; `mine` does not, so each reload loads it again.
+ */
+async function loadMine($: EngineInterface, id: string, title: string, cwd: string) {
+  if (mine?.id === id) return
+  const kept = await readJson<Track>($, `${await dataDir($)}/sessions/${id}.json`)
+  const base = kept ?? { id, title, cwd, plan: [], recap: null, ask: null, lastPrompt: '', lastAnswer: '', turnAt: 0, planAt: 0 }
+  mine = { ...base, title: title || base.title, cwd: cwd || base.cwd }
+  await saveMine($)
+}
+
 export async function identify($: EngineInterface): Promise<Me | null> {
   const known = await read($, me)
-  if (known?.id) return known
+  if (known?.id) {
+    await loadMine($, known.id, known.title, mine?.cwd ?? known.projectPath)
+
+    return known
+  }
   let id: string | null = null
   let title = ''
   let cwd = await $.session.cwd()
@@ -142,12 +173,7 @@ export async function identify($: EngineInterface): Promise<Me | null> {
     isPm: !!id && project.pmId === id,
   }
   await update($, me, () => found)
-  if (id && !mine) {
-    const kept = await readJson<Track>($, `${await dataDir($)}/sessions/${id}.json`)
-    mine = kept ?? { id, title, cwd, plan: [], recap: null, ask: null, lastPrompt: '', lastAnswer: '', turnAt: 0, planAt: 0 }
-    mine = { ...mine, title: title || mine.title, cwd }
-    void saveMine($)
-  }
+  if (id) await loadMine($, id, title, cwd)
 
   return found
 }
