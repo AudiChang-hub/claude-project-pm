@@ -348,7 +348,30 @@ const VERB = String.raw`commit(?:ted)?|push(?:ed)?|deploy(?:ed)?|release[sd]?|me
 /** A delivery verb, and those joined to it: 沒有 commit 或 push, not committed or pushed. */
 const VERBS = String.raw`(?:${VERB})(?![^\s，。,；;]{0,2}(?:設定|腳本|流程|文件|檔案|權限|環境|相關|說明|紀錄))(?:\s*(?:或|和|、|及|跟|與|也沒有?|/|／|,|and|or|nor)\s*(?:${VERB}))*`
 /** 尚未 commit, 還沒上線, 仍未 commit 或 push, 也沒有 push: the negation a few characters before the verb (a verb after 的 is a noun: 還沒公開的 commit). */
-const NOT_DONE = new RegExp(String.raw`(?:尚未|還沒有?|仍未|仍然沒有|並未|并未|沒有?|未)[^。，,；;：:\n]{0,4}?(?<!的\s*)(${VERBS})|\b(?:not(?: yet)?|haven't(?: yet)?|hasn't(?: yet)?|have not(?: yet)?|has not(?: yet)?|didn't|did not)\s+(?:been\s+)?(${VERBS})`, 'gi')
+const NOT_DONE = new RegExp(String.raw`(尚未|還沒有?|仍未|仍然沒有|並未|并未|沒有?|未)[^。，,；;：:\n]{0,4}?(?<!的\s*)(${VERBS})|\b(not(?: yet)?|haven't(?: yet)?|hasn't(?: yet)?|have not(?: yet)?|has not(?: yet)?|didn't|did not)\s+(?:been\s+)?(${VERBS})`, 'gi')
+/**
+ * A negation that says the work is still to come (還沒, 尚未, 未, not yet): it always counts. A bare one (沒有 push,
+ * didn't push) only says it was not done, which a report with no code to deliver may say of what was never needed.
+ */
+const YET = /還|尚|仍|^未$|yet/i
+/**
+ * Not needed: 不需要 push, 無需發布, 不用升版號, no need to push, nothing to commit. The kinds it names are settled,
+ * like done ones (版號, 標籤 and tag are a release's).
+ */
+const NO_NEED = new RegExp(
+  String.raw`(?:不需要|不需|不用|無需|無須|毋需|毋須|不必|沒必要)\s*(?:再|做|進行)?\s*((?:${VERBS})|版號|升版|打標籤|標籤|tag)|\b(?:no need to|nothing to|don't need to|do not need to|doesn't need to|does not need to)\s+(?:be\s+)?((?:${VERBS}))`,
+  'gi',
+)
+/**
+ * The work has no code to deliver: 沒有改程式, 沒有程式變更, 無程式變更, 純資料修正, no code changes. Anywhere in the
+ * report, it lets a bare negation of commit, push or release with nothing else as its subject (也沒有 push) go.
+ */
+const NO_CODE =
+  /沒有?(?:修?改|動|變更|修改)(?:任何)?(?:程式|code)|(?:沒有|無|未有)(?:任何)?程式(?:碼)?(?:變更|修改|異動|改動)|純資料(?:修正|修改|變更|操作|更新)|只(?:改|動|修正)了?資料|\bno code (?:changes?|change was made)|\b(?:didn't|did not) (?:change|touch) (?:any )?code|\bdata[- ]only (?:fix|change|update)/i
+/** The work waits on something before it is done: 等 PM 確認, 確認後再推, pending, until. A bare negation then counts. */
+const WAITING_TONE = /等(?!於)|待(?!發布|處理事項)|之後(?:再|才)|稍後|晚點|once\b|\buntil\b|\bpending\b|\bwaiting\b|\bafter (?:the )?(?:PM|review|approval|go-ahead)/i
+/** What may stand before a bare negation for it to be the report's own, with no other subject: 也沒有 push, 我也沒有 push. */
+const BARE_PREFIX = /^[\s,，、]*(?:(?:我們|我|也|都|並|而且|且|另外|同時|所以|因此|則|就|then|and|also|so|I|we)[\s,，、]*)*$/i
 /** 已推上 main, 已部署, 部署完成, 上線了, pushed to main: the same kinds done, which a later word may say. */
 const DONE = new RegExp(String.raw`(?:已經?|都已|也已|皆已)[^。，,；;：:\n]{0,4}?(${VERBS})|(${VERB})(?:完成|好了|成功|了)|\b(?:I|we|it|was|were|is|has been|have been)\s+(committed|pushed|deployed|released|merged|shipped)\b`, 'gi')
 /**
@@ -409,18 +432,33 @@ export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: strin
   // Rules, examples, quotes, someone else's work and what a clause disowns are gone (reportedText) before
   // anything is read: of what is left, a kind's last word stands.
   const plain = reportedText(text.replace(NOTHING_LEFT, ''))
-  for (const sentence of plain.split(/[。！？!?；;，,\n]+|\.\s+/)) {
-    if (!sentence.trim()) continue
-    const said: { at: number; kind: DeliveryKind; isLeft: boolean }[] = []
-    for (const m of sentence.matchAll(NOT_DONE)) {
-      // 版本 2.4.2 的未提交修改: undone, but someone else's, unless the owner named is this session.
-      const owner = /([^\s，,。]+(?:\s+[^\s，,。]+)?)\s*的\s*$/.exec(sentence.slice(0, m.index ?? 0))?.[1]
-      if (owner && !OWN.test(owner)) continue
-      for (const kind of verbsIn(m[1] ?? m[2] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: true })
+  const hasNoCode = NO_CODE.test(plain)
+  for (const whole of plain.split(/[。！？!?；;\n]+|\.\s+/)) {
+    // A wait anywhere in the sentence (沒有 push，等 PM 確認) keeps its bare negations: the work is still to come.
+    const isWaiting = WAITING_TONE.test(whole)
+    for (const sentence of whole.split(/[，,]+/)) {
+      if (!sentence.trim()) continue
+      const said: { at: number; kind: DeliveryKind; isLeft: boolean }[] = []
+      for (const m of sentence.matchAll(NOT_DONE)) {
+        // 版本 2.4.2 的未提交修改: undone, but someone else's, unless the owner named is this session.
+        const before = sentence.slice(0, m.index ?? 0)
+        const owner = /([^\s，,。]+(?:\s+[^\s，,。]+)?)\s*的\s*$/.exec(before)?.[1]
+        if (owner && !OWN.test(owner)) continue
+        // 沒有改程式，也沒有 push: nothing was there to push. Not 還沒 push (or "not pushed yet"), not 設定檔沒有 commit,
+        // not while it waits.
+        const isYet = YET.test(m[1] ?? m[3] ?? '') || /^\s*yet\b/i.test(sentence.slice((m.index ?? 0) + m[0].length))
+        if (hasNoCode && !isYet && !isWaiting && BARE_PREFIX.test(before)) continue
+        for (const kind of verbsIn(m[2] ?? m[4] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: true })
+      }
+      for (const m of sentence.matchAll(DONE)) for (const kind of verbsIn(m[1] ?? m[2] ?? m[3] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: false })
+      for (const m of sentence.matchAll(NO_NEED)) {
+        const named = m[1] ?? m[2] ?? ''
+        const kinds = /版號|升版|標籤|tag/i.test(named) ? (['release'] as const) : verbsIn(named)
+        for (const kind of kinds) said.push({ at: m.index ?? 0, kind, isLeft: false })
+      }
+      for (const m of sentence.matchAll(AWAITING_GO)) said.push({ at: m.index ?? 0, kind: 'release', isLeft: true })
+      for (const one of said.sort((a, b) => a.at - b.at)) last.set(one.kind, one.isLeft)
     }
-    for (const m of sentence.matchAll(DONE)) for (const kind of verbsIn(m[1] ?? m[2] ?? m[3] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: false })
-    for (const m of sentence.matchAll(AWAITING_GO)) said.push({ at: m.index ?? 0, kind: 'release', isLeft: true })
-    for (const one of said.sort((a, b) => a.at - b.at)) last.set(one.kind, one.isLeft)
   }
   const kinds = (['commit', 'push', 'release'] as const).filter(kind => last.get(kind))
 

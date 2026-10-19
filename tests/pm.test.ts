@@ -658,6 +658,52 @@ test("someone else's undone work, or work a session disowns, is not its own to d
   expect(kinds('部署腳本還沒動手改，2.4.2 還沒部署。')).toEqual(['release'])
 })
 
+test('work with no code to deliver is not left undelivered by a bare "no push"; work still to come is', () => {
+  const kinds = (text: string) => (undeliveredOf(text)?.kinds ?? []).join(',') || 'none'
+  // A real session's report on a data fix: nothing was ever going to be pushed.
+  const dataFix = '已寫入並複查通過，沒有改程式，也沒有 push。'
+  expect(kinds(dataFix)).toBe('none')
+  const idle = { id: 'x', title: 't', cwd: '', isRunning: false, lastActivityAt: new Date(NOW - 5 * 60000).toISOString(), isPinned: false, hasOpenPr: false }
+  expect(statusOf(idle, track('x', { lastAnswer: dataFix }) as never, undefined, NOW)).toBe('done')
+
+  const settled = [
+    // No code, anywhere in the report.
+    '這次是純資料修正。已寫入並複查通過。沒有 push。',
+    '純資料修正，已寫入並複查。我也沒有 commit 或 push。',
+    '沒有改程式，也沒有部署。',
+    'No code changes. Also, we did not push.',
+    // Not needed.
+    '不需要 push，也不需要升版號。',
+    '無需發布，資料已修正。',
+    '沒有 push，因為不需要 push。',
+    'No code changes, so nothing to commit or push.',
+    'No need to push; the data fix is applied and verified.',
+  ]
+  expect(settled.filter(t => kinds(t) !== 'none')).toEqual([])
+
+  const left: [string, string][] = [
+    // Still to come, whatever else the report says.
+    ['還沒 push。', 'push'],
+    ['Not pushed yet.', 'push'],
+    ['沒有改程式，但設定檔還沒 commit。', 'commit'],
+    ['沒有改程式，但設定檔沒有 commit。', 'commit'],
+    ['No code changes; the migration file is not committed.', 'commit'],
+    ['No code changes, but the config is not committed yet.', 'commit'],
+    ['沒有改程式。2.4.2 還沒上線。', 'release'],
+    ['沒有改程式，也還沒 push。', 'push'],
+    ['No code changes, and not pushed yet.', 'push'],
+    ['不需要 commit，但還沒 push。', 'push'],
+    // Waiting on a word before it goes out.
+    ['沒有 push，等 PM 確認。', 'push'],
+    ['沒有改程式，也沒有 push，等 PM 確認後再推。', 'push'],
+    // A bare "no push" with nothing to say there was nothing to push: a commit kept here until the PM confirms.
+    ['沒有 push。', 'push'],
+    ['也沒有 push。', 'push'],
+    ['沒有 push、也沒有打 tag。', 'push'],
+  ]
+  expect(left.filter(([text, want]) => kinds(text) !== want)).toEqual([])
+})
+
 test('a session whose words leave its work undelivered is not ended, however ticked its list', ZH, async ($, on) => {
   const files: Files = new Map()
   const item = { id: 1, text: '商品圖片可貼連結上傳', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
