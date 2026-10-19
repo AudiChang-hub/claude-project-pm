@@ -5,11 +5,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions match `version` in `.claude-plugin/plugin.json`.
 
-## [Unreleased]
+## [0.4.0] - 2026-10-19
 
 ### Added
 - *Not released* (待發布) status: a session whose latest recap or answer says its work is not delivered yet (not committed, pushed, released, deployed or live; 等 PM 放行) is never *Ended*, however ticked its task list, is listed under "needs attention", notifies the PM and blocks the ledger (`force` with a note still closes it). Sentences about a rule or an example, quoted words, someone else's work and double negatives do not count. When only a push is left and the words name the commit, the PM checks `git branch -r --contains` in the session's folder and the status clears once the commit is pushed. The third counter on the board is now *尚未完成* and counts it.
 - A session records the commands it starts in the background (`run_in_background`, or moved there), from their `backgroundTaskId` until their task notification (or `TaskStop`). While one has not reported back, the session shows as *In the background*, however long the command takes (up to 6 hours, since a session whose process ended never hears back), and the board lists them under the session.
+
+### Changed
+- The README images show the *Not released* status and the board's new *尚未完成* counter.
 
 ### Fixed
 - A session that ended its turn to wait on its own background work (tests running, CI to watch) showed as *Unfinished* and was listed under "needs attention" whenever its task list had steps left: open steps were checked before anything else. Running CI and background work now come first; words of background work count for 45 minutes in a session without the record.
@@ -58,7 +61,8 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 - A band above the prompt in projects without a PM, offering to start a PM session or make the current one the PM.
 - Notifications to the PM when a session starts waiting on the person or stops with steps left.
 
-[0.3.2]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.3.2
+[0.4.0]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.4.0
+[0.3.2]: https://github.com/AudiChang-hub/claude-project-pm/commit/f072ce8
 [0.3.1]: https://github.com/AudiChang-hub/claude-project-pm/commit/68af59e
 [0.3.0]: https://github.com/AudiChang-hub/claude-project-pm/commit/5f324d9
 [0.2.1]: https://github.com/AudiChang-hub/claude-project-pm/commit/4b0ead6

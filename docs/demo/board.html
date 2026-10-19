@@ -35,6 +35,7 @@
     --error: #c93a3a;
     --permission: #7552d6;
     --suggestion: #2f6bd8;
+    --planMode: #0f766e;
     --shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 40px 80px -30px rgba(60, 40, 20, .35), 0 12px 24px -12px rgba(60, 40, 20, .18);
     --sans: "Inter", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
     --mono: "JetBrains Mono", ui-monospace, monospace;
@@ -57,6 +58,7 @@
     --error: #f07070;
     --permission: #a78bfa;
     --suggestion: #6aa1ff;
+    --planMode: #2dd4bf;
     --shadow: 0 1px 0 rgba(255,255,255,.05) inset, 0 40px 80px -30px rgba(0,0,0,.7);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -65,7 +67,7 @@
 
   /* ── Hero canvas ── */
   .hero {
-    width: 1280px; height: 1040px; position: relative; overflow: hidden;
+    width: 1280px; height: 1240px; position: relative; overflow: hidden;
     background:
       radial-gradient(900px 600px at 78% 12%, rgba(217, 119, 87, .16), transparent 60%),
       radial-gradient(700px 700px at 8% 100%, rgba(139, 92, 246, .07), transparent 60%),
@@ -82,7 +84,7 @@
   h1 { font: 500 54px/1.04 var(--serif); letter-spacing: -.02em; margin-top: 22px; font-variation-settings: "opsz" 144; }
   h1 em { font-style: italic; color: var(--claude); padding-right: .14em; }
   .lede { margin-top: 20px; font-size: 17px; line-height: 1.55; color: var(--ink-2); max-width: 520px; }
-  .callouts { list-style: none; margin-top: 40px; display: grid; row-gap: 22px; }
+  .callouts { list-style: none; margin-top: 36px; display: grid; row-gap: 20px; }
   .callouts li { display: grid; grid-template-columns: 34px 1fr; column-gap: 16px; align-items: start; }
   .callouts b { display: block; font-weight: 600; font-size: 16px; letter-spacing: -.005em; }
   .callouts p { font-size: 14.5px; line-height: 1.5; color: var(--ink-2); margin-top: 4px; }
@@ -106,8 +108,8 @@
   }
   .pane-head { border-radius: 16px 16px 0 0; }
   /* Runs off the bottom of the canvas; the pins stand out to the left. */
-  .hero .pane { height: 968px; border-bottom: 0; border-radius: 16px 16px 0 0; clip-path: inset(-80px -80px 0 -80px); }
-  .hero .pane::after { content: ""; position: absolute; left: 1px; right: 1px; bottom: 0; height: 120px; background: linear-gradient(transparent, var(--canvas-2)); }
+  .hero .pane { height: 1168px; border-bottom: 0; border-radius: 16px 16px 0 0; clip-path: inset(-80px -80px 0 -80px); }
+  .hero .pane::after { content: ""; position: absolute; left: 1px; right: 1px; bottom: 0; height: 64px; background: linear-gradient(transparent, var(--canvas-2)); }
   .pane-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--pane-head); border-bottom: 1px solid var(--line); }
   .pane-head span { font-size: 13px; font-weight: 600; color: var(--ink); }
   .pane-head svg { color: var(--ink-3); }
@@ -201,19 +203,21 @@ const sessions = [
     summary: 'Pushed 8c41d2e; waiting for CI on GitHub Actions before merging.' },
   { pin: 4, status: 'open', title: 'Search ranking for in-stock items', ago: '41 分鐘前', plan: [C, C, C, P, _, _, _],
     current: 'Boost in-stock items in the ranker', summary: 'Indexed stock levels per warehouse; the ranker change is next.' },
+  { pin: 5, status: 'unreleased', title: 'Holiday banner on the home page', ago: '17 分鐘前', plan: [C, C, C, C, C],
+    caveat: 'Merged locally as a3f9c21; not pushed yet, waiting for your go-ahead to deploy.' },
   { status: 'ci', title: 'Export product list as CSV', ago: '8 分鐘前', plan: [C, C, C, C, C, C], pr: true,
     summary: 'Committed 4f2d9e1 and pushed. CI is still running on GitHub Actions; deploy once it passes.' },
   { status: 'running', title: 'Monthly payouts reconciliation', ago: '剛剛', plan: [C, C, P, _, _],
     current: 'Match payouts to orders by reference', summary: '指令：Reconcile October payouts against orders and flag mismatches' },
   { status: 'waiting', title: 'Image CDN backfill', ago: '5 分鐘前', plan: [C, C, C, C],
-    summary: 'Backfill is running in the background; about 20 minutes left.' },
+    summary: 'Backfill is still running in the background; about 20 minutes left.' },
 ]
 const ledger = [
   { id: 4, text: 'Export the product list as CSV', owner: 'Export product list as CSV', status: 'ci' },
   { id: 6, text: 'Fix tax rounding at checkout', owner: 'Fix tax rounding at checkout', status: 'failed' },
   { id: 7, text: 'Retire the v1 coupon fields', owner: 'Retire v1 coupon fields', status: 'asking' },
-  { id: 9, text: 'Rank in-stock items first in search', owner: 'Search ranking for in-stock items', status: 'open' },
-  { id: 10, text: 'Let shoppers save cards for checkout', owner: null },
+  { id: 11, text: 'Holiday banner on the home page', owner: 'Holiday banner on the home page', status: 'unreleased' },
+  { id: 12, text: 'Let shoppers save cards for checkout', owner: null },
 ]
 const items = { done: 4, total: 9 }
 const ended = 4
@@ -231,7 +235,7 @@ const ratio = items.done / items.total
 const open = ledger.length
 const unassigned = ledger.filter(i => !i.owner).length
 const pinOn = (n, c) => (hero && n ? `<div class="on-pane-pin" style="--c:${c}"><div class="pin">${n}</div></div>` : '')
-const PIN = { 1: 'var(--claude)', 2: '#e39200', 3: '#d94a4a', 4: '#d97757' }
+const PIN = { 1: 'var(--claude)', 2: '#e39200', 3: '#d94a4a', 4: '#d97757', 5: '#0d9488' }
 
 const metric = (value, label, color) => `
   <div class="metric">
@@ -250,7 +254,9 @@ const card = s => {
     <div class="caption trunc"><span class="medium" style="color:${colorVar(look.color)}">${look.label}</span><span class="dim">${meta.map(m => `　·　${m}`).join('')}</span></div>
     ${stepsSvg(s.plan, look.hex)}
     ${s.current ? `<div class="footnote trunc" style="${s.status === 'open' ? 'color:var(--claude)' : ''}">▸ ${esc(s.current)}${left > 1 ? `　（另 ${left - 1} 項）` : ''}</div>` : ''}
-    <div class="footnote dim trunc">${esc(s.summary)}</div>
+    ${s.caveat
+      ? `<div class="footnote trunc"><span class="medium" style="color:var(--warning)">需追蹤</span><span class="dim">${esc(s.caveat)}</span></div>`
+      : `<div class="footnote dim trunc">${esc(s.summary)}</div>`}
   </div>`
 }
 
@@ -316,10 +322,11 @@ document.getElementById('app').innerHTML = hero ? `
     <h1>Many sessions.<br><em>Nothing</em> slips.</h1>
     <p class="lede">One PM session per project keeps a live board of every Claude Code session you have running, and a ledger of everything you asked for.</p>
     <ol class="callouts">
-      ${callout(1, 'Progress is the work you asked for', 'The ring counts ledger items (T-01, T-02…) the PM has verified as done, not each session’s own checklist.')}
-      ${callout(2, 'Waiting on you comes first', 'Sessions blocked on your answer rise to the top with their question quoted, and the PM gets a toast.')}
-      ${callout(3, 'CI is not done until GitHub says so', 'A session that left CI running stays open; the PM asks GitHub with <code style="font:500 13px var(--mono)">gh</code>, and a failed run is flagged.')}
-      ${callout(4, 'Stopped with steps left', 'A session that halted mid-plan shows the step it stopped on and how many remain.')}
+      ${callout(1, 'Progress is the work you asked for', 'The ring counts ledger items the PM has verified, not each session’s own checklist.')}
+      ${callout(2, 'Waiting on you comes first', 'Sessions blocked on your answer rise to the top, question quoted.')}
+      ${callout(3, 'CI is not done until GitHub says so', 'Left-running CI stays open; the PM checks the run with <code style="font:500 13px var(--mono)">gh</code> and flags failures.')}
+      ${callout(4, 'Stopped with steps left', 'A session that halted mid-plan shows where it stopped.')}
+      ${callout(5, 'Not shipped is not done', 'Committed but not pushed, released or deployed stays open, every step ticked or not.')}
     </ol>
     <div class="install"><small>Try it in Claude Code</small><i>/plugin install</i> project-pm \n  <u>--marketplace</u> AudiChang-hub/claude-project-pm</div>
   </section>

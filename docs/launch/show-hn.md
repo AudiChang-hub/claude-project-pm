@@ -1,8 +1,12 @@
 # Show HN draft
 
+> **On hold: not posting for now** (decided 2026-10-19). Kept for later. If it is revived, update it
+> to the current features first (the *not released* status, background work, and v0.4.0) and give
+> the first comment the same plain, built-with-Claude-Code framing as the r/ClaudeAI draft.
+
 Rules checked against https://news.ycombinator.com/showhn.html: it must be something people can
 try (it is: a free, MIT plugin), the title starts with "Show HN:", the maker should be around to
-answer comments, and no asking anyone for upvotes. Post after the `v0.3.2` release is out and CI is green.
+answer comments, and no asking anyone for upvotes. Post after the release is out and CI is green.
 
 ## Title (74 characters; HN allows 80)
 

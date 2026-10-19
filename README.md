@@ -10,7 +10,7 @@
 Project PM gives each project one PM session. You talk to the PM; the PM keeps a live board of every other session in that project and a ledger of everything you asked for, and it will not call the work done while a session is waiting on you, stopped halfway, or still waiting on CI.
 
 <p align="center">
-  <img src="docs/images/board-hero.png" alt="The Project PM board for a demo project: 44% of ledger items done, one session waiting on an answer, one with failed CI, one stopped with four steps left." width="100%">
+  <img src="docs/images/board-hero.png" alt="The Project PM board for a demo project: 44% of ledger items done, one session waiting on an answer, one with failed CI, one stopped with four steps left, one merged but not pushed." width="100%">
 </p>
 
 <sub>Demo data. The board's labels are in Traditional Chinese, the mod's current UI language (see [Language](#language)).</sub>
@@ -86,7 +86,7 @@ At the top: a completion ring and three counters (running, waiting on you, not f
 **Housekeeping.** Archive a finished session from its card (hover to reveal, then confirm; the confirm warns about open steps, an open PR or a pin). In a project with no PM yet, a band above the prompt offers to start a PM session or make the current one the PM.
 
 <p align="center">
-  <img src="docs/images/board-dark.png" alt="The full board in dark mode: ledger items and six active sessions, including one running and one in the background." width="420">
+  <img src="docs/images/board-dark.png" alt="The full board in dark mode: ledger items and seven active sessions, including one not released, one running and one in the background." width="420">
 </p>
 
 ## Usage

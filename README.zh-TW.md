@@ -10,7 +10,7 @@
 一個專案往往同時開著好幾個 Claude Code Session，各自做不同的事。**Project PM** 會為每個專案指派一個 PM Session：你只要跟 PM 對話，它就能掌握所有子 Session 的進度、等你回覆的問題、中途停下的工作，以及你交辦過的每一件事；只要還有 Session 在等你、做到一半停下、或 CI 還沒跑完，PM 就不會說「都完成了」。
 
 <p align="center">
-  <img src="docs/images/board-hero.png" alt="示範專案的 Project PM 看板：工作項目完成 44%，一個 Session 待回覆、一個 CI 失敗、一個中斷且還有 4 項步驟未完成。" width="100%">
+  <img src="docs/images/board-hero.png" alt="示範專案的 Project PM 看板：工作項目完成 44%，一個 Session 待回覆、一個 CI 失敗、一個中斷且還有 4 項步驟未完成、一個已合併但還沒 push。" width="100%">
 </p>
 
 <sub>畫面為示範資料。</sub>
@@ -86,7 +86,7 @@ Project PM 會讀取每個 Session 的任務清單、收尾摘要與待決策問
 **整理 Session。** 卡片上的封存按鈕要滑過才會出現，按下後還需再確認一次（會提醒未完成步驟、開啟中的 PR 或已釘選）。還沒有 PM 的專案，輸入框上方會出現「建立 PM Session」或「由此 Session 擔任」的選項。
 
 <p align="center">
-  <img src="docs/images/board-dark.png" alt="深色模式的完整看板：工作項目與六個進行中的 Session，包含執行中與背景執行。" width="420">
+  <img src="docs/images/board-dark.png" alt="深色模式的完整看板：工作項目與七個進行中的 Session，包含待發布、執行中與背景執行。" width="420">
 </p>
 
 ## 使用方式

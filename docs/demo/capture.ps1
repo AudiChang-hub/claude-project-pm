@@ -11,8 +11,8 @@ $userData = Join-Path ([IO.Path]::GetTempPath()) 'project-pm-capture'
 $page = 'file:///' + ($root -replace '\\', '/') + '/docs/demo/board.html'
 
 $shots = @(
-  @{ Name = 'board-hero.png'; Query = 'view=hero'; Size = '1280,1040' },
-  @{ Name = 'board-dark.png'; Query = 'view=pane&theme=dark'; Size = '580,1500' }
+  @{ Name = 'board-hero.png'; Query = 'view=hero'; Size = '1280,1240' },
+  @{ Name = 'board-dark.png'; Query = 'view=pane&theme=dark'; Size = '580,1600' }
 )
 foreach ($shot in $shots) {
   $out = Join-Path $root "docs/images/$($shot.Name)"
