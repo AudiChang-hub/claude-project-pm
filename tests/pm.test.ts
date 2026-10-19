@@ -700,6 +700,10 @@ test('work with no code to deliver is not left undelivered by a bare "no push"; 
     ['沒有 push。', 'push'],
     ['也沒有 push。', 'push'],
     ['沒有 push、也沒有打 tag。', 'push'],
+    // Data named as a kind of work, or a folder: no statement that this work changed no code.
+    ['這個看板只對只改資料的工作放行。commit 是 9638755，沒有 push。', 'push'],
+    ['只改資料夾結構，沒有 push。', 'push'],
+    ['放行的情況：回報裡宣告沒有改程式。commit 是 9638755，沒有 push。', 'push'],
   ]
   expect(left.filter(([text, want]) => kinds(text) !== want)).toEqual([])
 })

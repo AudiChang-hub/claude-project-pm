@@ -367,7 +367,14 @@ const NO_NEED = new RegExp(
  * report, it lets a bare negation of commit, push or release with nothing else as its subject (也沒有 push) go.
  */
 const NO_CODE =
-  /沒有?(?:修?改|動|變更|修改)(?:任何)?(?:程式|code)|(?:沒有|無|未有)(?:任何)?程式(?:碼)?(?:變更|修改|異動|改動)|純資料(?:修正|修改|變更|操作|更新)|只(?:改|動|修正)了?資料|\bno code (?:changes?|change was made)|\b(?:didn't|did not) (?:change|touch) (?:any )?code|\bdata[- ]only (?:fix|change|update)/i
+  /沒有?(?:修?改|動|變更|修改)(?:任何)?(?:程式|code)|(?:沒有|無|未有)(?:任何)?程式(?:碼)?(?:變更|修改|異動|改動)|純資料(?:修正|修改|變更|操作|更新)|只(?:改|動|修正)了?(?:正式)?資料(?![夾表庫檔結])|\bno code (?:changes?|change was made)|\b(?:didn't|did not) (?:change|touch) (?:any )?code|\bdata[- ]only (?:fix|change|update)/gi
+/** What follows a no-code phrase when it names a kind of work rather than this one: 只改資料的工作, 沒有程式變更的任務. */
+const OF_A_KIND = /^[^，,。；;\n]*的(?:工作|任務|情況|案例|Session|事)/
+
+/** The report says this work changed no code: a no-code phrase that is a statement, not a kind of work named. */
+function hasNoCode(text: string): boolean {
+  return [...text.matchAll(NO_CODE)].some(m => !OF_A_KIND.test(text.slice((m.index ?? 0) + m[0].length)))
+}
 /** The work waits on something before it is done: 等 PM 確認, 確認後再推, pending, until. A bare negation then counts. */
 const WAITING_TONE = /等(?!於)|待(?!發布|處理事項)|之後(?:再|才)|稍後|晚點|once\b|\buntil\b|\bpending\b|\bwaiting\b|\bafter (?:the )?(?:PM|review|approval|go-ahead)/i
 /** What may stand before a bare negation for it to be the report's own, with no other subject: 也沒有 push, 我也沒有 push. */
@@ -388,7 +395,7 @@ const AWAITING_GO = new RegExp(
  * (其他 Session 還沒提交的修改都原樣留著: a folder shared with other sessions).
  */
 const ABOUT_A_RULE =
-  /另一個 ?Session|另個 ?Session|另外一個 ?Session|(?:另一個|另個|另外一個|另一|其他|別的|別個)\s*(?:Session|session|人|同事|版本|分支|專案)|其他人|別人|他人|其餘|another session|other sessions?|someone else|someone's|判|列為|列進|標成|標為|視為|字眼|說法|正則|regex|正例|反例|這類|例如|像是|顯示|不能是|不算|才算|當成|當作|被當|(?<![小同即當準及按暫])時\s*$|(?<![小同即當準及按暫])時(?:就|會|才|便|也|一樣|照樣|仍|都)|的時候|的話|如果|假如|只要|一旦|回報說|摘要寫|提到|e\.g\.|for example|such as|\bif\b|\bwhen\b/i
+  /另一個 ?Session|另個 ?Session|另外一個 ?Session|(?:另一個|另個|另外一個|另一|其他|別的|別個)\s*(?:Session|session|人|同事|版本|分支|專案)|其他人|別人|他人|其餘|another session|other sessions?|someone else|someone's|判|列為|列進|標成|標為|視為|字眼|說法|正則|regex|正例|反例|這類|例如|像是|顯示|不能是|不算|才算|當成|當作|被當|(?<![小同即當準及按暫])時\s*$|(?<![小同即當準及按暫])時(?:就|會|才|便|也|一樣|照樣|仍|都)|的時候|的話|如果|假如|只要|一旦|回報(?:裡|中|上)?[^，,。]{0,4}?(?:說|寫|宣告|聲明|提到)|摘要[^，,。]{0,4}?(?:說|寫|宣告|聲明|提到)|提到|e\.g\.|for example|such as|\bif\b|\bwhen\b/i
 /**
  * A clause that disowns what it speaks of: 我都沒有動, 沒碰, 不是我的, 不屬於這次, not mine, I didn't touch.
  * Its words, and the subject-less clause it disowns just before it, say nothing about this session's work.
@@ -432,7 +439,7 @@ export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: strin
   // Rules, examples, quotes, someone else's work and what a clause disowns are gone (reportedText) before
   // anything is read: of what is left, a kind's last word stands.
   const plain = reportedText(text.replace(NOTHING_LEFT, ''))
-  const hasNoCode = NO_CODE.test(plain)
+  const isNoCode = hasNoCode(plain)
   for (const whole of plain.split(/[。！？!?；;\n]+|\.\s+/)) {
     // A wait anywhere in the sentence (沒有 push，等 PM 確認) keeps its bare negations: the work is still to come.
     const isWaiting = WAITING_TONE.test(whole)
@@ -447,7 +454,7 @@ export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: strin
         // 沒有改程式，也沒有 push: nothing was there to push. Not 還沒 push (or "not pushed yet"), not 設定檔沒有 commit,
         // not while it waits.
         const isYet = YET.test(m[1] ?? m[3] ?? '') || /^\s*yet\b/i.test(sentence.slice((m.index ?? 0) + m[0].length))
-        if (hasNoCode && !isYet && !isWaiting && BARE_PREFIX.test(before)) continue
+        if (isNoCode && !isYet && !isWaiting && BARE_PREFIX.test(before)) continue
         for (const kind of verbsIn(m[2] ?? m[4] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: true })
       }
       for (const m of sentence.matchAll(DONE)) for (const kind of verbsIn(m[1] ?? m[2] ?? m[3] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: false })
