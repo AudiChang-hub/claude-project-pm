@@ -255,7 +255,7 @@ const card = s => {
     ${stepsSvg(s.plan, look.hex)}
     ${s.current ? `<div class="footnote trunc" style="${s.status === 'open' ? 'color:var(--claude)' : ''}">▸ ${esc(s.current)}${left > 1 ? `　（另 ${left - 1} 項）` : ''}</div>` : ''}
     ${s.caveat
-      ? `<div class="footnote trunc"><span class="medium" style="color:var(--warning)">需追蹤</span><span class="dim">${esc(s.caveat)}</span></div>`
+      ? `<div class="footnote trunc"><span class="medium" style="color:var(--warning)">需追蹤</span><span class="dim">　${esc(s.caveat)}</span></div>`
       : `<div class="footnote dim trunc">${esc(s.summary)}</div>`}
   </div>`
 }

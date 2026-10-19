@@ -332,7 +332,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
             <Text color="warning" weight="medium">
               需追蹤
             </Text>
-            <Text dimColor>{clip(caveat, 160)}</Text>
+            <Text dimColor>{`　${clip(caveat, 160)}`}</Text>
           </Text>
         ) : (
           <Text size="footnote" dimColor wrap="truncate-end">
