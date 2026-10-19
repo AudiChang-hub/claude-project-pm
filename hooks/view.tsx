@@ -383,7 +383,10 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   }
 
   const byRank = (a: Session, b: Session) => STATUS[statusOfOne(a)].rank - STATUS[statusOfOne(b)].rank
-  const active = (list: Session[]) => list.filter(one => isActive(statusOfOne(one)) || !!caveatOf(all[one.id]) || one.hasOpenPr).sort(byRank)
+  // A session that owns open work stays in sight, whatever it is doing.
+  const owners = new Set(ledgers.map(({ item }) => item.owner).filter(Boolean))
+  const active = (list: Session[]) =>
+    list.filter(one => isActive(statusOfOne(one)) || !!caveatOf(all[one.id]) || one.hasOpenPr || owners.has(one.id)).sort(byRank)
   const ended = (list: Session[]) => list.filter(one => !active(list).includes(one))
 
   const sessionsBlock = (project: Project) => {

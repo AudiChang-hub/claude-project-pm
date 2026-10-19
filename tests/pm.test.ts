@@ -232,3 +232,35 @@ test('a session the app did not know at its start is tracked once it is known', 
   const kept = JSON.parse(files.get(`${DIR}/sessions/local_late.json`)!)
   expect(kept.plan).toEqual([{ content: '合併欄位', status: 'in_progress' }])
 })
+
+test('an empty track does not hide a transcript that says CI is still running', async ($, on) => {
+  const files: Files = new Map()
+  const item = { id: 1, text: '合併重複的日期欄位', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
+  // What a session writes when its module reloads, before its next turn ends: nothing yet.
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', {})))
+  const clock = mock.clock(on, { now: NOW })
+  on('mcp.call', { tool: 'list_events' }, ($, e, next) =>
+    e.args?.session_id === 'local_open'
+      ? { value: { content: [{ type: 'text' as const, text: '[assistant] 2.3.2 已推上 main，CI 正在跑，大約要 22 分鐘，我在背景等結果。\n[result] done (success), 8 turns' }], isError: false } }
+      : next(e),
+  )
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+  await clock.advance(400)
+
+  const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(board).toMatch(/\[等待 CI・未完成\] 「商品列表頁」\(local_open\)/)
+
+  const ui = await $.ui.mount({
+    plugin: 'project-pm',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: 'project-pm',
+    props: { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 40 } },
+  } as never)
+  // It owns open work and waits on CI: a card in sight, not a row among the ended.
+  expect(await ui.find({ key: 'card:local_open' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '等待 CI' })).toBeDefined()
+  await ui.unmount()
+})

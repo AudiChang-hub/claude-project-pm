@@ -1,6 +1,6 @@
 {
   "name": "project-pm",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "專案 PM：每個專案一個 PM Session，追蹤所有子 Session 的任務清單、待你回覆的問題與工作項目，確保沒有工作遺漏。",
   "author": { "name": "billy", "url": "https://github.com/AudiChang-hub" },
   "license": "MIT",

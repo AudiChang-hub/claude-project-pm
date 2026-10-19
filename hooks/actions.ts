@@ -10,6 +10,7 @@ import {
   clip,
   emptyProject,
   groupProjects,
+  hasReport,
   isCiPending,
   isScratch,
   itemCode,
@@ -211,14 +212,18 @@ export async function readTracks($: EngineInterface, list: Session[]) {
     const id = entry.name.replace(/\.json$/, '')
     if (!wanted.has(id) || trackSeen.get(id) === entry.mtimeMs) continue
     const track = await readJson<Track>($, `${dir}/${entry.name}`)
-    if (track) {
+    // An empty track would hide the transcript's last word: leave it out until it holds a report.
+    if (hasReport(track)) {
       fresh[id] = track
       trackSeen.set(id, entry.mtimeMs)
     }
   }
-  if (Object.keys(fresh).length === 0) return
+  const held = await read($, tracks)
+  const isStale = Object.entries(held).some(([id, track]) => !wanted.has(id) || !hasReport(track))
+  if (Object.keys(fresh).length === 0 && !isStale) return
   await update($, tracks, all => {
-    const kept = Object.fromEntries(Object.entries(all).filter(([id]) => wanted.has(id)))
+    // Held values outlive a reload of the module: an empty track kept from before goes too.
+    const kept = Object.fromEntries(Object.entries(all).filter(([id, track]) => wanted.has(id) && hasReport(track)))
 
     return { ...kept, ...fresh }
   })
@@ -483,7 +488,8 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
 async function ownerBlocker($: EngineInterface, ownerId: string): Promise<string | null> {
   await refresh($, true)
   const one = (await read($, sessions)).list.find(s => s.id === ownerId)
-  const track = (await read($, tracks))[ownerId] ?? (await readJson<Track>($, `${await dataDir($)}/sessions/${ownerId}.json`)) ?? undefined
+  const kept = (await read($, tracks))[ownerId] ?? (await readJson<Track>($, `${await dataDir($)}/sessions/${ownerId}.json`))
+  const track = hasReport(kept) ? kept : undefined
   const title = one?.title ?? track?.title ?? ownerId
   if (!one) {
     return track && isCiPending(latestWords(track)) ? `負責的 Session「${title}」最後回報 CI 尚未跑完（${clip(latestWords(track), 120)}）。` : null

@@ -115,6 +115,14 @@ export function groupProjects(list: Session[]): Project[] {
   return [...byKey.values()].sort((a, b) => at(b.sessions[0]!) - at(a.sessions[0]!))
 }
 
+/**
+ * Whether a track holds anything the session reported. A track a session writes when it
+ * (re)loads, before its next turn ends, holds nothing: its transcript's last word says more.
+ */
+export function hasReport(track: Track | null | undefined): track is Track {
+  return !!track && (track.plan.length > 0 || !!track.lastAnswer || !!track.recap || !!track.ask)
+}
+
 export function openSteps(track: Track | undefined): Step[] {
   return track ? track.plan.filter(s => s.status !== 'completed') : []
 }
@@ -308,7 +316,8 @@ export function boardText(input: BoardInput): string {
   lines.push('', '## Sessions')
   let listed = 0
   for (const r of rows) {
-    if (!input.isIncludingDone && !isActive(r.status) && !caveatOf(r.track) && !r.one.hasOpenPr) continue
+    const isOwner = openLedger.some(item => item.owner === r.one.id)
+    if (!input.isIncludingDone && !isActive(r.status) && !caveatOf(r.track) && !r.one.hasOpenPr && !isOwner) continue
     listed += 1
     const flags = [r.one.hasOpenPr ? 'PR 開啟中' : '', r.one.isPinned ? '已釘選' : ''].filter(Boolean).join('、')
     lines.push(`### [${STATUS[r.status].tag}] ${r.one.title} (${r.one.id})`)
