@@ -1,0 +1,330 @@
+<!doctype html>
+<!--
+  Offline demo of the Project PM board, used for the README screenshots.
+  Fixture data only (a made-up "Acme Storefront" project): nothing here reads a real session.
+  The marks (ring, status dots, step bars), status labels and colors are copied from
+  hooks/view.tsx and hooks/sessions.ts; the layout follows renderPane().
+
+  Views:  board.html?view=hero            light, annotated (docs/images/board-hero.png)
+          board.html?view=pane&theme=dark  the pane alone (docs/images/board-dark.png)
+  Capture: see docs/demo/README.md
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project PM Board Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&family=Noto+Sans+TC:wght@400;500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --canvas: #f3efe6;
+    --canvas-2: #ebe5d8;
+    --pane: #fbfaf7;
+    --pane-head: #f4f1ea;
+    --ink: #1c1b18;
+    --ink-2: #5d5a52;
+    --ink-3: #8b877c;
+    --line: rgba(28, 27, 24, 0.12);
+    --line-strong: rgba(28, 27, 24, 0.2);
+    --btn-2: rgba(28, 27, 24, 0.06);
+    --claude: #c15f3c;
+    --success: #1f8a4c;
+    --warning: #b26a00;
+    --error: #c93a3a;
+    --permission: #7552d6;
+    --suggestion: #2f6bd8;
+    --shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 40px 80px -30px rgba(60, 40, 20, .35), 0 12px 24px -12px rgba(60, 40, 20, .18);
+    --sans: "Inter", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+    --serif: "Fraunces", Georgia, serif;
+  }
+  :root[data-theme="dark"] {
+    --canvas: #1b1a18;
+    --canvas-2: #141412;
+    --pane: #262522;
+    --pane-head: #2d2c28;
+    --ink: #f3f1ea;
+    --ink-2: #bdb9ad;
+    --ink-3: #8f8b80;
+    --line: rgba(243, 241, 234, 0.12);
+    --line-strong: rgba(243, 241, 234, 0.22);
+    --btn-2: rgba(243, 241, 234, 0.08);
+    --claude: #e08a68;
+    --success: #4cc27a;
+    --warning: #f0a83a;
+    --error: #f07070;
+    --permission: #a78bfa;
+    --suggestion: #6aa1ff;
+    --shadow: 0 1px 0 rgba(255,255,255,.05) inset, 0 40px 80px -30px rgba(0,0,0,.7);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--canvas); color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  .tab { font-variant-numeric: tabular-nums; }
+
+  /* ── Hero canvas ── */
+  .hero {
+    width: 1280px; height: 1040px; position: relative; overflow: hidden;
+    background:
+      radial-gradient(900px 600px at 78% 12%, rgba(217, 119, 87, .16), transparent 60%),
+      radial-gradient(700px 700px at 8% 100%, rgba(139, 92, 246, .07), transparent 60%),
+      linear-gradient(180deg, var(--canvas), var(--canvas-2));
+    display: grid; grid-template-columns: 1fr 500px; column-gap: 72px; padding: 72px 88px 0 88px;
+  }
+  .hero::after { /* fine paper grain */
+    content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .12; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .4 0 0 0 0 .32 0 0 0 0 .25 0 0 0 .08 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .story { padding-top: 18px; position: relative; z-index: 1; }
+  .eyebrow { font: 600 12px/1 var(--sans); letter-spacing: .16em; text-transform: uppercase; color: var(--claude); display: flex; align-items: center; gap: 10px; }
+  .eyebrow i { width: 22px; height: 1.5px; background: currentColor; display: inline-block; }
+  h1 { font: 500 54px/1.04 var(--serif); letter-spacing: -.02em; margin-top: 22px; font-variation-settings: "opsz" 144; }
+  h1 em { font-style: italic; color: var(--claude); padding-right: .14em; }
+  .lede { margin-top: 20px; font-size: 17px; line-height: 1.55; color: var(--ink-2); max-width: 520px; }
+  .callouts { list-style: none; margin-top: 40px; display: grid; row-gap: 22px; }
+  .callouts li { display: grid; grid-template-columns: 34px 1fr; column-gap: 16px; align-items: start; }
+  .callouts b { display: block; font-weight: 600; font-size: 16px; letter-spacing: -.005em; }
+  .callouts p { font-size: 14.5px; line-height: 1.5; color: var(--ink-2); margin-top: 4px; }
+  .pin {
+    width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+    font: 600 13px/1 var(--sans); color: #fff; background: var(--c);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--c) 18%, transparent), 0 6px 14px -6px var(--c);
+  }
+  .install { margin-top: 40px; display: inline-block; padding: 14px 20px 16px; border-radius: 12px;
+    background: rgba(28, 27, 24, .92); color: #f3f1ea; font: 500 14px/1.65 var(--mono); white-space: pre; box-shadow: 0 18px 30px -18px rgba(28, 27, 24, .6); }
+  .install small { display: block; font: 600 10.5px/1 var(--sans); letter-spacing: .16em; text-transform: uppercase; color: #8f8b80; margin-bottom: 10px; }
+  .install i { font-style: normal; color: #e08a68; }
+  .install u { text-decoration: none; color: #8f8b80; }
+  .fine { position: absolute; left: 88px; bottom: 34px; font-size: 12.5px; color: var(--ink-3); z-index: 1; letter-spacing: .01em; }
+  .fine span { color: var(--ink-2); }
+
+  /* ── Pane ── */
+  .pane-wrap { position: relative; z-index: 1; }
+  .pane {
+    width: 500px; background: var(--pane); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); position: relative;
+  }
+  .pane-head { border-radius: 16px 16px 0 0; }
+  /* Runs off the bottom of the canvas; the pins stand out to the left. */
+  .hero .pane { height: 968px; border-bottom: 0; border-radius: 16px 16px 0 0; clip-path: inset(-80px -80px 0 -80px); }
+  .hero .pane::after { content: ""; position: absolute; left: 1px; right: 1px; bottom: 0; height: 120px; background: linear-gradient(transparent, var(--canvas-2)); }
+  .pane-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--pane-head); border-bottom: 1px solid var(--line); }
+  .pane-head span { font-size: 13px; font-weight: 600; color: var(--ink); }
+  .pane-head svg { color: var(--ink-3); }
+  .body { padding: 18px 20px 20px; display: flex; flex-direction: column; row-gap: 6px; }
+
+  .row { display: flex; align-items: center; }
+  .caption { font-size: 12px; line-height: 1.45; }
+  .footnote { font-size: 13px; line-height: 1.5; }
+  .dim { color: var(--ink-3); }
+  .trunc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .semibold { font-weight: 600; }
+  .medium { font-weight: 500; }
+
+  .btn { font: 500 12.5px/1 var(--sans); padding: 7px 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--btn-2); color: var(--ink); }
+  .btn.primary { background: var(--ink); color: var(--pane); border-color: var(--ink); }
+  .btn.plain { background: none; border: 0; padding: 4px 0; color: var(--ink-3); }
+
+  .box { border: 1px solid var(--line); border-radius: 12px; padding: 10px 16px; }
+  .kpi { display: flex; flex-direction: column; row-gap: 10px; margin-top: 10px; }
+  .metric { width: 33%; padding: 0 6px; }
+  .title { font-size: 22px; line-height: 1.2; font-weight: 600; letter-spacing: -.01em; }
+  .heading { font-size: 18px; line-height: 1.3; font-weight: 600; letter-spacing: -.01em; }
+
+  .section { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; margin-bottom: 2px; }
+  .ledger { display: flex; column-gap: 10px; align-items: flex-start; padding: 5px 0; }
+  .ledger code { font: 500 11.5px/1.65 var(--mono); color: var(--ink-3); }
+
+  .card { display: flex; flex-direction: column; row-gap: 5px; position: relative; }
+  .card + .card { margin-top: 6px; }
+  .card .head { display: flex; align-items: center; column-gap: 9px; }
+  .card .head .t { flex: 1 1 auto; font-weight: 600; font-size: 14px; }
+  .card svg.steps { width: 100%; height: 4px; display: block; margin: 2px 0; }
+  .sep { color: var(--ink-3); }
+
+  .on-pane-pin { position: absolute; left: -46px; }
+  .pane .pin { width: 26px; height: 26px; font-size: 12.5px; }
+  .hl { box-shadow: 0 0 0 1.5px var(--c), 0 0 0 6px color-mix(in srgb, var(--c) 12%, transparent); border-color: transparent; }
+
+  /* pane-only view */
+  .solo { padding: 40px; width: 580px; min-height: 100vh; background:
+      radial-gradient(600px 400px at 80% 0%, rgba(217, 119, 87, .14), transparent 60%),
+      linear-gradient(180deg, var(--canvas), var(--canvas-2)); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ── Copied from hooks/view.tsx (marks) and hooks/sessions.ts (STATUS) ──
+const TRACK_HEX = '#9ca3af'
+const ACCENT_HEX = '#d97757'
+function dotSvg(hex, isPulsing) {
+  const pulse = isPulsing
+    ? `<circle cx="6" cy="6" r="3" fill="none" stroke="${hex}" stroke-width="1.2"><animate attributeName="r" values="3;5.6" dur="1.8s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.9;0" dur="1.8s" repeatCount="indefinite"/></circle>`
+    : ''
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12">${pulse}<circle cx="6" cy="6" r="3" fill="${hex}"/></svg>`
+}
+function ringSvg(ratio) {
+  const r = 17
+  const c = 2 * Math.PI * r
+  const arc = Math.max(0, Math.min(1, ratio)) * c
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="42" height="42" viewBox="0 0 42 42"><circle cx="21" cy="21" r="${r}" fill="none" stroke="${TRACK_HEX}" stroke-opacity="0.22" stroke-width="4"/><circle cx="21" cy="21" r="${r}" fill="none" stroke="${ACCENT_HEX}" stroke-width="4" stroke-linecap="round" stroke-dasharray="${arc.toFixed(2)} ${c.toFixed(2)}" transform="rotate(-90 21 21)"/></svg>`
+}
+function stepsSvg(plan, hex) {
+  const width = 320
+  const gap = plan.length > 24 ? 1 : 3
+  const seg = (width - gap * (plan.length - 1)) / plan.length
+  const rects = plan.map((status, i) => {
+    const x = (i * (seg + gap)).toFixed(2)
+    const fill = status === 'pending' ? TRACK_HEX : hex
+    const opacity = status === 'completed' ? 1 : status === 'in_progress' ? 0.5 : 0.22
+    return `<rect x="${x}" y="0" width="${seg.toFixed(2)}" height="4" rx="2" fill="${fill}" fill-opacity="${opacity}"/>`
+  }).join('')
+  return `<svg class="steps" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" viewBox="0 0 ${width} 4">${rects}</svg>`
+}
+const STATUS = {
+  asking: { label: '待回覆', color: 'warning', hex: '#f59e0b' },
+  failed: { label: 'CI 失敗', color: 'error', hex: '#ef4444' },
+  open: { label: '未完成', color: 'claude', hex: '#d97757' },
+  ci: { label: '等待 CI', color: 'permission', hex: '#8b5cf6' },
+  running: { label: '執行中', color: 'success', hex: '#22c55e' },
+  waiting: { label: '背景執行', color: 'suggestion', hex: '#3b82f6' },
+}
+
+// ── Fixture: a made-up project ──
+const C = 'completed', P = 'in_progress', _ = 'pending'
+const sessions = [
+  { pin: 2, status: 'asking', title: 'Retire v1 coupon fields', ago: '12 分鐘前', plan: [C, C, C, C, C], pr: true,
+    summary: '問題：Drop the coupon_v1 columns in this release, or keep them read-only until 0.9?' },
+  { pin: 3, status: 'failed', title: 'Fix tax rounding at checkout', ago: '26 分鐘前', plan: [C, C, C, C], pr: true,
+    summary: 'Pushed 8c41d2e; waiting for CI on GitHub Actions before merging.' },
+  { pin: 4, status: 'open', title: 'Search ranking for in-stock items', ago: '41 分鐘前', plan: [C, C, C, P, _, _, _],
+    current: 'Boost in-stock items in the ranker', summary: 'Indexed stock levels per warehouse; the ranker change is next.' },
+  { status: 'ci', title: 'Export product list as CSV', ago: '8 分鐘前', plan: [C, C, C, C, C, C], pr: true,
+    summary: 'Committed 4f2d9e1 and pushed. CI is still running on GitHub Actions; deploy once it passes.' },
+  { status: 'running', title: 'Monthly payouts reconciliation', ago: '剛剛', plan: [C, C, P, _, _],
+    current: 'Match payouts to orders by reference', summary: '指令：Reconcile October payouts against orders and flag mismatches' },
+  { status: 'waiting', title: 'Image CDN backfill', ago: '5 分鐘前', plan: [C, C, C, C],
+    summary: 'Backfill is running in the background; about 20 minutes left.' },
+]
+const ledger = [
+  { id: 4, text: 'Export the product list as CSV', owner: 'Export product list as CSV', status: 'ci' },
+  { id: 6, text: 'Fix tax rounding at checkout', owner: 'Fix tax rounding at checkout', status: 'failed' },
+  { id: 7, text: 'Retire the v1 coupon fields', owner: 'Retire v1 coupon fields', status: 'asking' },
+  { id: 9, text: 'Rank in-stock items first in search', owner: 'Search ranking for in-stock items', status: 'open' },
+  { id: 10, text: 'Let shoppers save cards for checkout', owner: null },
+]
+const items = { done: 4, total: 9 }
+const ended = 4
+
+// ── Render (mirrors renderPane) ──
+const q = new URLSearchParams(location.search)
+const view = q.get('view') || 'hero'
+if (q.get('theme') === 'dark') document.documentElement.dataset.theme = 'dark'
+const hero = view === 'hero'
+const esc = s => s.replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]))
+const colorVar = key => `var(--${key})`
+const code = id => `T-${String(id).padStart(2, '0')}`
+const count = s => sessions.filter(x => x.status === s).length
+const ratio = items.done / items.total
+const open = ledger.length
+const unassigned = ledger.filter(i => !i.owner).length
+const pinOn = (n, c) => (hero && n ? `<div class="on-pane-pin" style="--c:${c}"><div class="pin">${n}</div></div>` : '')
+const PIN = { 1: 'var(--claude)', 2: '#e39200', 3: '#d94a4a', 4: '#d97757' }
+
+const metric = (value, label, color) => `
+  <div class="metric">
+    <div class="title tab" style="color:${value ? colorVar(color) : 'var(--ink-3)'}">${value}</div>
+    <div class="caption dim trunc">${label}</div>
+  </div>`
+
+const card = s => {
+  const look = STATUS[s.status]
+  const left = s.plan.filter(x => x !== C).length
+  const meta = [`步驟 ${s.plan.length - left}/${s.plan.length}`, s.pr ? 'PR 開啟中' : ''].filter(Boolean)
+  return `
+  <div class="card box${hero && s.pin ? ' hl' : ''}" style="--c:${PIN[s.pin] || 'transparent'}">
+    ${pinOn(s.pin, PIN[s.pin])}
+    <div class="head">${dotSvg(look.hex, s.status === 'running')}<span class="t trunc">${esc(s.title)}</span><span class="caption dim tab">${s.ago}</span></div>
+    <div class="caption trunc"><span class="medium" style="color:${colorVar(look.color)}">${look.label}</span><span class="dim">${meta.map(m => `　·　${m}`).join('')}</span></div>
+    ${stepsSvg(s.plan, look.hex)}
+    ${s.current ? `<div class="footnote trunc" style="${s.status === 'open' ? 'color:var(--claude)' : ''}">▸ ${esc(s.current)}${left > 1 ? `　（另 ${left - 1} 項）` : ''}</div>` : ''}
+    <div class="footnote dim trunc">${esc(s.summary)}</div>
+  </div>`
+}
+
+const ledgerRow = i => {
+  const ownerText = i.owner ? `負責　${esc(i.owner)}・${STATUS[i.status].label}` : '尚未指派'
+  return `
+  <div class="ledger">
+    <code>${code(i.id)}</code>
+    <div style="flex:1;min-width:0">
+      <div class="footnote">${esc(i.text)}</div>
+      <div class="caption trunc" style="color:${i.owner ? 'var(--ink-3)' : 'var(--warning)'}">${ownerText}</div>
+    </div>
+  </div>`
+}
+
+const pane = `
+<div class="pane">
+  <div class="pane-head"><span>Acme Storefront · PM</span>
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg></div>
+  <div class="body">
+    <div class="row" style="justify-content:space-between;align-items:flex-start;column-gap:8px">
+      <div style="min-width:0">
+        <div class="caption medium" style="color:var(--claude);letter-spacing:.04em">PROJECT</div>
+        <div class="heading trunc">Acme Storefront</div>
+        <div class="caption dim tab">${sessions.length + ended} Sessions　·　PM：本 Session</div>
+      </div>
+      <div class="row" style="column-gap:6px;flex-shrink:0"><span class="btn primary">本專案</span><span class="btn">全部</span></div>
+    </div>
+    <div class="kpi box${hero ? ' hl' : ''}" style="--c:${PIN[1]};position:relative">
+      ${pinOn(1, PIN[1])}
+      <div class="row" style="column-gap:14px">
+        ${ringSvg(ratio)}
+        <div style="flex:1;min-width:0">
+          <div class="title tab">${Math.round(ratio * 100)}%</div>
+          <div class="caption dim trunc tab">工作項目完成 ${items.done}/${items.total}</div>
+          <div class="caption trunc tab"><span class="dim">${open} 項進行中</span>${unassigned ? `<span style="color:var(--warning)">　·　${unassigned} 項未指派</span>` : ''}</div>
+        </div>
+      </div>
+      <div class="row">
+        ${metric(count('running') + count('waiting'), '執行中', 'success')}
+        ${metric(count('asking'), '待回覆', 'warning')}
+        ${metric(count('open') + count('ci') + count('failed'), '未完成・待 CI', 'claude')}
+      </div>
+    </div>
+    <div class="section"><span class="caption semibold dim">工作項目</span><span class="caption dim tab">${open} 項進行中</span></div>
+    ${ledger.map(ledgerRow).join('')}
+    <div class="section"><span class="caption semibold dim">SESSIONS</span><span class="caption dim tab">${sessions.length} 進行中　·　${ended} 已結束</span></div>
+    ${sessions.map(card).join('')}
+    <div class="row" style="margin-top:4px"><span class="btn plain">顯示已結束的 Session（${ended}）</span></div>
+    <div class="row" style="justify-content:space-between;margin-top:6px">
+      <span class="caption dim tab">同步於 剛剛　·　每 30 秒自動更新</span><span class="btn plain">重新同步</span>
+    </div>
+  </div>
+</div>`
+
+const callout = (n, title, text) => `
+  <li><div class="pin" style="--c:${PIN[n]}">${n}</div><div><b>${title}</b><p>${text}</p></div></li>`
+
+document.getElementById('app').innerHTML = hero ? `
+<main class="hero">
+  <section class="story">
+    <div class="eyebrow"><i></i>Project PM for Claude Code</div>
+    <h1>Many sessions.<br><em>Nothing</em> slips.</h1>
+    <p class="lede">One PM session per project keeps a live board of every Claude Code session you have running, and a ledger of everything you asked for.</p>
+    <ol class="callouts">
+      ${callout(1, 'Progress is the work you asked for', 'The ring counts ledger items (T-01, T-02…) the PM has verified as done, not each session’s own checklist.')}
+      ${callout(2, 'Waiting on you comes first', 'Sessions blocked on your answer rise to the top with their question quoted, and the PM gets a toast.')}
+      ${callout(3, 'CI is not done until GitHub says so', 'A session that left CI running stays open; the PM asks GitHub with <code style="font:500 13px var(--mono)">gh</code>, and a failed run is flagged.')}
+      ${callout(4, 'Stopped with steps left', 'A session that halted mid-plan shows the step it stopped on and how many remain.')}
+    </ol>
+    <div class="install"><small>Try it in Claude Code</small><i>/plugin install</i> project-pm \n  <u>--marketplace</u> AudiChang-hub/claude-project-pm</div>
+  </section>
+  <div class="pane-wrap">${pane}</div>
+  <p class="fine">Demo data. <span>Board labels appear in Traditional Chinese, the mod’s current UI language.</span></p>
+</main>` : `<div class="solo">${pane}</div>`
+</script>
+</body>
+</html>

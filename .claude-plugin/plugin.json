@@ -1,7 +1,7 @@
 {
   "name": "project-pm",
   "version": "0.3.2",
-  "description": "專案 PM：每個專案一個 PM Session，追蹤所有子 Session 的任務清單、待你回覆的問題與工作項目，確保沒有工作遺漏。",
+  "description": "One PM session per project: a live board of every Claude Code session (waiting on you, stopped mid-plan, CI still running) and a ledger of the work you asked for, so nothing slips.",
   "author": { "name": "billy", "url": "https://github.com/AudiChang-hub" },
   "license": "MIT",
   "repository": "https://github.com/AudiChang-hub/claude-project-pm",

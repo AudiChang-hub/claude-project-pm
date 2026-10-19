@@ -1,80 +1,140 @@
-# Project PM：Claude Code 的專案 PM
+# Project PM for Claude Code
 
-一個專案往往同時開著好幾個 Claude Code Session，各自做不同的事。**Project PM** 會為每個專案指派一個 PM Session：你只要跟 PM 對話，它就能掌握所有子 Session 的進度、等你回覆的問題、中途停下的工作，以及你交辦過的每一件事，確保沒有工作被遺漏。
+**English** | [繁體中文](README.zh-TW.md)
 
-## 功能
+**Run many Claude Code sessions in parallel without losing track of any work.**
 
-- **自動追蹤每個 Session**：每個 Session 會把自己的任務清單、收尾摘要、待決策問題、最新指令與最後回報寫成一份紀錄，PM 隨時讀得到。
-- **專案狀態報告**（`mcp__project-pm__board`）：PM 回報前先讀這份報告，「需要處理」排在最前面：
-  - 等你回覆的 Session
-  - 已停止、但任務清單仍有未完成步驟的 Session
-  - CI 還沒跑完，或在 GitHub 上失敗的 Session
-  - 收尾摘要提到「尚未部署／尚未提交」等未完成事項
-  - 仍開啟的 PR
-  - 尚未指派負責 Session 的工作項目
-- **工作項目清單**（`mcp__project-pm__ledger`）：你交代 PM 的每件事都以 T-01、T-02… 編號登記並指派負責的 Session，PM 確認真正完成後才會結案。專案進度以工作項目計算，而不是看各 Session 自己的勾選清單。
-- **CI 沒跑完就不算完成**：Session 最後一輪的回報如果說 CI 還在跑、或要等 CI 通過才部署，狀態會標成「等待 CI」，不管停了多久都不會變成「已結束」。這時負責的工作項目也不能結案，除非使用者明確確認，並在備註寫明。
-  - **以 GitHub 的實際結果為準**：看到這類回報時，會在該 Session 的資料夾用 `gh` 查實際狀態（回報裡有 run id 就查那個 run，有 commit 就查那個 commit，都沒有就查資料夾當時的 HEAD）。CI 已經通過就不再標「等待 CI」；失敗會標成「CI 失敗」列進「需要處理」，工作項目同樣不能結案。查不到時（沒裝 `gh`、不在 GitHub、逾時）照文字判斷。查詢結果會快取：通過的不再重查，失敗的 5 分鐘後重查，還在跑的 1 分鐘後重查。
-  - **只看最新一輪**：收尾摘要只算寫下它的那一輪；之後被通知叫醒、沒有重新收尾的回合，舊摘要就不再算數。紀錄檔如果漏記了後面的回合（Session 最後活動時間比紀錄晚），改用對話紀錄的最後一則訊息判斷。
-- **收尾摘要的未完成事項**：摘要寫到「尚未部署」「還沒提交」這類字眼時列為「需追蹤」；「沒有任何未提交的修改」這種表示已經做完的雙重否定不算。
-- **PM 行為準則**：PM 回報前一定先看狀態報告；實作交給子 Session，自己不改程式碼；「需要處理」還沒清空之前，不會說「都完成了」。
-- **專案看板面板**：
-  - 完成率圓環，以及執行中、待回覆、中斷・未完成三項指標
-  - Session 卡片：狀態燈號與逐步進度條；封存按鈕要滑過卡片才會出現，按下後還需再確認一次
-  - 可切換「本專案／全部」
-  - PM 會在子 Session 開始等你回覆、或中途停下時跳出通知
-- **新專案提示**：還沒有 PM 的專案，輸入框上方會出現「建立 PM Session」或「由此 Session 擔任」的選項。
+[![CI](https://github.com/AudiChang-hub/claude-project-pm/actions/workflows/ci.yml/badge.svg)](https://github.com/AudiChang-hub/claude-project-pm/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-## 安裝
+Project PM gives each project one PM session. You talk to the PM; the PM keeps a live board of every other session in that project and a ledger of everything you asked for, and it will not call the work done while a session is waiting on you, stopped halfway, or still waiting on CI.
 
-需要支援 function hooks Mod 的 Claude Code（已在 2.1.299 測試）。PM 會用到 Claude Code 桌面版（Code 分頁）內建的 Session 管理工具，所以請在桌面版中使用。
+<p align="center">
+  <img src="docs/images/board-hero.png" alt="The Project PM board for a demo project: 44% of ledger items done, one session waiting on an answer, one with failed CI, one stopped with four steps left." width="100%">
+</p>
 
-在終端機的 Claude Code 提示字元輸入：
+<sub>Demo data. The board's labels are in Traditional Chinese, the mod's current UI language (see [Language](#language)).</sub>
 
-```
-/plugin install project-pm --marketplace AudiChang-hub/claude-project-pm
-```
+## Why
 
-或在 shell 執行：
+With five or ten sessions open on one project, things slip:
 
-```bash
-claude plugin install project-pm --marketplace AudiChang-hub/claude-project-pm
-```
+- A session asked you a question an hour ago and has been sitting there since.
+- A session stopped with three steps of its plan left, and nothing tells you.
+- A session said "CI is running, I'll deploy once it passes", and then nobody came back to check.
+- Every session ticks its own checklist off when its turn ends, so "all green" in the sidebar does not mean the thing you asked for is done.
 
-在桌面版中（無法使用 `/plugin`）：點提示框旁的 **+** → **Plugins** → **Add marketplace**，輸入 `AudiChang-hub/claude-project-pm`，再點 **Add plugin**。
+Project PM reads every session's task list, final recap and open question, checks CI on GitHub, and puts what needs you at the top of one board.
 
-安裝後新開的 Session 才會載入。
+## Quick start
 
-## 使用方式
+Requires the **Claude Code desktop app (Code tab)**; see [Requirements](#requirements).
 
-| 指令 | 作用 |
+1. Install the plugin. In a Claude Code prompt:
+
+   ```
+   /plugin install project-pm --marketplace AudiChang-hub/claude-project-pm
+   ```
+
+   In the desktop app, where `/plugin` is not available: click **+** next to the prompt box → **Plugins** → **Add marketplace**, enter `AudiChang-hub/claude-project-pm`, then **Add plugin**.
+
+   Or from a shell:
+
+   ```bash
+   claude plugin install project-pm --marketplace AudiChang-hub/claude-project-pm
+   ```
+
+2. Open a new session in your project (sessions opened before the install do not load it) and type:
+
+   ```
+   /pm
+   ```
+
+   That session becomes the project's PM, opens the board, and reports what is waiting on you.
+
+3. From then on, talk to the PM: *"Is anything slipping?"*, *"Hand the CSV export to the product-list session."*, *"Which sessions are waiting on me?"*
+
+## Features
+
+**One board per project.** A pane that lists the project's sessions, most urgent first, each with a status mark, a step-by-step progress bar, the step it is on, and its latest recap or question.
+
+| Status | Shown when |
 | --- | --- |
-| `/pm` | 指定目前的 Session 為這個專案的 PM，並開啟專案看板 |
-| `/pm off` | 卸任 PM（工作項目會保留，由下一任 PM 接手） |
-| `/board` | 在任何 Session 開啟或收合專案看板 |
+| Waiting on you (待回覆) | The session ended its turn with a question for you. |
+| CI failed (CI 失敗) | Its last words left CI running, and GitHub reports that run failed. |
+| Unfinished (未完成) | It stopped with steps of its task list still open. |
+| Waiting on CI (等待 CI) | Its last words say CI has not finished, and GitHub has not said it passed. |
+| Running (執行中) | The session is working right now. |
+| In the background (背景執行) | It said work goes on in the background (for up to 45 minutes). |
+| Ended (已結束) / Idle (長期閒置) | Nothing left; idle for more than 3 days. Hidden behind a toggle. |
 
-接著直接跟 PM 對話，例如：
+At the top: a completion ring and three counters (running, waiting on you, unfinished or waiting on CI). Switch between **this project** and **all projects**.
 
-- 「目前有沒有漏掉的工作？」
-- 「幫我把匯出 CSV 交給商品列表那個 Session 做。」
-- 「哪些 Session 在等我回覆？」
+**A ledger of what you asked for.** Every request you give the PM is recorded as T-01, T-02, … with the session that owns it. Project progress is counted from the ledger, not from the sessions' own checklists. An owner working from another project's folder (a session fixing a shared library, say) is still shown with its title and status; the item is flagged only when its owner is archived or gone.
 
-## 運作方式與資料
+**CI is not done until GitHub says so.** When a session's latest words say CI is still running, or that it will deploy once checks pass, the session is held at *Waiting on CI*, however long ago it stopped. The PM then runs `gh` in that session's folder: the run id the words name, else the commit they name, else the folder's `HEAD` (only if it was committed before the words). A pass clears the status, a failure turns it into *CI failed*. Answers are cached: a pass for good, a failure for 5 minutes, a running or unknown result for 1 minute. Without `gh`, or outside GitHub, the words decide.
 
-- 每個 Session 只寫自己的紀錄檔：`~/.claude/project-pm/sessions/<session id>.json`。
-- 每個專案一份檔案，記錄 PM 與工作項目：`~/.claude/project-pm/projects/<專案>-<hash>.json`。
-- 所有資料都存在本機，不會傳到任何外部服務。Session 清單、紀錄讀取與封存，都是透過桌面版內建的 `ccd_session_mgmt` 工具完成。
-- Mod 安裝前就開著的 Session 沒有追蹤紀錄，看板只會顯示它們最後一則訊息。
-- 工作項目的負責 Session 可以在別的專案資料夾工作（例如修 Mod 的 Session），看板會顯示它的標題和狀態；只有封存或找不到時才標「負責人失聯」。
-- 執行 `/reload-plugins` 後，PM 的 `board`／`ledger` 工具會在 PM 的下一輪（下一則訊息或通知叫醒）重新註冊，不必重開 Session。
+**The ledger will not close unfinished work.** Marking an item done is refused while its owner is running, waiting on you, unfinished, waiting on CI, failed CI or still working in the background, unless you confirm it explicitly and the PM records why in a note.
 
-## 開發
+**Recaps that admit work is left.** A recap that says something is "not yet deployed", "not committed", "still needs…" (in English or Chinese) is flagged for follow-up. A Chinese double negative such as 沒有任何未提交的修改 ("there are no uncommitted changes") is not.
+
+**Only the latest turn counts.** A recap belongs to the turn that wrote it; a later turn that ends without its own recap clears it. If a session's record has missed later turns, its transcript's last message is used instead.
+
+**A PM that behaves like one.** The PM reads the board before every report, hands implementation to other sessions instead of editing code itself, relays sub-sessions' questions to you word for word, asks before archiving anything, and will not say "all done" while anything needs attention. It gets a notification when a session starts waiting on you, fails CI, or stops with steps left.
+
+**Housekeeping.** Archive a finished session from its card (hover to reveal, then confirm; the confirm warns about open steps, an open PR or a pin). In a project with no PM yet, a band above the prompt offers to start a PM session or make the current one the PM.
+
+<p align="center">
+  <img src="docs/images/board-dark.png" alt="The full board in dark mode: ledger items and six active sessions, including one running and one in the background." width="420">
+</p>
+
+## Usage
+
+| Command | What it does |
+| --- | --- |
+| `/pm` | Makes this session the project's PM and opens the board. |
+| `/pm off` | Steps down as PM. The ledger stays with the project for the next PM. |
+| `/board` | Opens or closes the board in any session. |
+
+The PM has two tools of its own, which you do not call directly:
+
+- `mcp__project-pm__board`: the project status report (what needs attention, the ledger, every session). Pass `scope: "all"` for every project, `include_done: true` to list finished sessions and items too.
+- `mcp__project-pm__ledger`: `add`, `update` (owner, status `open` / `done` / `dropped`, note) and `list` the work items.
+
+A project is the folder a session works in; a git worktree under `.claude/worktrees/` or `.worktrees/` counts as its repository.
+
+## Requirements
+
+- **Claude Code desktop app, Code tab.** The PM uses the app's built-in session tools (`ccd_session_mgmt` to list, read and archive sessions; `ccd_session` to start the PM session), and sessions report their task lists through the app's `update_plan` and `wrap_up`. Sessions that keep their tasks with `TodoWrite` instead are tracked as well.
+- **A Claude Code version that supports function-hook mods.** Tested with 2.1.299.
+- **Optional: the [GitHub CLI](https://cli.github.com/) (`gh`), signed in,** to check CI on GitHub. Without it, CI status is judged from what the sessions said.
+- In an organization that manages Claude Code, the PM's role instructions (a `prompt.compose` hook) only apply when the organization lists this plugin in its managed settings. The board and the ledger work either way.
+
+## Language
+
+The board, the PM's instructions and its tool output are currently in Traditional Chinese. Status detection reads both English and Chinese, so sessions can work in either language. English UI strings are welcome as a contribution.
+
+## Data and privacy
+
+- Each session writes only its own record: `~/.claude/project-pm/sessions/<session id>.json` (its task list, last recap, open question, latest prompt and last answer, clipped).
+- Each project has one file for its PM and ledger: `~/.claude/project-pm/projects/<project>-<hash>.json`.
+- The mod itself sends nothing anywhere. Listing, reading and archiving sessions go through the desktop app's built-in tools. To check CI it runs `git` and `gh` in the session's folder, so `gh` contacts GitHub with your own login, as it would if you ran it yourself.
+- Sessions opened before the install keep no record; the board shows their last message, read from the transcript.
+- After `/reload-plugins`, the PM's `board` and `ledger` tools come back on its next turn (your next message or a notification); no need to restart the session.
+
+## Development
 
 ```bash
 claude plugin validate .
 claude plugin test .
 ```
 
-## 授權
+The tests (`tests/pm.test.ts`) run against Claude Code's plugin test host with an in-memory desktop app, disk and `gh`; they need no login or API key. CI runs the same two commands on every push and pull request.
 
-MIT
+`docs/demo/board.html` draws the README images from made-up data; see [docs/demo/README.md](docs/demo/README.md).
+
+Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+[MIT](LICENSE)
