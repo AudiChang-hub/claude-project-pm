@@ -7,6 +7,7 @@ import type { EngineInterface, McpToolResult } from 'claude-code'
 import type { CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Session, Sessions, Track } from '../types'
 import {
   boardText,
+  betterCi,
   ciTargets,
   ciVerdict,
   ciWords,
@@ -32,7 +33,7 @@ import {
   statusOf,
   undeliveredOf,
 } from './sessions'
-import type { Project, Status } from './sessions'
+import type { CiRun, Project, Status } from './sessions'
 
 // The engine reads each module's state refs from its own source: these name the same values as the other modules'.
 const me = atom({ plugin: 'project-pm', key: 'me' } as const, null as Me | null)
@@ -281,48 +282,92 @@ async function run($: EngineInterface, argv: string[], cwd: string, timeoutMs: n
 /** How many named runs and commits one check tries before it falls back to the folder's HEAD. */
 const CI_CANDIDATES = 3
 
-async function askRun($: EngineInterface, cwd: string, id: string): Promise<CiCheck['state']> {
-  const out = await run($, ['gh', 'run', 'view', id, '--json', 'status,conclusion'], cwd, GH_TIMEOUT_MS)
+/** A named run's answer and the commit it ran on (a failed or called-off run hands its commit over). */
+async function askRun($: EngineInterface, cwd: string, id: string): Promise<{ state: CiCheck['state']; sha: string | null }> {
+  const out = await run($, ['gh', 'run', 'view', id, '--json', 'status,conclusion,workflowName,headSha'], cwd, GH_TIMEOUT_MS)
   try {
-    return out === null ? 'unknown' : ciVerdict([JSON.parse(out)])
+    const one = out === null ? null : (JSON.parse(out) as CiRun & { headSha?: string })
+
+    return one ? { state: ciVerdict([one]), sha: typeof one.headSha === 'string' ? one.headSha : null } : { state: 'unknown', sha: null }
   } catch {
-    return 'unknown'
+    return { state: 'unknown', sha: null }
   }
 }
 
 async function askCommit($: EngineInterface, cwd: string, sha: string): Promise<CiCheck['state']> {
-  const out = await run($, ['gh', 'run', 'list', '--commit', sha, '--limit', '20', '--json', 'status,conclusion'], cwd, GH_TIMEOUT_MS)
+  const out = await run($, ['gh', 'run', 'list', '--commit', sha, '--limit', '20', '--json', 'status,conclusion,workflowName'], cwd, GH_TIMEOUT_MS)
   try {
     const runs: unknown = out === null ? null : JSON.parse(out)
 
-    return Array.isArray(runs) ? ciVerdict(runs as { status?: string; conclusion?: string | null }[]) : 'unknown'
+    return Array.isArray(runs) ? ciVerdict(runs as CiRun[]) : 'unknown'
   } catch {
     return 'unknown'
   }
 }
 
+/** How many remote branch tips holding a commit are asked about with it. */
+const CI_TIPS = 2
+
 /**
- * What GitHub says about the CI `text` left running in `cwd`. The runs and commits the words name are
- * tried likeliest first, a commit only when it is in this repository (a hash quoted from another project
- * or an example is not); when none answers, the folder's HEAD, when committed no later than the words.
+ * A commit's answer, with that of each remote branch tip that holds it: newer work on the same branch
+ * (a fix pushed after it, someone's later commit) answers for it too, the better answer standing (betterCi).
+ */
+async function askCommitOrNewer($: EngineInterface, cwd: string, sha: string): Promise<{ target: string; state: CiCheck['state'] }> {
+  let best = { target: `commit ${sha.slice(0, 7)}`, state: await askCommit($, cwd, sha) }
+  if (best.state === 'success') return best
+  const tips = ((await run($, ['git', 'for-each-ref', '--contains', sha, '--format=%(objectname)', 'refs/remotes'], cwd, GIT_TIMEOUT_MS)) ?? '')
+    .split('\n')
+    .filter((tip, i, all) => tip && tip !== sha && all.indexOf(tip) === i)
+  for (const tip of tips.slice(0, CI_TIPS)) {
+    const state = await askCommit($, cwd, tip)
+    if (betterCi(state, best.state) === state && state !== best.state) best = { target: `commit ${tip.slice(0, 7)}`, state }
+  }
+
+  return best
+}
+
+/**
+ * What GitHub says about the CI `text` left running in `cwd`.
+ *
+ * A named run that passed or still runs answers. Otherwise the commits the words name (likeliest first,
+ * only those in this repository; a failed or called-off run's own commit among them) are asked, each with
+ * the remote branch tips that hold it, skipping one that another named commit holds: when the words tell
+ * of commit A and then its fix B, B is the newer word. When none answers, the folder's HEAD, when committed
+ * no later than the words.
  */
 export async function askCi($: EngineInterface, cwd: string, text: string, saidAt: number): Promise<Omit<CiCheck, 'words' | 'checkedAt'>> {
   if (!cwd) return { target: '', state: 'unknown' }
   const named = ciTargets(text)
   let first = ''
+  const handed: string[] = []
   for (const id of named.runs.slice(0, CI_CANDIDATES)) {
-    const state = await askRun($, cwd, id)
-    if (state !== 'unknown') return { target: `run ${id}`, state }
+    const { state, sha } = await askRun($, cwd, id)
+    if (state === 'success' || state === 'pending') return { target: `run ${id}`, state }
+    if (sha) handed.push(sha)
+    else if (state !== 'unknown') return { target: `run ${id}`, state }
     first ||= `run ${id}`
   }
-  for (const short of named.shas.slice(0, CI_CANDIDATES)) {
+  const commits: string[] = []
+  for (const short of [...handed, ...named.shas.slice(0, CI_CANDIDATES)]) {
     const sha = await run($, ['git', 'rev-parse', '--verify', '--quiet', `${short}^{commit}`], cwd, GIT_TIMEOUT_MS)
-    if (!sha) continue
-    const target = `commit ${sha.slice(0, 7)}`
-    const state = await askCommit($, cwd, sha)
-    if (state !== 'unknown') return { target, state }
-    first ||= target
+    if (sha && !commits.includes(sha)) commits.push(sha)
   }
+  // `merge-base --is-ancestor` answers by its exit code alone: run's '' is yes, null is no.
+  const isHeldBy = async (older: string, newer: string) => (await run($, ['git', 'merge-base', '--is-ancestor', older, newer], cwd, GIT_TIMEOUT_MS)) !== null
+  const latest: string[] = []
+  for (const sha of commits) {
+    let isOlder = false
+    for (const other of commits) if (other !== sha && (await isHeldBy(sha, other))) isOlder = true
+    if (!isOlder) latest.push(sha)
+  }
+  let failed: { target: string; state: CiCheck['state'] } | null = null
+  for (const sha of latest) {
+    const answer = await askCommitOrNewer($, cwd, sha)
+    if (answer.state === 'success' || answer.state === 'pending') return answer
+    if (answer.state === 'failure') failed ??= answer
+    first ||= answer.target
+  }
+  if (failed) return failed
   const head = await run($, ['git', 'log', '-1', '--format=%H %ct'], cwd, GIT_TIMEOUT_MS)
   const [full, at] = head?.split(' ') ?? []
   // A HEAD committed after the words is not the commit they waited on.

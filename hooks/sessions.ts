@@ -54,7 +54,7 @@ const WAITING = new RegExp(
     /背景[^。\n「」]{0,20}?(完成|跑完|結束)(後|之後)/,
     // 等 CI 通過 / 等測試跑完: not the status named in quotes or brackets (「等待 CI」, (等待 CI)) or as a noun
     // (標成等待 CI, 維持等待 CI), not 不用等, not 等級 or 相等
-    /(?<![「『"'(（\[【相平同對均高]|不用|不必|不需要|無需|別|不要)(?<!標|維持|卡在|成|為|是|算|顯示)等(?![級等於同])[^。\n「」]{0,16}?(CI|部署|測試|建置|build|跑完|完成|結果)/,
+    /(?<![「『"'(（\[【相平同對均高]|不用|不必|不需要|無需|別|不要)(?<!標|維持|卡在|成|為|是|算|顯示)(?<!(?:[、／/→從和與及]|->)\s*(?=等待))等(?![級等於同]|待\s*CI\s*(?:[、／/→,，)）]|->))[^。\n「」]{0,16}?(CI|部署|測試|建置|build|跑完|完成|結果)/,
     // 跑完會通知 / 完成後再推送
     /(跑完|完成後)[^。\n「」]{0,8}?(會|再|就)/,
     /自動接著/,
@@ -73,12 +73,15 @@ const WAITING = new RegExp(
 /** Words that say CI (or the checks a release waits on) has not finished yet. */
 const CI_PENDING = new RegExp(
   [
-    // CI 還在跑 / checks still running / CI 尚未完成: the run's own state, not "檢查兩個工具還在" or a name like CI_PENDING
-    /(CI|GitHub Actions|workflow|pipeline|checks?)[^。\n]{0,16}(還在|仍在|正在|尚未|還沒|未(?!來|知)|進行中|執行中|跑(?!完)|\b(running|pending|in progress|queued|not (yet )?(finished|done|passed)))/,
+    // CI 還在跑 / checks still running / CI 尚未完成: the run's own state, not "檢查兩個工具還在", a name like CI_PENDING
+    // or the next status in a list (CI 失敗／等待 CI → 背景執行 → 未完成)
+    /(CI|GitHub Actions|workflow|pipeline|checks?)[^。\n→／、]{0,16}(還在|仍在|正在|尚未|還沒|未(?!來|知)|進行中|執行中|跑(?!完)|\b(running|pending|in progress|queued|not (yet )?(finished|done|passed)))/,
     /檢查[^。\n]{0,10}(還在(跑|執行|進行)|仍在(跑|執行|進行)|正在(跑|執行|進行)|尚未(跑完|完成|通過)|還沒(跑完|完成|通過|過)|進行中|執行中)/,
-    /(還在|仍在|正在)(跑|等)[^。\n]{0,8}(CI|測試|workflow|pipeline|檢查|checks?)/,
-    // 等 CI 通過: not the status named in quotes or brackets (「等待 CI」, (等待 CI)) or as a noun (不再標等待 CI), not 不用等
-    /(?<![「『"'(（\[【相平同對均高]|不用|不必|不需要|無需|別|不要)(?<!標|維持|卡在|成|為|是|算|顯示)等(?![級等於同])[^。\n]{0,8}(CI|checks?)/,
+    // 正在等 9f8e7d6 的 CI: room for a hash between
+    /(還在|仍在|正在)(跑|等)[^。\n]{0,16}(CI|測試|workflow|pipeline|檢查|checks?)/,
+    // 等 CI 通過: not the status named in quotes or brackets (「等待 CI」, (等待 CI)) or as a noun (不再標等待 CI, 從等待 CI 轉成,
+    // 未完成、等待 CI、CI 失敗, CI 失敗／等待 CI → 背景執行), not 不用等
+    /(?<![「『"'(（\[【相平同對均高]|不用|不必|不需要|無需|別|不要)(?<!標|維持|卡在|成|為|是|算|顯示)(?<!(?:[、／/→從和與及]|->)\s*(?=等待))等(?![級等於同]|待\s*CI\s*(?:[、／/→,，)）]|->))[^。\n]{0,16}(CI|checks?)/,
     /(waiting|wait) (for|on) (the )?(CI|checks?|workflow|pipeline)/,
     /(CI|checks?)[^。\n]{0,10}(通過|跑完|完成)(後|之後|再|才)/,
     /once (the )?(CI|checks?)[^.\n]{0,20}(pass|finish|complete)/,
@@ -165,12 +168,35 @@ export function ciTarget(text: string): { run: string } | { sha: string } | null
 }
 
 /** What GitHub's runs for a commit (or one run) come to: any still going is pending, any failed is failure. */
-export function ciVerdict(runs: { status?: string; conclusion?: string | null }[]): CiCheck['state'] {
-  if (runs.length === 0) return 'unknown'
-  if (runs.some(r => r.status !== 'completed')) return 'pending'
-  if (runs.some(r => !['success', 'skipped', 'neutral'].includes(String(r.conclusion)))) return 'failure'
+export type CiRun = { status?: string; conclusion?: string | null; workflowName?: string }
 
-  return 'success'
+/**
+ * What GitHub's runs for a commit (or one run) come to: any still going is pending, any failed is failure.
+ *
+ * A cancelled run is not a failure. One whose workflow has another run on the same commit (re-run, or run
+ * again after it was called off) is left out; a workflow whose runs were all cancelled never finished, so
+ * the commit has not passed either: unknown, and a newer commit or the words decide.
+ */
+export function ciVerdict(runs: CiRun[]): CiCheck['state'] {
+  const isCancelled = (r: CiRun) => r.status === 'completed' && r.conclusion === 'cancelled'
+  const workflow = (r: CiRun) => r.workflowName ?? ''
+  const counted = runs.filter(r => !isCancelled(r))
+  const unfinished = runs.some(r => isCancelled(r) && !counted.some(c => workflow(c) === workflow(r)))
+  if (counted.some(r => r.status !== 'completed')) return 'pending'
+  if (counted.some(r => !['success', 'skipped', 'neutral'].includes(String(r.conclusion)))) return 'failure'
+
+  return counted.length === 0 || unfinished ? 'unknown' : 'success'
+}
+
+/**
+ * Of two answers for the same work, the one that says more for it: a commit is as good as anything that
+ * holds it, so a newer build that passed clears an older one that failed or was called off, and one still
+ * running keeps it pending. success, then pending, then failure, then unknown.
+ */
+export function betterCi(a: CiCheck['state'], b: CiCheck['state']): CiCheck['state'] {
+  const order: CiCheck['state'][] = ['success', 'pending', 'failure', 'unknown']
+
+  return order.indexOf(a) <= order.indexOf(b) ? a : b
 }
 
 /**

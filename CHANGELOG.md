@@ -5,6 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions match `version` in `.claude-plugin/plugin.json`.
 
+## [Unreleased]
+
+### Fixed
+- A cancelled CI run counted as a failure, so a session that called off one commit's run and pushed a fix showed as *CI failed* after the fix passed. A cancelled run is now left out when its workflow ran again on the same commit; a workflow whose runs were all cancelled never finished, so the commit has not passed either and a newer commit, the folder's `HEAD` or the words decide (the words of CI still to run keep it *Waiting on CI*).
+- When a report named several commits, an older one could answer for the newer one. A named commit that another named commit holds is now skipped, a failed or cancelled run named by id hands over its commit to the same rule, and each commit is asked together with the remote branch tips that hold it, the better answer standing (passed, then running, then failed): a fix that passed clears the commit it fixed, and a fix still running keeps it waiting.
+- 「正在等 9f8e7d6 的 CI」 ("waiting for 9f8e7d6's CI") was not read as CI still running: a hash between the words no longer hides it. The status 等待 CI in a list or a chain of statuses (未完成、等待 CI、CI 失敗, CI 失敗／等待 CI → 背景執行) is a name, not CI running.
+
 ## [0.4.0] - 2026-10-19
 
 ### Added

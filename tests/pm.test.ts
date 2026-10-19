@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { applyPlan, caveatOf, ciTarget, ciTargets, isCiPending, isPushedContent, keyFile, parseLastWord, projectKey, statusOf, undeliveredOf } from '../hooks/sessions'
+import { applyPlan, betterCi, caveatOf, ciTarget, ciTargets, ciVerdict, isCiPending, isPushedContent, keyFile, parseLastWord, projectKey, statusOf, undeliveredOf } from '../hooks/sessions'
 
 const NOW = Date.parse('2026-10-17T12:00:00.000Z')
 const PROJECT = 'C:\\Users\\dev\\Projects\\Acme 商店後台'
@@ -367,7 +367,7 @@ test('GitHub decides whether CI the words left running is still running', async 
 
   // Still running on GitHub: the old guard stands.
   expect(await board()).toMatch(/\[等待 CI・未完成\] 「商品列表頁」/)
-  expect(asked).toContain(`gh run list --commit ${FULL} --limit 20 --json status,conclusion @ ${PROJECT}`)
+  expect(asked).toContain(`gh run list --commit ${FULL} --limit 20 --json status,conclusion,workflowName @ ${PROJECT}`)
   expect(await close()).toMatch(/無法將 T-01 標記為完成：負責的 Session「商品列表頁」CI 尚未跑完/)
 
   // GitHub can't be asked: the words alone decide, as before.
@@ -701,6 +701,9 @@ test('CI named in quotes or in a rule is not CI still running', () => {
     '已推上 main（CI 還在跑）。',
     'Pushed to main; waiting for CI before tagging.',
     'The checks are still running.',
+    '修正已推上 9f8e7d6，正在等 9f8e7d6 的 CI。',
+    '接下來：推送、等 CI 通過後部署。',
+    '等待 CI 通過後再部署。',
   ]
   // A real session's report about this very board, its own CI long passed.
   const report = `T-04 修好了：看板現在只有在回報說工作「還在進行」時，才會判成「背景執行」。commit 是 \`9638755\`，在本機 main 上，沒有 push、也沒有打 tag。19 項測試全部通過，validate 也通過。
@@ -727,6 +730,9 @@ test('CI named in quotes or in a rule is not CI still running', () => {
     '- HEAD 比回報晚時維持等待 CI。',
     // A name in code.
     'WAITING 和 CI_PENDING 都一樣。',
+    // The status in a list or a chain of statuses.
+    '- 優先順序：待回覆 → CI 失敗／等待 CI → 背景執行 → 未完成 → 待發布 → 已結束。CI 通過後如果回報還說沒部署，會從等待 CI 轉成待發布。',
+    '- 第三個指標改名「尚未完成」，把未完成、等待 CI、CI 失敗、待發布都算進去。',
   ]
   expect(running.filter(t => !isCiPending(t))).toEqual([])
   expect(named.filter(isCiPending)).toEqual([])
@@ -768,14 +774,14 @@ test('GitHub is asked about a commit of this repository, else about its HEAD', a
   // The two quoted hashes are not commits here: the session's own one answers.
   expect(await board()).not.toMatch(/等待 CI・未完成\] 「商品列表頁」/)
   expect(asked.filter(a => a.startsWith('git rev-parse')).map(a => a.split(' ')[4])).toEqual(['8c41d2e^{commit}', 'b8e41f0^{commit}', '3fa1c2e^{commit}'])
-  expect(asked).toContain(`gh run list --commit ${FULL} --limit 20 --json status,conclusion`)
+  expect(asked).toContain(`gh run list --commit ${FULL} --limit 20 --json status,conclusion,workflowName`)
 
   // None of the named hashes is here: the folder's HEAD, committed before the words, answers instead.
   isOwnNamed = false
   files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { lastAnswer: `${words} `, turnAt: at, planAt: at })))
   await clock.advance(31_000)
   expect(await board()).not.toMatch(/等待 CI・未完成\] 「商品列表頁」/)
-  expect(asked).toContain(`gh run list --commit ${HEAD} --limit 20 --json status,conclusion`)
+  expect(asked).toContain(`gh run list --commit ${HEAD} --limit 20 --json status,conclusion,workflowName`)
 
   // A HEAD committed after the words is not what they waited on: the words decide.
   headAt = Math.floor(at / 1000) + 60
@@ -855,4 +861,108 @@ test('a commit counts as pushed once its content is on a remote branch: rebased,
   const bare = fakeGit(commits, { main: 'mine' }, { 'origin/main': 'later' })
   expect(await isPushedContent(bare, 'l1')).toBe(false)
   expect(await isPushedContent(bare, 'l2')).toBe(true)
+})
+
+test('a cancelled run is no failure: left out when its workflow ran again, else the commit has not passed', () => {
+  const run = (conclusion: string, workflowName = 'CI') => ({ status: 'completed', conclusion, workflowName })
+  expect(ciVerdict([run('cancelled'), run('success')])).toBe('success')
+  expect(ciVerdict([run('cancelled'), run('failure')])).toBe('failure')
+  expect(ciVerdict([run('cancelled')])).toBe('unknown')
+  expect(ciVerdict([run('cancelled'), run('success', 'Lint')])).toBe('unknown')
+  expect(ciVerdict([run('skipped', 'Docs'), run('success')])).toBe('success')
+  expect(ciVerdict([run('cancelled'), { status: 'in_progress', conclusion: null, workflowName: 'CI' }])).toBe('pending')
+
+  expect(betterCi('failure', 'success')).toBe('success')
+  expect(betterCi('failure', 'pending')).toBe('pending')
+  expect(betterCi('unknown', 'failure')).toBe('failure')
+})
+
+test('a fix pushed after a cancelled or failed commit is what CI waits on', async ($, on) => {
+  const files: Files = new Map()
+  const item = { id: 1, text: '商品列表頁加匯出 CSV', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
+  const at = Date.parse('2026-10-17T11:50:00.000Z')
+  const A = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
+  const B = '9f8e7d6c5b4a39281706f5e4d3c2b1a098765432'
+  // A first, then its fix B on top; the remote branch's tip is B (or A, before B is pushed).
+  let tip = B
+  // The folder's HEAD: committed after the words unless a scenario says otherwise (others keep committing).
+  let headAt = Math.floor(at / 1000) + 600
+  const runs: Record<string, object[]> = {}
+  let saying = 0
+  const say = (lastAnswer: string) => {
+    saying += 1
+    files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { lastAnswer: `${lastAnswer}${' '.repeat(saying)}`, turnAt: at, planAt: at })))
+  }
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files, [], argv => {
+    const full = (short: string) => [A, B].find(c => c.startsWith(short.replace('^{commit}', '')))
+    if (argv[1] === 'rev-parse') return full(argv[4]!) ? { exitCode: 0, stdout: full(argv[4]!)! } : { exitCode: 1, stdout: '' }
+    if (argv[1] === 'merge-base') return { exitCode: argv[3] === A && argv[4] === B ? 0 : 1, stdout: '' }
+    if (argv[1] === 'for-each-ref') return { exitCode: 0, stdout: argv[3] === A || argv[3] === tip ? `${tip}\n${tip}` : '' }
+    if (argv[1] === 'log') return { exitCode: 0, stdout: `${tip} ${headAt}` }
+    if (argv[0] === 'gh' && argv[1] === 'run' && argv[2] === 'list') return { exitCode: 0, stdout: JSON.stringify(runs[argv[4]!] ?? []) }
+    if (argv[0] === 'gh' && argv[2] === 'view') return { exitCode: 0, stdout: JSON.stringify({ status: 'completed', conclusion: 'cancelled', workflowName: 'CI', headSha: A }) }
+
+    return null
+  })
+  await $.session.start(START)
+  const board = async () => {
+    await clock.advance(61_000)
+    return String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  }
+  const cancelled = [{ status: 'completed', conclusion: 'cancelled', workflowName: 'CI' }]
+  const failed = [{ status: 'completed', conclusion: 'failure', workflowName: 'CI' }]
+  const passed = [{ status: 'completed', conclusion: 'success', workflowName: 'CI' }]
+  const running = [{ status: 'in_progress', conclusion: null, workflowName: 'CI' }]
+
+  // A called off, its fix B passed: done, and the ledger closes.
+  runs[A] = cancelled
+  runs[B] = passed
+  say('a1b2c3d 不符合專案的命名規則，所以取消了它的 CI；修正已推上 9f8e7d6，正在等 9f8e7d6 的 CI。')
+  let shown = await board()
+  expect(shown).not.toMatch(/「商品列表頁」\(local_open\) (最後回報 CI|GitHub)/)
+  expect(shown).not.toMatch(/CI 失敗・需處理\] 「商品列表頁」/)
+
+  // B still running: waiting on CI, not failed.
+  runs[B] = running
+  say('a1b2c3d 不符合專案的命名規則，所以取消了它的 CI；修正已推上 9f8e7d6，正在等 9f8e7d6 的 CI。')
+  shown = await board()
+  expect(shown).toMatch(/\[等待 CI・未完成\] 「商品列表頁」/)
+  expect(shown).not.toMatch(/CI 失敗・需處理\] 「商品列表頁」/)
+
+  // A failed rather than called off, B passed: the fix is the newer word.
+  runs[A] = failed
+  runs[B] = passed
+  say('a1b2c3d 的 CI 失敗了，修正已推上 9f8e7d6，正在等 9f8e7d6 的 CI。')
+  expect(await board()).not.toMatch(/CI 失敗・需處理\] 「商品列表頁」/)
+
+  // Only A named, called off; the branch's tip B holds it and passed.
+  runs[A] = cancelled
+  say('已推上 a1b2c3d，CI 還在跑。')
+  expect(await board()).not.toMatch(/「商品列表頁」\(local_open\) (最後回報 CI|GitHub)/)
+
+  // A's old run still going, its fix B failed: B is the newer word, and it failed.
+  runs[A] = running
+  runs[B] = failed
+  say('a1b2c3d 的 CI 還在跑，但修正已推上 9f8e7d6，正在等 9f8e7d6 的 CI。')
+  shown = await board()
+  expect(shown).toMatch(/\[CI 失敗・需處理\] 「商品列表頁」\(local_open\) GitHub 上的 CI（commit 9f8e7d6）失敗/)
+  runs[B] = passed
+
+  // A cancelled run named by its id: its commit A is handed over, and B, named after it, answers.
+  say('run 41022337761 被我取消了；修正 9f8e7d6 已推上，正在等它的 CI。')
+  expect(await board()).not.toMatch(/「商品列表頁」\(local_open\) (最後回報 CI|GitHub)/)
+
+  // Called off, and nothing after it: not passed, not failed. The words decide: waiting on CI.
+  tip = A
+  headAt = Math.floor(at / 1000) - 60
+  runs[A] = cancelled
+  delete runs[B]
+  say('已推上 a1b2c3d，取消了它的 CI，等一下再重跑 CI。')
+  shown = await board()
+  expect(shown).toMatch(/\[等待 CI・未完成\] 「商品列表頁」/)
+  expect(shown).not.toMatch(/CI 失敗・需處理\] 「商品列表頁」/)
+  const refused = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done' } as never)) as { result?: unknown }).result)
+  expect(refused).toMatch(/無法將 T-01 標記為完成：負責的 Session「商品列表頁」CI 尚未跑完/)
 })
