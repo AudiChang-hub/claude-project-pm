@@ -723,6 +723,38 @@ test('its own delivery said as what comes next is still to deliver; offers, rule
   expect(statusOf(idle, said, undefined, NOW, undefined, { words: later, sha: '3fa1c2e', isPushed: true, checkedAt: NOW })).toBe('done')
 })
 
+test("a release handed on to the next version, or the person's own plan, is not this session's to deliver", () => {
+  const kinds = (text: string) => (undeliveredOf(text)?.kinds ?? []).join(',') || 'none'
+  // A real session's report: its release done and checked, the next version cleared to go, an aside on the person's plan.
+  const handedOn =
+    '2.4.1 已上正式站並驗證通過：標籤 v2.4.1、commit 3fa1c2e。結果已回報 PM，2.4.2 可以放行。這兩件商品我都沒碰，你原本打算上線後自己在商品頁調整，可以先看一下它們現在的狀態。'
+  expect(kinds(handedOn)).toBe('none')
+  const idle = { id: 'x', title: 't', cwd: '', isRunning: false, lastActivityAt: new Date(NOW - 5 * 60000).toISOString(), isPinned: false, hasOpenPr: false }
+  expect(statusOf(idle, track('x', { lastAnswer: handedOn }) as never, undefined, NOW)).toBe('done')
+
+  const notOwn = [
+    '結果已回報 PM，下一個版本可以放行。',
+    '下一版可以接著推。',
+    '可以通知下一位部署。',
+    '下個版本可以開始。',
+    'The next release can go ahead.',
+    '你原本打算上線後自己在商品頁調整。',
+    "You'll deploy it yourself after review.",
+    // The no-code statement and the bare negation in one clause, joined by 、.
+    '沒有改程式、沒有 push，所以不需要版號。',
+    '沒有改程式、也沒有 push。',
+  ]
+  expect(notOwn.filter(text => kinds(text) !== 'none')).toEqual([])
+
+  const own: [string, string][] = [
+    ['我之後會幫你部署到正式站。', 'release'],
+    ['測試通過後我再通知你，然後部署。', 'release'],
+    ['Next: deploy to production.', 'release'],
+    ['沒有改程式、但設定檔沒有 commit。', 'commit'],
+  ]
+  expect(own.filter(([text, want]) => kinds(text) !== want)).toEqual([])
+})
+
 test('work with no code to deliver is not left undelivered by a bare "no push"; work still to come is', () => {
   const kinds = (text: string) => (undeliveredOf(text)?.kinds ?? []).join(',') || 'none'
   // A real session's report on a data fix: nothing was ever going to be pushed.

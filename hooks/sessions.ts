@@ -389,7 +389,7 @@ const WAITING_TONE = /等(?!於)|待(?!發布|處理事項)|之後(?:再|才)|�
  * 多了兩個 commit, 合併後的提交, 之後部署會改成, commit 再 push 就會更新.
  */
 const FUTURE = new RegExp(
-  String.raw`(?:之後|稍後|待會兒?|晚點|接下來|下一步|再來|明天|今晚|下午|下週|隨後|然後|預計|打算|準備|將|(?:確認|通過|審核|審查|放行|review|合併|完成|跑完|結束)後)[^。，,；;：:\n]{0,6}?(?<![個筆次條份的]\s*)((?:${VERBS})|推(?![薦測論動進出廣]))(?!\s*(?:[就便]?會|時|的))|\b(?:I'll|I will|I'm going to|I am going to|we'll|we will|will|going to|next[:,]?|then|later|tomorrow)\s+(?:then\s+)?((?:${VERBS}))`,
+  String.raw`(?:之後|稍後|待會兒?|晚點|接下來|下一步|再來|明天|今晚|下午|下週|隨後|然後|預計|打算|準備|將|(?:確認|通過|審核|審查|放行|review|合併|完成|跑完|結束)後)[^。，,；;：:\n]{0,6}?(?<![個筆次條份的]\s*)((?:${VERBS})|推(?![薦測論動進出廣]))(?!\s*(?:[就便]?會|時|的))|\b(?:I'll|I will|I'm going to|I am going to|we'll|we will|will|going to|next[:,]|then|later|tomorrow)\s+(?:then\s+)?((?:${VERBS}))`,
   'gi',
 )
 /**
@@ -410,6 +410,12 @@ const NOT_FUTURE = /不|沒|別|無需|毋需|了|已|完成|過|可能|也許|�
  * An offer is theirs to take (a question already shows the session as waiting on them), not this session's to-do.
  */
 const OFFER = /你可以|您可以|你也可以|您也可以|你要|可以|建議|要不要|是否要|\byou (?:can|could|may|might)\b|\bwould you\b|\bfeel free\b|\boptional(?:ly)?\b|\bif you (?:want|like)\b/i
+
+/**
+ * The person's own plan, not this session's: 你原本打算上線後自己改, you'll deploy it. Not 幫你, 給你 or 通知你,
+ * where the session still does the work.
+ */
+const YOURS = /(?<![幫給替向跟和對讓與知訴])(?:你|您)(?!的)|\byou(?:'ll| will| plan| were going| are going)\b/i
 
 /** What may stand before a bare negation for it to be the report's own, with no other subject: 也沒有 push, 我也沒有 push. */
 const BARE_PREFIX = /^[\s,，、]*(?:(?:我們|我|也|都|並|而且|且|另外|同時|所以|因此|則|就|then|and|also|so|I|we)[\s,，、]*)*$/i
@@ -496,7 +502,8 @@ export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: strin
         // 沒有改程式，也沒有 push: nothing was there to push. Not 還沒 push (or "not pushed yet"), not 設定檔沒有 commit,
         // not while it waits.
         const isYet = YET.test(m[1] ?? m[3] ?? '') || /^\s*yet\b/i.test(sentence.slice((m.index ?? 0) + m[0].length))
-        if (isNoCode && !isYet && !isWaiting && BARE_PREFIX.test(before)) continue
+        // The no-code statement itself may stand just before it (沒有改程式、沒有 push): it is no other subject.
+        if (isNoCode && !isYet && !isWaiting && BARE_PREFIX.test(before.replace(new RegExp(NO_CODE.source, 'gi'), ''))) continue
         for (const kind of verbsIn(m[2] ?? m[4] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: true })
       }
       for (const m of sentence.matchAll(DONE)) for (const kind of verbsIn(m[1] ?? m[2] ?? m[3] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: false })
@@ -507,7 +514,7 @@ export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: strin
       }
       for (const m of sentence.matchAll(AWAITING_GO)) said.push({ at: m.index ?? 0, kind: 'release', isLeft: true })
       // Its own delivery said as what comes next: not an offer to the person, not a question to them, not a "won't".
-      if (!OFFER.test(sentence) && !isQuestion) {
+      if (!OFFER.test(sentence) && !YOURS.test(sentence) && !isQuestion) {
         for (const m of sentence.matchAll(FUTURE)) {
           // The marker's own words (通過後) aside: a negation or a past in what follows it.
           if (NOT_FUTURE.test(m[0].replace(/^(?:之後|稍後|待會兒?|晚點|接下來|下一步|再來|明天|今晚|下午|下週|隨後|然後|預計|打算|準備|將|(?:確認|通過|審核|審查|放行|review|合併|完成|跑完|結束)後)/i, ''))) continue
