@@ -128,9 +128,14 @@ export function reportedText(text: string): string {
   const blank = (i: number) => {
     parts[i] = ' '.repeat(parts[i]!.length)
   }
+  // Another session spoken of as 它 or by its link, or a rule laid out (流程是, 規範是): the sentence's next clauses
+  // without an I of their own go on with it (接下來它會推送，CI 通過後部署; 規範是先打標籤，通過後才推標籤).
+  let isCarried = false
   for (let i = 0; i < parts.length; i += 2) {
     const part = parts[i]!
-    if (ABOUT_A_RULE.test(part)) blank(i)
+    if (i >= 2 && !/^[，,]+$/.test(parts[i - 1]!)) isCarried = false
+    if (THEIRS.test(part) || RULE_LEAD.test(part)) isCarried = true
+    if (ABOUT_A_RULE.test(part) || (isCarried && !FIRST_PERSON.test(part))) blank(i)
     else if (DISCLAIMER.test(part)) {
       blank(i)
       // 那些未提交的修改，我都沒有動: what is disclaimed often stands just before, in the same sentence,
@@ -346,7 +351,7 @@ export type DeliveryKind = 'commit' | 'push' | 'release'
 
 const VERB = String.raw`commit(?:ted)?|push(?:ed)?|deploy(?:ed)?|release[sd]?|merge[sd]?|ship(?:ped)?|提交|推送|推上|發布|發佈|部署|上線|合併|交付|升版`
 /** A delivery verb, and those joined to it: 沒有 commit 或 push, not committed or pushed. */
-const VERBS = String.raw`(?:${VERB})(?![^\s，。,；;]{0,2}(?:設定|腳本|流程|文件|檔案|權限|環境|相關|說明|紀錄))(?:\s*(?:或|和|、|及|跟|與|也沒有?|/|／|,|and|or|nor)\s*(?:${VERB}))*`
+const VERBS = String.raw`(?:${VERB})(?![^\s，。,；;]{0,2}(?:設定|腳本|流程|文件|檔案|權限|環境|相關|說明|紀錄))(?:\s*(?:或|和|、|及|跟|與|並|再|也沒有?|/|／|,|and|or|nor)\s*(?:${VERB}))*`
 /** 尚未 commit, 還沒上線, 仍未 commit 或 push, 也沒有 push: the negation a few characters before the verb (a verb after 的 is a noun: 還沒公開的 commit). */
 const NOT_DONE = new RegExp(String.raw`(尚未|還沒有?|仍未|仍然沒有|並未|并未|沒有?|未)[^。，,；;：:\n]{0,4}?(?<!的\s*)(${VERBS})|\b(not(?: yet)?|haven't(?: yet)?|hasn't(?: yet)?|have not(?: yet)?|has not(?: yet)?|didn't|did not)\s+(?:been\s+)?(${VERBS})`, 'gi')
 /**
@@ -377,10 +382,39 @@ function hasNoCode(text: string): boolean {
 }
 /** The work waits on something before it is done: 等 PM 確認, 確認後再推, pending, until. A bare negation then counts. */
 const WAITING_TONE = /等(?!於)|待(?!發布|處理事項)|之後(?:再|才)|稍後|晚點|once\b|\buntil\b|\bpending\b|\bwaiting\b|\bafter (?:the )?(?:PM|review|approval|go-ahead)/i
+/**
+ * Its own delivery still to come, said as what happens next with no negation: 之後再 push, 接下來部署到正式站,
+ * 明天發布 2.4.2, PM 確認後我再推, 稍後 commit, I'll push after review, Next: deploy to production. A time or a step
+ * ahead, then (a few characters on) the verb; 推 alone is a push here (再推, 才推). Not a verb used as a noun:
+ * 多了兩個 commit, 合併後的提交, 之後部署會改成, commit 再 push 就會更新.
+ */
+const FUTURE = new RegExp(
+  String.raw`(?:之後|稍後|待會兒?|晚點|接下來|下一步|再來|明天|今晚|下午|下週|隨後|然後|預計|打算|準備|將|(?:確認|通過|審核|審查|放行|review|合併|完成|跑完|結束)後)[^。，,；;：:\n]{0,6}?(?<![個筆次條份的]\s*)((?:${VERBS})|推(?![薦測論動進出廣]))(?!\s*(?:[就便]?會|時|的))|\b(?:I'll|I will|I'm going to|I am going to|we'll|we will|will|going to|next[:,]?|then|later|tomorrow)\s+(?:then\s+)?((?:${VERBS}))`,
+  'gi',
+)
+/**
+ * After a future verb, what makes it a consequence, a noun or a fact: (more verbs, then) 就會, 便會, 會, 時, 的;
+ * a commit hash (之後另外提交 7fcc930: a commit to come has none yet); a 就/便…會 soon after (之後推送、SSH 就不會再詢問).
+ */
+const NOUN_AFTER = new RegExp(
+  String.raw`^\s*(?:(?:或|和|、|及|跟|與|並|再|and|or)\s*(?:${VERB})\s*)*(?:[就便]?會|時|的|` + '`?' + String.raw`[0-9a-f]{7,40}\b)|^[^。，,；;\n]{0,8}?[就便]不?會`,
+  'i',
+)
+/**
+ * A future that will not come (不會再部署, won't deploy), a past told in order (之後它完成部署, 之後補了一個提交),
+ * a guess (今晚可能還會推送, might deploy), or a noun that follows the marker (接下來的推版).
+ */
+const NOT_FUTURE = /不|沒|別|無需|毋需|了|已|完成|過|可能|也許|或許|大概|^的|won't|will not|never|no longer|\bmaybe\b|\bprobably\b|\bmight\b/i
+/**
+ * Words that leave the next step to the person: 你可以之後再 push, 下一步可以部署, 建議, 要不要, you can, you could.
+ * An offer is theirs to take (a question already shows the session as waiting on them), not this session's to-do.
+ */
+const OFFER = /你可以|您可以|你也可以|您也可以|你要|可以|建議|要不要|是否要|\byou (?:can|could|may|might)\b|\bwould you\b|\bfeel free\b|\boptional(?:ly)?\b|\bif you (?:want|like)\b/i
+
 /** What may stand before a bare negation for it to be the report's own, with no other subject: 也沒有 push, 我也沒有 push. */
 const BARE_PREFIX = /^[\s,，、]*(?:(?:我們|我|也|都|並|而且|且|另外|同時|所以|因此|則|就|then|and|also|so|I|we)[\s,，、]*)*$/i
 /** 已推上 main, 已部署, 部署完成, 上線了, pushed to main: the same kinds done, which a later word may say. */
-const DONE = new RegExp(String.raw`(?:已經?|都已|也已|皆已)[^。，,；;：:\n]{0,4}?(${VERBS})|(${VERB})(?:完成|好了|成功|了)|\b(?:I|we|it|was|were|is|has been|have been)\s+(committed|pushed|deployed|released|merged|shipped)\b`, 'gi')
+const DONE = new RegExp(String.raw`(?:已經?|都已|也已|皆已|完成(?!後))[^。，,；;：:\n]{0,4}?(${VERBS})|(${VERB})(?:完成|好了|成功|了)|\b(?:I|we|it|was|were|is|has been|have been)\s+(committed|pushed|deployed|released|merged|shipped)\b`, 'gi')
 /**
  * Delivery waits on someone's word: 等 PM 放行, 等 PM 通知 2.4.1 上線後才發布, 等確認才 push, waiting for
  * your go-ahead. Not 等 PM 下一輪確認 (a check to come, with nothing to deliver after it).
@@ -395,13 +429,17 @@ const AWAITING_GO = new RegExp(
  * (其他 Session 還沒提交的修改都原樣留著: a folder shared with other sessions).
  */
 const ABOUT_A_RULE =
-  /另一個 ?Session|另個 ?Session|另外一個 ?Session|(?:另一個|另個|另外一個|另一|其他|別的|別個)\s*(?:Session|session|人|同事|版本|分支|專案)|其他人|別人|他人|其餘|another session|other sessions?|someone else|someone's|判|列為|列進|標成|標為|視為|字眼|說法|正則|regex|正例|反例|這類|例如|像是|顯示|不能是|不算|才算|當成|當作|被當|(?<![小同即當準及按暫])時\s*$|(?<![小同即當準及按暫])時(?:就|會|才|便|也|一樣|照樣|仍|都)|的時候|的話|如果|假如|只要|一旦|回報(?:裡|中|上)?[^，,。]{0,4}?(?:說|寫|宣告|聲明|提到)|摘要[^，,。]{0,4}?(?:說|寫|宣告|聲明|提到)|提到|e\.g\.|for example|such as|\bif\b|\bwhen\b/i
+  /另一個 ?Session|另個 ?Session|另外一個 ?Session|(?:另一個|另個|另外一個|另一|其他|別的|別個)\s*(?:Session|session|工作階段|人|同事|版本|分支|專案|工作|任務|項目)|(?:由|交給|交由)\s*[^\s，,。]{1,12}?\s*(?:負責|管|處理|接手|主導)|子 ?Session|子工作階段|它(?:們)?(?=會|將|就|再|要|先|已|還|也|正|在|自己|負責)|\(#local_|其他人|別人|他人|其餘|another session|other sessions?|someone else|someone's|判|列為|列進|標成|標為|視為|字眼|說法|正則|regex|正例|反例|這類|例如|像是|顯示|不能是|不算|才算|當成|當作|被當|(?<![小同即當準及按暫])時\s*$|(?<![小同即當準及按暫])時(?:就|會|才|便|也|一樣|照樣|仍|都)|的時候|的話|如果|假如|只要|一旦|回報(?:裡|中|上)?[^，,。]{0,4}?(?:說|寫|宣告|聲明|提到)|(?:流程|步驟|順序|做法|規則|規範|規定|慣例)(?:是|為|：|:)|\bthe (?:process|flow|order|rule) is\b|摘要[^，,。]{0,4}?(?:說|寫|宣告|聲明|提到)|提到|e\.g\.|for example|such as|\bif\b|\bwhen\b/i
 /**
  * A clause that disowns what it speaks of: 我都沒有動, 沒碰, 不是我的, 不屬於這次, not mine, I didn't touch.
  * Its words, and the subject-less clause it disowns just before it, say nothing about this session's work.
  */
 const DISCLAIMER =
   /(?<![還尚仍])(?:都|也|並|完全)?沒(?:有)?(?:動|碰|改動)(?![手工])(?:過|到)?|沒碰|不是我的|不是這次的|不屬於(?:這次|本次|我)|與我無關|not mine|isn't mine|aren't mine|weren't mine|\bI (?:didn't|did not|haven't|have not) touch|left (?:them|it|those|that) (?:alone|untouched)|untouched/i
+/** Another session spoken of as 它 (it) or by its link, whose words may run on into the next clauses. */
+const THEIRS = /它(?:們)?(?=會|將|就|再|要|先|已|還|也|正|在|自己|負責)|\(#local_/
+/** A rule or a process laid out, whose words may run on into the next clauses: 流程是, 規範是, the process is. */
+const RULE_LEAD = /(?:流程|步驟|順序|做法|規則|規範|規定|慣例)(?:是|為|：|:)|\bthe (?:process|flow|order|rule) is\b/i
 /** A clause with its own I: what it says is this session's own. */
 const FIRST_PERSON = /我|自己|\bI\b|\bwe\b|\bmy\b|\bour\b/i
 /** What a possessive (X 的未提交修改) may name and still be this session's own: 我, this turn, now, here. */
@@ -440,7 +478,11 @@ export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: strin
   // anything is read: of what is left, a kind's last word stands.
   const plain = reportedText(text.replace(NOTHING_LEFT, ''))
   const isNoCode = hasNoCode(plain)
-  for (const whole of plain.split(/[。！？!?；;\n]+|\.\s+/)) {
+  // Sentences with what ends them: a question mark makes the sentence a question to the person.
+  const pieces = plain.split(/([。！？!?；;\n]+|\.\s+)/)
+  for (let p = 0; p < pieces.length; p += 2) {
+    const whole = pieces[p]!
+    const isQuestion = /[?？]/.test(pieces[p + 1] ?? '')
     // A wait anywhere in the sentence (沒有 push，等 PM 確認) keeps its bare negations: the work is still to come.
     const isWaiting = WAITING_TONE.test(whole)
     for (const sentence of whole.split(/[，,]+/)) {
@@ -464,6 +506,18 @@ export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: strin
         for (const kind of kinds) said.push({ at: m.index ?? 0, kind, isLeft: false })
       }
       for (const m of sentence.matchAll(AWAITING_GO)) said.push({ at: m.index ?? 0, kind: 'release', isLeft: true })
+      // Its own delivery said as what comes next: not an offer to the person, not a question to them, not a "won't".
+      if (!OFFER.test(sentence) && !isQuestion) {
+        for (const m of sentence.matchAll(FUTURE)) {
+          // The marker's own words (通過後) aside: a negation or a past in what follows it.
+          if (NOT_FUTURE.test(m[0].replace(/^(?:之後|稍後|待會兒?|晚點|接下來|下一步|再來|明天|今晚|下午|下週|隨後|然後|預計|打算|準備|將|(?:確認|通過|審核|審查|放行|review|合併|完成|跑完|結束)後)/i, ''))) continue
+          // A verb that goes on into a consequence or a noun (commit 再 push 就會更新, 部署時, 部署的): not a step to take.
+          if (NOUN_AFTER.test(sentence.slice((m.index ?? 0) + m[0].length))) continue
+          const named = m[1] ?? m[2] ?? ''
+          const kinds = /^推$/.test(named) ? (['push'] as const) : verbsIn(named)
+          for (const kind of kinds) said.push({ at: m.index ?? 0, kind, isLeft: true })
+        }
+      }
       for (const one of said.sort((a, b) => a.at - b.at)) last.set(one.kind, one.isLeft)
     }
   }

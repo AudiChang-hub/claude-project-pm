@@ -387,17 +387,18 @@ test('GitHub decides whether CI the words left running is still running', ZH, as
   expect(failed).not.toMatch(/等待 CI・未完成\] 「商品列表頁」/)
   expect(await close()).toMatch(/無法將 T-01 標記為完成：負責的 Session「商品列表頁」GitHub 上的 CI 失敗/)
 
-  // Re-run and passed: done, and not asked again after that.
+  // Re-run and passed: no longer waiting on CI, and not asked again after that. But the words said tagging and
+  // deploying come after CI, and nothing since says they happened: not released, not ended.
   runs = [{ status: 'completed', conclusion: 'success' }]
   await clock.advance(5 * 60_000 + 1000)
   const passed = await board()
   expect(passed).not.toMatch(/「商品列表頁」\(local_open\) (最後回報 CI|GitHub)/)
-  expect(passed).toMatch(/### \[已結束\] 商品列表頁/)
+  expect(passed).toMatch(/### \[待發布・未完成\] 商品列表頁/)
   const before = asked.length
   await clock.advance(10 * 60_000)
   await board()
   expect(asked.length).toBe(before)
-  expect(await close()).toMatch(/已更新工作項目 T-01/)
+  expect(await close()).toMatch(/無法將 T-01 標記為完成：負責的 Session「商品列表頁」最後回報尚未交付/)
 })
 
 test('a recap that says nothing is left is not a caveat', () => {
@@ -656,6 +657,70 @@ test("someone else's undone work, or work a session disowns, is not its own to d
   expect(kinds('另一個 Session 的修改我沒動；我這次的修改還沒 commit。')).toEqual(['commit'])
   expect(kinds('還有未提交的修改，等測試跑完再 commit。')).toEqual(['commit'])
   expect(kinds('部署腳本還沒動手改，2.4.2 還沒部署。')).toEqual(['release'])
+})
+
+test('its own delivery said as what comes next is still to deliver; offers, rules and others are not', () => {
+  const kinds = (text: string) => (undeliveredOf(text)?.kinds ?? []).join(',') || 'none'
+  const ahead: [string, string][] = [
+    ['之後再 push。', 'push'],
+    ['接下來部署到正式站。', 'release'],
+    ['明天發布 2.4.2。', 'release'],
+    ['PM 確認後我再推。', 'push'],
+    ['測試完成後再部署。', 'release'],
+    ['測試都過了，稍後 commit。', 'commit'],
+    ['已 commit 為 3fa1c2e，PM 放行後我會 push 並部署。', 'push,release'],
+    ["I'll push after review.", 'push'],
+    ['Next: deploy to production.', 'release'],
+    ["The full suite takes about 10 minutes. I'll push once every exit code is 0.", 'push'],
+  ]
+  expect(ahead.filter(([text, want]) => kinds(text) !== want)).toEqual([])
+
+  const notOwnToDo = [
+    // Settled later in the same report.
+    '之後再 push。……剛剛已 push。',
+    // Rules and processes.
+    '之後再 push 的情況會被判成待發布。',
+    '流程是先 commit 再 push。',
+    '發布規範是先打標籤、跑核對，通過後才推標籤。',
+    // Someone else's.
+    '另一個 Session 之後會部署 2.4.2。',
+    '另一個工作階段準備推 2.4.2。',
+    '我已經請子 Session 在 T-05 之後另外 commit。',
+    '接下來它會推送，CI 通過後部署。',
+    '我這邊不用再改任何檔案，接下來的推版和部署都由它負責。',
+    '交接完成：之後版號和發布接力都由 PM 管，我這邊沒有任何未提交的修改。',
+    '之後其他工作要 push、發 release，我照樣會先問你。',
+    // Offers to the person, conditionals and questions: theirs to decide.
+    '你可以之後再 push。',
+    '如果要，下一步可以部署。',
+    'You can deploy it later if you like.',
+    '要不要接下來部署到正式站？',
+    '接下來部署到正式站嗎？我先等你的意見。',
+    // A future that will not come, a guess, a past told in order.
+    '之後不會再部署舊版。',
+    '今晚可能還會推送幾則，明天起就會安靜。',
+    '之後它完成部署，卻沒有再更新摘要。',
+    '之後補了一個修正提交，CI 就通過並部署了。',
+    '之後另外提交 3fa1c2e，把現況文件的版本改成 2.4.1。',
+    // A verb used as a noun or a consequence.
+    'main 上我的 3fa1c2e 之後多了兩個 commit。',
+    '讓合併後的提交也能被認出來。',
+    '之後部署會改成讓腳本自己更新。',
+    '之後改版在那裡 commit 再 push 就會更新。',
+    '之後推送、SSH 就不會再詢問。',
+    '主機上已經是新腳本，下次部署會直接用到。',
+    // Done, with harmless words of what comes next.
+    '2.4.1 已部署並驗證通過，接下來會繼續觀察錯誤率。',
+  ]
+  expect(notOwnToDo.filter(text => kinds(text) !== 'none')).toEqual([])
+
+  // A push left for later, its commit named: git clears it once that commit is on a remote branch.
+  const later = 'commit 是 3fa1c2e，PM 確認後我再推。'
+  expect(undeliveredOf(later)).toEqual({ kinds: ['push'], sha: '3fa1c2e' })
+  const idle = { id: 'x', title: 't', cwd: '', isRunning: false, lastActivityAt: new Date(NOW - 5 * 60000).toISOString(), isPinned: false, hasOpenPr: false }
+  const said = track('x', { lastAnswer: later }) as never
+  expect(statusOf(idle, said, undefined, NOW)).toBe('unreleased')
+  expect(statusOf(idle, said, undefined, NOW, undefined, { words: later, sha: '3fa1c2e', isPushed: true, checkedAt: NOW })).toBe('done')
 })
 
 test('work with no code to deliver is not left undelivered by a bare "no push"; work still to come is', () => {
