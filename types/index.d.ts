@@ -49,6 +49,15 @@ export type Track = {
   background?: BackgroundTask[]
 }
 
+/** Whether the commit a session's words left unpushed has reached a remote branch since (`git branch -r --contains`). */
+export type PushCheck = {
+  /** The words it was checked for: other words check again. */
+  words: string
+  sha: string
+  isPushed: boolean
+  checkedAt: number
+}
+
 /** A command a session runs in the background (run_in_background, or moved there), until its task-notification. */
 export type BackgroundTask = {
   id: string
@@ -114,6 +123,7 @@ declare module 'claude-code' {
       tracks: Record<string, Track>
       lastWords: Record<string, LastWord>
       ciChecks: Record<string, CiCheck>
+      pushChecks: Record<string, PushCheck>
       projects: Record<string, ProjectFile>
       scope: Scope
       confirm: string | null

@@ -186,6 +186,7 @@ const STATUS = {
   asking: { label: '待回覆', color: 'warning', hex: '#f59e0b' },
   failed: { label: 'CI 失敗', color: 'error', hex: '#ef4444' },
   open: { label: '未完成', color: 'claude', hex: '#d97757' },
+  unreleased: { label: '待發布', color: 'planMode', hex: '#0d9488' },
   ci: { label: '等待 CI', color: 'permission', hex: '#8b5cf6' },
   running: { label: '執行中', color: 'success', hex: '#22c55e' },
   waiting: { label: '背景執行', color: 'suggestion', hex: '#3b82f6' },
@@ -291,7 +292,7 @@ const pane = `
       <div class="row">
         ${metric(count('running') + count('waiting'), '執行中', 'success')}
         ${metric(count('asking'), '待回覆', 'warning')}
-        ${metric(count('open') + count('ci') + count('failed'), '未完成・待 CI', 'claude')}
+        ${metric(count('open') + count('ci') + count('failed') + count('unreleased'), '尚未完成', 'claude')}
       </div>
     </div>
     <div class="section"><span class="caption semibold dim">工作項目</span><span class="caption dim tab">${open} 項進行中</span></div>

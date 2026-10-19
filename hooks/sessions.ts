@@ -1,9 +1,9 @@
 // Reading sessions into a project's board: who is working, who waits on you,
 // who stopped with steps left, and what the PM was asked to keep track of.
 
-import type { BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, Session, Step, Track } from '../types'
+import type { BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, PushCheck, Session, Step, Track } from '../types'
 
-export type Status = 'running' | 'asking' | 'failed' | 'open' | 'ci' | 'waiting' | 'done' | 'stale'
+export type Status = 'running' | 'asking' | 'failed' | 'open' | 'unreleased' | 'ci' | 'waiting' | 'done' | 'stale'
 
 /**
  * How each status reads and looks: `color` is a theme key (drawn right in light and dark),
@@ -13,11 +13,12 @@ export const STATUS: Record<Status, { label: string; tag: string; color: string;
   asking: { label: '待回覆', tag: '待回覆', color: 'warning', hex: '#f59e0b', rank: 0 },
   failed: { label: 'CI 失敗', tag: 'CI 失敗・需處理', color: 'error', hex: '#ef4444', rank: 1 },
   open: { label: '未完成', tag: '中斷・未完成', color: 'claude', hex: '#d97757', rank: 2 },
-  ci: { label: '等待 CI', tag: '等待 CI・未完成', color: 'permission', hex: '#8b5cf6', rank: 3 },
-  running: { label: '執行中', tag: '執行中', color: 'success', hex: '#22c55e', rank: 4 },
-  waiting: { label: '背景執行', tag: '背景執行', color: 'suggestion', hex: '#3b82f6', rank: 5 },
-  done: { label: '已結束', tag: '已結束', color: 'inactive', hex: '#9ca3af', rank: 6 },
-  stale: { label: '長期閒置', tag: '長期閒置', color: 'subtle', hex: '#6b7280', rank: 7 },
+  unreleased: { label: '待發布', tag: '待發布・未完成', color: 'planMode', hex: '#0d9488', rank: 3 },
+  ci: { label: '等待 CI', tag: '等待 CI・未完成', color: 'permission', hex: '#8b5cf6', rank: 4 },
+  running: { label: '執行中', tag: '執行中', color: 'success', hex: '#22c55e', rank: 5 },
+  waiting: { label: '背景執行', tag: '背景執行', color: 'suggestion', hex: '#3b82f6', rank: 6 },
+  done: { label: '已結束', tag: '已結束', color: 'inactive', hex: '#9ca3af', rank: 7 },
+  stale: { label: '長期閒置', tag: '長期閒置', color: 'subtle', hex: '#6b7280', rank: 8 },
 }
 
 export function isActive(status: Status): boolean {
@@ -46,13 +47,14 @@ const WAITING = new RegExp(
     // 正在乾淨 worktree 裡背景執行 / 還在背景跑
     /(正在|還在|仍在|持續)[^。\n「」]{0,20}?背景(裡|中)?(執行|跑|進行|處理|運行|監看|盯)(?!的)/,
     // 我在背景等結果 / 已丟到背景跑 / 先放到背景執行: the speaker's own, not 「它把測試丟到背景跑」 or 丟到背景跑的指令
-    /(我|已|已經|先|會)[^。\n「」]{0,10}?(在|丟到|丟進|放到|放進|移到|轉到)背景(裡|中)?(執行|跑|進行|處理|等|監看|盯|運行)(?!的)/,
+    /(我|已|已經|先|會)[^。，,\n「」]{0,10}?(在|丟到|丟進|放到|放進|移到|轉到)背景(裡|中)?(執行|跑|進行|處理|等|監看|盯|運行)(?!的)/,
     // 背景執行中 / 背景跑著
     /背景(執行|跑|處理|運行)(中|著)/,
     // 背景…完成後 / 背景跑完之後
     /背景[^。\n「」]{0,20}?(完成|跑完|結束)(後|之後)/,
-    // 等 CI 通過 / 等測試跑完: not the status named in quotes or brackets (「等待 CI」, (等待 CI)), not 不用等, not 等級 or 相等
-    /(?<![「『"'(（\[【相平同對均高]|不用|不必|不需要|無需|別|不要)等(?![級等於同])[^。\n「」]{0,16}?(CI|部署|測試|建置|build|跑完|完成|結果)/,
+    // 等 CI 通過 / 等測試跑完: not the status named in quotes or brackets (「等待 CI」, (等待 CI)) or as a noun
+    // (標成等待 CI, 維持等待 CI), not 不用等, not 等級 or 相等
+    /(?<![「『"'(（\[【相平同對均高]|不用|不必|不需要|無需|別|不要)(?<!標|維持|卡在|成|為|是|算|顯示)等(?![級等於同])[^。\n「」]{0,16}?(CI|部署|測試|建置|build|跑完|完成|結果)/,
     // 跑完會通知 / 完成後再推送
     /(跑完|完成後)[^。\n「」]{0,8}?(會|再|就)/,
     /自動接著/,
@@ -69,8 +71,22 @@ const WAITING = new RegExp(
 )
 
 /** Words that say CI (or the checks a release waits on) has not finished yet. */
-const CI_PENDING =
-  /(CI|GitHub Actions|workflow|pipeline|檢查|checks?)[^。\n]{0,16}(還在|仍在|正在|尚未|還沒|未|進行中|執行中|跑(?!完)|running|pending|in progress|queued|not (yet )?(finished|done|passed))|(還在|仍在|正在)(跑|等)[^。\n]{0,8}(CI|測試|workflow|pipeline|檢查|checks?)|等[^。\n]{0,8}(CI|checks?)|(waiting|wait) (for|on) (the )?(CI|checks?|workflow|pipeline)|(CI|checks?)[^。\n]{0,10}(通過|跑完|完成)(後|之後|再|才)|once (the )?(CI|checks?)[^.\n]{0,20}(pass|finish|complete)/gi
+const CI_PENDING = new RegExp(
+  [
+    // CI 還在跑 / checks still running / CI 尚未完成: the run's own state, not "檢查兩個工具還在" or a name like CI_PENDING
+    /(CI|GitHub Actions|workflow|pipeline|checks?)[^。\n]{0,16}(還在|仍在|正在|尚未|還沒|未(?!來|知)|進行中|執行中|跑(?!完)|\b(running|pending|in progress|queued|not (yet )?(finished|done|passed)))/,
+    /檢查[^。\n]{0,10}(還在(跑|執行|進行)|仍在(跑|執行|進行)|正在(跑|執行|進行)|尚未(跑完|完成|通過)|還沒(跑完|完成|通過|過)|進行中|執行中)/,
+    /(還在|仍在|正在)(跑|等)[^。\n]{0,8}(CI|測試|workflow|pipeline|檢查|checks?)/,
+    // 等 CI 通過: not the status named in quotes or brackets (「等待 CI」, (等待 CI)) or as a noun (不再標等待 CI), not 不用等
+    /(?<![「『"'(（\[【相平同對均高]|不用|不必|不需要|無需|別|不要)(?<!標|維持|卡在|成|為|是|算|顯示)等(?![級等於同])[^。\n]{0,8}(CI|checks?)/,
+    /(waiting|wait) (for|on) (the )?(CI|checks?|workflow|pipeline)/,
+    /(CI|checks?)[^。\n]{0,10}(通過|跑完|完成)(後|之後|再|才)/,
+    /once (the )?(CI|checks?)[^.\n]{0,20}(pass|finish|complete)/,
+  ]
+    .map(r => r.source)
+    .join('|'),
+  'gi',
+)
 
 /** Words that say CI has finished and passed. */
 const CI_PASSED = /(CI|GitHub Actions|workflow|pipeline|檢查|checks?)[^。\n]{0,12}(已|都)?(通過|跑完|全綠|綠燈|成功|passed|succeeded|green)(?!後|之後|再|才|就)/gi
@@ -82,11 +98,25 @@ function lastIndex(re: RegExp, text: string): number {
   return at
 }
 
+/**
+ * The words as a report of the work: quoted words (a status 「等待 CI」, a step, a phrase) gone, and the
+ * clauses about a rule, an example, a condition or someone else's work blanked; separators and offsets kept.
+ */
+export function reportedText(text: string): string {
+  // Blanked to as many spaces, so an offset in it is one in `text`.
+  return text
+    .replace(QUOTED, quoted => ' '.repeat(quoted.length))
+    .split(/([。！？!?；;，,\n]+|\.\s+)/)
+    .map((part, i) => (i % 2 === 0 && ABOUT_A_RULE.test(part) ? ' '.repeat(part.length) : part))
+    .join('')
+}
+
 /** The latest turn says CI has not finished (and says nothing later about it passing). */
 export function isCiPending(text: string): boolean {
-  const pending = lastIndex(CI_PENDING, text)
+  const plain = reportedText(text)
+  const pending = lastIndex(CI_PENDING, plain)
 
-  return pending >= 0 && pending > lastIndex(CI_PASSED, text)
+  return pending >= 0 && pending > lastIndex(CI_PASSED, plain)
 }
 
 /** What the session said in its latest turn: its recap and final answer, the later one last. */
@@ -103,14 +133,35 @@ export function ciWords(track: Track | undefined, word: LastWord | undefined): s
   return track ? latestWords(track) : (word?.said ?? '')
 }
 
-/** The CI a session's words name, the latest mention: a run id, else a commit. */
-export function ciTarget(text: string): { run: string } | { sha: string } | null {
-  const runs = [...text.matchAll(/(?:actions\/runs\/|\brun\s*(?:id\s*)?[#:：]?\s*)(\d{8,12})\b/gi)]
-  if (runs.length) return { run: runs.at(-1)![1]! }
-  // Seven to forty hex digits, with a digit and a letter: 4dca77c, not 1918 or "deadbeef".
-  const shas = [...text.matchAll(/(?<![0-9a-z])[0-9a-f]{7,40}(?![0-9a-z])/gi)].map(m => m[0]).filter(w => /\d/.test(w) && /[a-f]/i.test(w))
+/**
+ * The runs and commits a session's words name, the likeliest first: nearest to where the report itself
+ * talks of CI (not in a quote or a rule), then the later one. A commit is seven to forty hex digits
+ * with a digit and a letter (3fa1c2e, not 1204 or "deadbeef") that is not part of an id (local_…-9e0f1a2b3c4d);
+ * the caller tries them in turn against the session's repository.
+ */
+export function ciTargets(text: string): { runs: string[]; shas: string[] } {
+  const plain = reportedText(text)
+  const ci = [...plain.matchAll(/CI|GitHub Actions|workflow|pipeline|checks?|檢查/gi)].map(m => m.index ?? 0)
+  const rank = (found: { word: string; at: number }[]) =>
+    found
+      .map(f => ({ ...f, distance: ci.length ? Math.min(...ci.map(c => Math.abs(c - f.at))) : 0 }))
+      .sort((a, b) => a.distance - b.distance || b.at - a.at)
+      .map(f => f.word)
+      .filter((w, i, all) => all.indexOf(w) === i)
+  const runs = [...text.matchAll(/(?:actions\/runs\/|\brun\s*(?:id\s*)?[#:：]?\s*)(\d{8,12})\b/gi)].map(m => ({ word: m[1]!, at: (m.index ?? 0) + m[0].length - m[1]!.length }))
+  const shas = [...text.matchAll(/(?<![0-9a-z_-])[0-9a-f]{7,40}(?![0-9a-z_-])/gi)]
+    .filter(m => /\d/.test(m[0]) && /[a-f]/i.test(m[0]))
+    .map(m => ({ word: m[0].toLowerCase(), at: m.index ?? 0 }))
 
-  return shas.length ? { sha: shas.at(-1)!.toLowerCase() } : null
+  return { runs: rank(runs), shas: rank(shas) }
+}
+
+/** The likeliest CI the words name: a run id, else a commit. */
+export function ciTarget(text: string): { run: string } | { sha: string } | null {
+  const { runs, shas } = ciTargets(text)
+  if (runs[0]) return { run: runs[0] }
+
+  return shas[0] ? { sha: shas[0] } : null
 }
 
 /** What GitHub's runs for a commit (or one run) come to: any still going is pending, any failed is failure. */
@@ -234,6 +285,92 @@ export function openSteps(track: Track | undefined): Step[] {
   return track ? track.plan.filter(s => s.status !== 'completed') : []
 }
 
+// ── Work not delivered yet: not committed, not pushed, not released, waiting on a go-ahead ──
+
+/** What delivering takes, as the words name it. */
+export type DeliveryKind = 'commit' | 'push' | 'release'
+
+const VERB = String.raw`commit(?:ted)?|push(?:ed)?|deploy(?:ed)?|release[sd]?|merge[sd]?|ship(?:ped)?|提交|推送|推上|發布|發佈|部署|上線|合併|交付|升版`
+/** A delivery verb, and those joined to it: 沒有 commit 或 push, not committed or pushed. */
+const VERBS = String.raw`(?:${VERB})(?![^\s，。,；;]{0,2}(?:設定|腳本|流程|文件|檔案|權限|環境|相關|說明|紀錄))(?:\s*(?:或|和|、|及|跟|與|也沒有?|/|／|,|and|or|nor)\s*(?:${VERB}))*`
+/** 尚未 commit, 還沒上線, 仍未 commit 或 push, 也沒有 push: the negation a few characters before the verb (a verb after 的 is a noun: 還沒公開的 commit). */
+const NOT_DONE = new RegExp(String.raw`(?:尚未|還沒有?|仍未|仍然沒有|並未|并未|沒有?|未)[^。，,；;：:\n]{0,4}?(?<!的\s*)(${VERBS})|\b(?:not(?: yet)?|haven't(?: yet)?|hasn't(?: yet)?|have not(?: yet)?|has not(?: yet)?|didn't|did not)\s+(?:been\s+)?(${VERBS})`, 'gi')
+/** 已推上 main, 已部署, 部署完成, 上線了, pushed to main: the same kinds done, which a later word may say. */
+const DONE = new RegExp(String.raw`(?:已經?|都已|也已|皆已)[^。，,；;：:\n]{0,4}?(${VERBS})|(${VERB})(?:完成|好了|成功|了)|\b(?:I|we|it|was|were|is|has been|have been)\s+(committed|pushed|deployed|released|merged|shipped)\b`, 'gi')
+/**
+ * Delivery waits on someone's word: 等 PM 放行, 等 PM 通知 2.4.1 上線後才發布, 等確認才 push, waiting for
+ * your go-ahead. Not 等 PM 下一輪確認 (a check to come, with nothing to deliver after it).
+ */
+const AWAITING_GO = new RegExp(
+  String.raw`等[^。，,；;\n]{0,10}?(?:放行|批准|核准|同意)|等[^。，,；;\n]{0,12}?(?:通知|確認)[^。；;\n]{0,16}?(?:後|再|才)[^。；;\n]{0,6}?(?:${VERB})|\bwaiting (?:for|on) (?:the PM's |the PM |your |a |an |the )?(?:go-ahead|approval|sign-off|OK)\b`,
+  'gi',
+)
+/**
+ * A clause about a rule, a status or an example, not about the work: 看板會把它判成待發布, 這類字眼, 就不能顯示已結束;
+ * a condition (回報說還沒交付時, 如果還沒部署), words reported (摘要提到尚未部署), or someone else's work
+ * (其他 Session 還沒提交的修改都原樣留著: a folder shared with other sessions).
+ */
+const ABOUT_A_RULE =
+  /其他 ?Session|別的 ?Session|其他人|別人|他人|其餘|other sessions?|someone else|判|列為|列進|標成|標為|視為|字眼|說法|正則|regex|正例|反例|這類|例如|像是|顯示|不能是|不算|才算|當成|當作|被當|(?<![小同即當準及按暫])時\s*$|(?<![小同即當準及按暫])時(?:就|會|才|便|也|一樣|照樣|仍|都)|的時候|的話|如果|假如|只要|一旦|回報說|摘要寫|提到|e\.g\.|for example|such as|\bif\b|\bwhen\b/i
+/** The commit the words name: the hash after "commit", else the first one that is not part of an id (local_…-9e0f1a2b3c4d). */
+function commitOf(text: string): string | null {
+  const named = /\bcommit\s*(?:是|為|:|：|hash)?\s*`?([0-9a-f]{7,40})\b/i.exec(text)?.[1]
+  if (named) return named.toLowerCase()
+  const any = [...text.matchAll(/(?<![0-9a-z_-])[0-9a-f]{7,40}(?![0-9a-z_-])/gi)].map(m => m[0]).find(w => /\d/.test(w) && /[a-f]/i.test(w))
+
+  return any?.toLowerCase() ?? null
+}
+/** Quoted words name something (a status, a step, a phrase); backticks hold code and hashes. */
+const QUOTED = /「[^」]*」|『[^』]*』|“[^”]*”|"[^"\n]*"|`[^`\n]*`/g
+
+function deliveryKind(verb: string): DeliveryKind {
+  if (/^(commit|committed|提交)$/i.test(verb)) return 'commit'
+  if (/^(push|pushed|推送|推上)$/i.test(verb)) return 'push'
+
+  return 'release'
+}
+
+function verbsIn(segment: string): DeliveryKind[] {
+  return [...segment.matchAll(new RegExp(VERB, 'gi'))].map(m => deliveryKind(m[0]))
+}
+
+/**
+ * What the words say is not delivered yet, read sentence by sentence: what a kind was last said to be
+ * (not done, or done later on) decides it. A sentence about a rule or an example, quoted words and a
+ * double negative (沒有任何未提交的修改) say nothing about the work.
+ */
+export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: string | null } | null {
+  const last = new Map<DeliveryKind, boolean>()
+  const plain = text.replace(NOTHING_LEFT, '').replace(QUOTED, ' ')
+  for (const sentence of plain.split(/[。！？!?；;，,\n]+|\.\s+/)) {
+    if (ABOUT_A_RULE.test(sentence)) continue
+    const said: { at: number; kind: DeliveryKind; isLeft: boolean }[] = []
+    for (const m of sentence.matchAll(NOT_DONE)) for (const kind of verbsIn(m[1] ?? m[2] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: true })
+    for (const m of sentence.matchAll(DONE)) for (const kind of verbsIn(m[1] ?? m[2] ?? m[3] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: false })
+    for (const m of sentence.matchAll(AWAITING_GO)) said.push({ at: m.index ?? 0, kind: 'release', isLeft: true })
+    for (const one of said.sort((a, b) => a.at - b.at)) last.set(one.kind, one.isLeft)
+  }
+  const kinds = (['commit', 'push', 'release'] as const).filter(kind => last.get(kind))
+
+  return kinds.length ? { kinds, sha: commitOf(text) } : null
+}
+
+/** The words leave work undelivered, and git has not shown the one push they left to be done since. */
+function isUndelivered(text: string, push: PushCheck | undefined): boolean {
+  const left = undeliveredOf(text)
+  if (!left) return false
+  const isOnlyPush = left.kinds.length === 1 && left.kinds[0] === 'push'
+
+  return !(isOnlyPush && push?.words === text && push.isPushed)
+}
+
+/** What a session still has to deliver, as people read it. */
+export function deliveryText(kinds: DeliveryKind[]): string {
+  const name: Record<DeliveryKind, string> = { commit: 'commit', push: 'push', release: '發布／部署／上線' }
+
+  return kinds.map(k => name[k]).join('、')
+}
+
 export function caveatOf(track: Track | undefined): string | null {
   return track?.recap && CAVEAT.test(track.recap.replace(NOTHING_LEFT, '')) ? track.recap : null
 }
@@ -250,7 +387,7 @@ function ciStatus(text: string, ci: CiCheck | undefined): Status | null {
   return known === 'failure' ? 'failed' : 'ci'
 }
 
-export function statusOf(one: Session, track: Track | undefined, word: LastWord | undefined, now: number, ci?: CiCheck): Status {
+export function statusOf(one: Session, track: Track | undefined, word: LastWord | undefined, now: number, ci?: CiCheck, push?: PushCheck): Status {
   if (one.isRunning) return 'running'
   const minutes = (now - (Date.parse(one.lastActivityAt) || 0)) / 60000
   if (track) {
@@ -262,13 +399,16 @@ export function statusOf(one: Session, track: Track | undefined, word: LastWord 
     // whatever its task list still holds: while the work runs (its notification not yet in), however long that takes.
     if (backgroundOf(track, now).length > 0) return 'waiting'
     // Words alone say the same for a while: a session that never came back has stopped after all.
-    if (WAITING.test(track.lastAnswer) && minutes < WAITING_MINUTES) return 'waiting'
+    if (WAITING.test(reportedText(track.lastAnswer)) && minutes < WAITING_MINUTES) return 'waiting'
     if (openSteps(track).length > 0) return 'open'
+    // Not committed, pushed or released, however ticked its task list (wrap_up ticks every step).
+    if (isUndelivered(latestWords(track), push)) return 'unreleased'
   } else {
     if (word?.isAsking) return 'asking'
     const pending = word ? ciStatus(word.said, ci) : null
     if (pending) return pending
     if (word?.isWaiting && minutes < WAITING_MINUTES) return 'waiting'
+    if (word && isUndelivered(word.said, push)) return 'unreleased'
   }
 
   return minutes > STALE_DAYS * 24 * 60 ? 'stale' : 'done'
@@ -331,7 +471,7 @@ export function parseLastWord(text: string, activity: string): LastWord {
   return {
     said: said ? clip(said.body, 140) : '',
     isAsking,
-    isWaiting: isLast && !isAsking && WAITING.test(said.body),
+    isWaiting: isLast && !isAsking && WAITING.test(reportedText(said.body)),
     activity,
     error: null,
   }
@@ -391,6 +531,7 @@ export type BoardInput = {
   tracks: Record<string, Track>
   words: Record<string, LastWord>
   ci?: Record<string, CiCheck>
+  push?: Record<string, PushCheck>
   ledger: LedgerItem[]
   now: number
   isIncludingDone: boolean
@@ -402,14 +543,15 @@ export function boardText(input: BoardInput): string {
   const everyone = input.everyone ?? sessions
   const tracks = liveTracks(everyone, input.tracks, words)
   const ci = input.ci ?? {}
+  const push = input.push ?? {}
   const rows = sessions
-    .map(one => ({ one, track: tracks[one.id], word: words[one.id], status: statusOf(one, tracks[one.id], words[one.id], now, ci[one.id]) }))
+    .map(one => ({ one, track: tracks[one.id], word: words[one.id], status: statusOf(one, tracks[one.id], words[one.id], now, ci[one.id], push[one.id]) }))
     .sort((a, b) => STATUS[a.status].rank - STATUS[b.status].rank)
   const lines: string[] = []
   lines.push(`# 專案狀態報告：${project.name}`, `路徑：${project.path}`)
   const count = (s: Status) => rows.filter(r => r.status === s).length
   lines.push(
-    `Sessions ${rows.length}（不含 PM）｜待回覆 ${count('asking')}｜CI 失敗 ${count('failed')}｜等待 CI ${count('ci')}｜中斷・未完成 ${count('open')}｜執行中 ${count('running')}｜背景執行 ${count('waiting')}｜已結束 ${count('done')}｜長期閒置 ${count('stale')}`,
+    `Sessions ${rows.length}（不含 PM）｜待回覆 ${count('asking')}｜CI 失敗 ${count('failed')}｜等待 CI ${count('ci')}｜待發布 ${count('unreleased')}｜中斷・未完成 ${count('open')}｜執行中 ${count('running')}｜背景執行 ${count('waiting')}｜已結束 ${count('done')}｜長期閒置 ${count('stale')}`,
   )
 
   const counted = ledger.filter(item => item.status !== 'dropped')
@@ -424,11 +566,15 @@ export function boardText(input: BoardInput): string {
       attention.push(`- [中斷・未完成] ${name} 已停止，任務清單仍有 ${left.length} 項未完成：${left.map(s => s.content).join('；')}`)
     }
     if (r.status === 'ci') attention.push(`- [等待 CI・未完成] ${name} 最後回報 CI 尚未跑完，不能視為完成：${clip(ciWords(r.track, r.word), 200)}`)
+    if (r.status === 'unreleased') {
+      const words = ciWords(r.track, r.word)
+      attention.push(`- [待發布・未完成] ${name} 最後回報尚未交付（${deliveryText(undeliveredOf(words)?.kinds ?? [])}），不能視為完成：${clip(words, 200)}`)
+    }
     if (r.status === 'failed') {
       attention.push(`- [CI 失敗・需處理] ${name} GitHub 上的 CI（${ci[r.one.id]?.target || '最近一次'}）失敗，要修正後重跑：${clip(ciWords(r.track, r.word), 200)}`)
     }
     const caveat = caveatOf(r.track)
-    if (caveat && r.status !== 'running' && r.status !== 'ci' && r.status !== 'failed') attention.push(`- [需追蹤] ${name} 收尾摘要載明尚有未完成事項：${clip(caveat, 200)}`)
+    if (caveat && !['running', 'ci', 'failed', 'unreleased'].includes(r.status)) attention.push(`- [需追蹤] ${name} 收尾摘要載明尚有未完成事項：${clip(caveat, 200)}`)
     if (r.one.hasOpenPr && r.status !== 'running') attention.push(`- [PR 開啟中] ${name}`)
   }
   const openLedger = ledger.filter(item => item.status === 'open')
@@ -443,7 +589,7 @@ export function boardText(input: BoardInput): string {
     if (!id) return '未指派'
     const one = everyone.find(s => s.id === id)
     if (!one) return `${id}（已不在清單中）`
-    const status = statusOf(one, tracks[id], words[id], now, ci[id])
+    const status = statusOf(one, tracks[id], words[id], now, ci[id], push[id])
 
     return `${one.title}（${STATUS[status].tag}${inProject.has(id) ? '' : '・其他專案的 Session'}）`
   }

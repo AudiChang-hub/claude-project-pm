@@ -63,18 +63,19 @@ Requires the **Claude Code desktop app (Code tab)**; see [Requirements](#require
 | Waiting on you (待回覆) | The session ended its turn with a question for you. |
 | CI failed (CI 失敗) | Its last words left CI running, and GitHub reports that run failed. |
 | Unfinished (未完成) | It stopped with steps of its task list still open, and nothing it waits on is still running. |
+| Not released (待發布) | Its latest recap or answer says its work is not delivered yet: not committed, not pushed, not released, deployed or live, or waiting on a go-ahead (等 PM 放行). A fully ticked task list does not override it (`wrap_up` ticks every step). Sentences about a rule or an example, quoted words, someone else's work and double negatives (沒有任何未提交的修改) do not count. When only a push is left and the words name the commit, it clears once that commit is on a remote branch (`git branch -r --contains`), as when the PM pushes it from this machine. |
 | Waiting on CI (等待 CI) | Its last words say CI has not finished, and GitHub has not said it passed. |
 | Running (執行中) | The session is working right now. |
 | In the background (背景執行) | A command it started in the background (`run_in_background`, or moved there) has not reported back yet, for up to 6 hours; or, for a session without that record, it said work goes on in the background (for up to 45 minutes). Open steps on its task list do not make it *Unfinished* meanwhile. |
 | Ended (已結束) / Idle (長期閒置) | Nothing left; idle for more than 3 days. Hidden behind a toggle. |
 
-At the top: a completion ring and three counters (running, waiting on you, unfinished or waiting on CI). Switch between **this project** and **all projects**.
+At the top: a completion ring and three counters (running, waiting on you, not finished: unfinished, waiting on CI, CI failed or not released). Switch between **this project** and **all projects**.
 
 **A ledger of what you asked for.** Every request you give the PM is recorded as T-01, T-02, … with the session that owns it. Project progress is counted from the ledger, not from the sessions' own checklists. An owner working from another project's folder (a session fixing a shared library, say) is still shown with its title and status; the item is flagged only when its owner is archived or gone.
 
-**CI is not done until GitHub says so.** When a session's latest words say CI is still running, or that it will deploy once checks pass, the session is held at *Waiting on CI*, however long ago it stopped. The PM then runs `gh` in that session's folder: the run id the words name, else the commit they name, else the folder's `HEAD` (only if it was committed before the words). A pass clears the status, a failure turns it into *CI failed*. Answers are cached: a pass for good, a failure for 5 minutes, a running or unknown result for 1 minute. Without `gh`, or outside GitHub, the words decide.
+**CI is not done until GitHub says so.** When a session's latest words say CI is still running, or that it will deploy once checks pass, the session is held at *Waiting on CI*, however long ago it stopped. Quoted words (a status named 「等待 CI」) and sentences about a rule or an example do not count. The PM then runs `gh` in that session's folder: the runs and commits the words name, nearest their own CI words first, a commit only when it is in that repository (a hash quoted from another project or an example is skipped), and when none of them answers, the folder's `HEAD` (only if it was committed before the words). A pass clears the status, a failure turns it into *CI failed*. Answers are cached: a pass for good, a failure for 5 minutes, a running or unknown result for 1 minute. Without `gh`, or outside GitHub, the words decide.
 
-**The ledger will not close unfinished work.** Marking an item done is refused while its owner is running, waiting on you, unfinished, waiting on CI, failed CI or still working in the background, unless you confirm it explicitly and the PM records why in a note.
+**The ledger will not close unfinished work.** Marking an item done is refused while its owner is running, waiting on you, unfinished, waiting on CI, failed CI, not released or still working in the background, unless you confirm it explicitly and the PM records why in a note.
 
 **Recaps that admit work is left.** A recap that says something is "not yet deployed", "not committed", "still needs…" (in English or Chinese) is flagged for follow-up. A Chinese double negative such as 沒有任何未提交的修改 ("there are no uncommitted changes") is not.
 

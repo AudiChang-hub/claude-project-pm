@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { applyPlan, caveatOf, ciTarget, keyFile, parseLastWord, projectKey, statusOf } from '../hooks/sessions'
+import { applyPlan, caveatOf, ciTarget, ciTargets, isCiPending, keyFile, parseLastWord, projectKey, statusOf, undeliveredOf } from '../hooks/sessions'
 
 const NOW = Date.parse('2026-10-17T12:00:00.000Z')
 const PROJECT = 'C:\\Users\\dev\\Projects\\Acme 商店後台'
@@ -198,8 +198,8 @@ test('work whose CI is still running is never done', () => {
   const twoDaysAgo = { id: 'x', title: 't', cwd: '', isRunning: false, lastActivityAt: new Date(NOW - 2 * 24 * 3600000).toISOString(), isPinned: false, hasOpenPr: false }
   const said = (lastAnswer: string, recap: string | null = null) => statusOf(twoDaysAgo, track('x', { lastAnswer, recap }) as never, undefined, NOW)
 
-  expect(said('已推上 main（4dca77c），CI 還在跑，通過後才會打標籤和部署。')).toBe('ci')
-  expect(said('已回覆對方。', '1.86.11 已推上 main，等 CI 通過後我會部署。')).toBe('ci')
+  expect(said('已推上 main（3fa1c2e），CI 還在跑，通過後才會打標籤和部署。')).toBe('ci')
+  expect(said('已回覆對方。', '2.4.0 已推上 main，等 CI 通過後我會部署。')).toBe('ci')
   expect(said('Pushed to main; waiting for CI before tagging.')).toBe('ci')
   expect(said('CI 已通過，已打標籤並部署 2.3.1。')).toBe('done')
   expect(said('CI 跑完了，已部署 2.3.1。')).toBe('done')
@@ -250,7 +250,7 @@ test('a session the app did not know at its start is tracked once it is known', 
 
 test('an empty track does not hide a transcript that says CI is still running', async ($, on) => {
   const files: Files = new Map()
-  const item = { id: 1, text: '合併重複的日期欄位', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
+  const item = { id: 1, text: '合併重複的出貨日期欄位', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
   // What a session writes when its module reloads, before its next turn ends: nothing yet.
   files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', {})))
@@ -289,13 +289,13 @@ test('a recap stands only for the turn that wrote it', async ($, on) => {
   await $.session.start(START)
   const turn = (answer: string) => $.turn.complete({ answer, durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' })
 
-  await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', recap: '1.86.11 已推上 main，CI 還在跑，通過後才會打標籤和部署。' } as never)
+  await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', recap: '2.4.0 已推上 main，CI 還在跑，通過後才會打標籤和部署。' } as never)
   await turn('已推上 main，我在背景等 CI。')
   expect(JSON.parse(files.get(`${DIR}/sessions/local_me.json`)!).recap).toMatch(/CI 還在跑/)
 
   // Woken later by a notification, the session answers without a wrap_up of its own (and no prompt.submit).
   await clock.advance(30 * 60000)
-  await turn('已打標籤 v1.86.11 並部署到正式站。')
+  await turn('已打標籤 v2.4.0 並部署到正式站。')
   const kept = JSON.parse(files.get(`${DIR}/sessions/local_me.json`)!)
   expect(kept.recap).toBe(null)
   const idle = { id: 'local_me', title: '我', cwd: PROJECT, isRunning: false, lastActivityAt: new Date(NOW + 30 * 60000).toISOString(), isPinned: false, hasOpenPr: false }
@@ -304,7 +304,7 @@ test('a recap stands only for the turn that wrote it', async ($, on) => {
 
 test('a track that missed later turns gives way to the transcript', async ($, on) => {
   const files: Files = new Map()
-  const item = { id: 1, text: '訂單總覽頁面', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
+  const item = { id: 1, text: '商品總覽頁面', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
   // Written when it pushed; the turns that saw CI pass and deployed never reached the file. The app saw them (11:50).
   const pushedAt = Date.parse('2026-10-17T11:31:00.000Z')
@@ -313,7 +313,7 @@ test('a track that missed later turns gives way to the transcript', async ($, on
     JSON.stringify(
       track('local_open', {
         plan: [{ content: '等 CI 通過後打標籤', status: 'completed' }],
-        recap: '1.86.11 已推上 main（4dca77c）。CI 還在跑，通過後才會打標籤和部署；目前還沒部署。',
+        recap: '2.4.0 已推上 main（3fa1c2e）。CI 還在跑，通過後才會打標籤和部署；目前還沒部署。',
         lastAnswer: '還沒完成：CI 還在跑，大約 25 分鐘，我在背景等結果。',
         turnAt: pushedAt,
         planAt: pushedAt,
@@ -321,7 +321,7 @@ test('a track that missed later turns gives way to the transcript', async ($, on
     ),
   )
   const clock = mock.clock(on, { now: NOW })
-  const transcript = '[assistant] 「訂單總覽」已經上線，正式站現在是 1.86.11。\n[assistant] (called mcp__ccd_turn__wrap_up)\n[assistant] 已部署 1.86.11，正式站驗證通過。\n[result] done (success), 14 turns'
+  const transcript = '[assistant] 「商品總覽」已經上線，正式站現在是 2.4.0。\n[assistant] (called mcp__ccd_turn__wrap_up)\n[assistant] 已部署 2.4.0，正式站驗證通過。\n[result] done (success), 14 turns'
   on('mcp.call', { tool: 'list_events' }, ($, e, next) =>
     e.args?.session_id === 'local_open' ? { value: { content: [{ type: 'text' as const, text: transcript }], isError: false } } : next(e),
   )
@@ -333,7 +333,7 @@ test('a track that missed later turns gives way to the transcript', async ($, on
   expect(board).toMatch(/### \[已結束\] 商品列表頁 \(local_open\)/)
   expect(board).not.toMatch(/等待 CI・未完成\] 「商品列表頁」/)
   expect(board).not.toMatch(/\[需追蹤\] 「商品列表頁」/)
-  expect(board).toMatch(/最後回報：已部署 1.86.11，正式站驗證通過。/)
+  expect(board).toMatch(/最後回報：已部署 2.4.0，正式站驗證通過。/)
 
   const closed = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done' } as never)) as { result?: unknown }).result)
   expect(closed).toMatch(/已更新工作項目 T-01/)
@@ -341,14 +341,14 @@ test('a track that missed later turns gives way to the transcript', async ($, on
 
 test('GitHub decides whether CI the words left running is still running', async ($, on) => {
   const files: Files = new Map()
-  const item = { id: 1, text: '訂單總覽頁面', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
+  const item = { id: 1, text: '商品總覽頁面', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
   const at = Date.parse('2026-10-17T11:50:00.000Z')
   files.set(
     `${DIR}/sessions/local_open.json`,
-    JSON.stringify(track('local_open', { lastAnswer: '已推上 main（`4dca77c`），CI 還在跑，通過後才會打標籤和部署。', turnAt: at, planAt: at })),
+    JSON.stringify(track('local_open', { lastAnswer: '已推上 main（`3fa1c2e`），CI 還在跑，通過後才會打標籤和部署。', turnAt: at, planAt: at })),
   )
-  const FULL = '4dca77ca10fda0b742c442bc2623c01c470259d3'
+  const FULL = '3fa1c2e9d84b07a6c5e1f2039b8d7c6a5e4f3d21'
   let runs: object[] | null = [{ status: 'in_progress', conclusion: null }]
   const asked: string[] = []
   const clock = mock.clock(on, { now: NOW })
@@ -379,7 +379,7 @@ test('GitHub decides whether CI the words left running is still running', async 
   runs = [{ status: 'completed', conclusion: 'success' }, { status: 'completed', conclusion: 'failure' }]
   await clock.advance(61_000)
   const failed = await board()
-  expect(failed).toMatch(/\[CI 失敗・需處理\] 「商品列表頁」\(local_open\) GitHub 上的 CI（commit 4dca77c）失敗/)
+  expect(failed).toMatch(/\[CI 失敗・需處理\] 「商品列表頁」\(local_open\) GitHub 上的 CI（commit 3fa1c2e）失敗/)
   expect(failed).not.toMatch(/等待 CI・未完成\] 「商品列表頁」/)
   expect(await close()).toMatch(/無法將 T-01 標記為完成：負責的 Session「商品列表頁」GitHub 上的 CI 失敗/)
 
@@ -405,9 +405,9 @@ test('a recap that says nothing is left is not a caveat', () => {
 })
 
 test('the CI a session names: a run id, else a commit', () => {
-  expect(ciTarget('CI 還在跑：https://github.com/o/r/actions/runs/39031560867')).toEqual({ run: '39031560867' })
-  expect(ciTarget('1.86.11 已推上 main（`4dca77c`），CI 還在跑，1918 項全過')).toEqual({ sha: '4dca77c' })
-  expect(ciTarget('1.86.11 已推上 main，CI 還在跑')).toBe(null)
+  expect(ciTarget('CI 還在跑：https://github.com/o/r/actions/runs/41022337760')).toEqual({ run: '41022337760' })
+  expect(ciTarget('2.4.0 已推上 main（`3fa1c2e`），CI 還在跑，1204 項全過')).toEqual({ sha: '3fa1c2e' })
+  expect(ciTarget('2.4.0 已推上 main，CI 還在跑')).toBe(null)
 })
 
 test('an owner working from another project is not lost; only one gone from the list is', async ($, on) => {
@@ -464,7 +464,7 @@ test('a session waiting on its own background commands is running in the backgro
   const clock = mock.clock(on, { now: NOW })
   world(on, 'local_me', files)
   on('tool.call', { tool: 'mcp__ccd_turn__update_plan' }, () => ({ result: 'ok' }))
-  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'bxq91e4je' } }))
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: 'b7k2m9x1q' } }))
   on('turn.complete', () => ({ text: '' }))
   on('prompt.submit', ($, e) => ({ text: e.text }))
   await $.session.start(START)
@@ -473,19 +473,19 @@ test('a session waiting on its own background commands is running in the backgro
   await $.tool.call({
     tool: 'mcp__ccd_turn__update_plan',
     items: [
-      { content: '在乾淨 worktree 跑完整 sales 與前端測試', status: 'in_progress' },
+      { content: '在乾淨 worktree 跑完整後端與前端測試', status: 'in_progress' },
       { content: 'push 並等 CI 全部 success', status: 'pending' },
     ],
   } as never)
-  await $.tool.call({ tool: 'Bash', command: 'python -m unittest discover', description: 'Run full sales test suite', run_in_background: true } as never)
+  await $.tool.call({ tool: 'Bash', command: 'python -m unittest discover', description: 'Run full backend test suite', run_in_background: true } as never)
   await $.turn.complete({
-    answer: '完整 sales 測試、前端測試與 context 測試正在乾淨 worktree 裡背景執行，完成後依結果修正或推送。',
+    answer: '完整後端測試、前端測試與整合測試正在乾淨 worktree 裡背景執行，完成後依結果修正或推送。',
     durationMs: 1,
     isAborted: false,
     turnId: 't',
     reason: 'answer',
   })
-  expect(file().background).toEqual([{ id: 'bxq91e4je', label: 'Run full sales test suite', at: NOW }])
+  expect(file().background).toEqual([{ id: 'b7k2m9x1q', label: 'Run full backend test suite', at: NOW }])
 
   // Two hours on, the suite still running: past the words' 45 minutes, and still not "stopped midway".
   const at = (minutes: number) => ({ id: 'local_me', title: '我', cwd: PROJECT, isRunning: false, lastActivityAt: new Date(NOW).toISOString(), isPinned: false, hasOpenPr: false, at: NOW + minutes * 60000 })
@@ -495,7 +495,7 @@ test('a session waiting on its own background commands is running in the backgro
   // Its notification comes in: it is over, and the open steps speak again.
   await clock.advance(120 * 60000)
   await $.prompt.submit({
-    text: '<task-notification> <task-id>bxq91e4je</task-id> <status>completed</status> <summary>Background command "Run full sales test suite" completed (exit code 0)</summary> </task-notification>',
+    text: '<task-notification> <task-id>b7k2m9x1q</task-id> <status>completed</status> <summary>Background command "Run full backend test suite" completed (exit code 0)</summary> </task-notification>',
   } as never)
   expect(file().background).toEqual([])
   expect(statusOf(later, file(), undefined, later.at + 60000)).toBe('open')
@@ -510,7 +510,7 @@ test('words of background work keep a session with open steps off the stopped li
     JSON.stringify(
       track('local_open', {
         plan: [{ content: '跑完整測試', status: 'in_progress' }, { content: 'push', status: 'pending' }],
-        lastAnswer: '完整 sales 測試、前端測試與 context 測試正在乾淨 worktree 裡背景執行，完成後依結果修正或推送。',
+        lastAnswer: '完整後端測試、前端測試與整合測試正在乾淨 worktree 裡背景執行，完成後依結果修正或推送。',
         turnAt: at,
         planAt: at,
       }),
@@ -553,13 +553,13 @@ test('the PM gets its tools back whenever the engine has dropped them', async ($
 test('only words of work still going on read as waiting, not words that name it', () => {
   const waits = (text: string) => parseLastWord(`[assistant] ${text}\n[result] done (success), 1 turns`, '').isWaiting
   const going = [
-    // The DMIS session's own words while its suite ran.
-    '完整 sales 測試、前端測試與 context 測試正在乾淨 worktree 裡背景執行，完成後依結果修正或推送。',
+    // A real session's own words while its suite ran.
+    '完整後端測試、前端測試與整合測試正在乾淨 worktree 裡背景執行，完成後依結果修正或推送。',
     '還在背景跑，大約 20 分鐘。',
     '我在背景等結果。',
     '已丟到背景跑，跑完會通知 PM。',
     '完整測試背景執行中。',
-    '1.86.11 已推上 main，等 CI 通過後我會部署。',
+    '2.4.0 已推上 main，等 CI 通過後我會部署。',
     '等測試跑完再打標籤。',
     "Waiting for CI to finish (~21 minutes); I'll tag and deploy once it's green.",
     'The full suite is still running in the background.',
@@ -574,8 +574,10 @@ test('only words of work still going on read as waiting, not words that name it'
     '背景偵測只對重新載入之後才開始跑的指令有效。',
     '子代理和監看類的背景工作還沒有追蹤。',
     '修正了背景判斷的誤判，任務 5/5 全部完成。',
+    // Another session's state, its own clause.
+    '那個 Session 之後已經繼續工作，目前在背景跑測試。',
     // The status's name, quoted.
-    '**「訂單總覽頁面」一直卡在「等待 CI」的原因**',
+    '**「商品總覽頁面」一直卡在「等待 CI」的原因**',
     'CI 已通過就不算「等待 CI」。',
     '不用等測試跑完，已經全部通過。',
     '| Waiting on CI (等待 CI) | Its last words say CI has not finished. |',
@@ -583,4 +585,201 @@ test('only words of work still going on read as waiting, not words that name it'
   ]
   expect(going.filter(t => !waits(t))).toEqual([])
   expect(named.filter(waits)).toEqual([])
+})
+
+test('words that leave work undelivered, and words that only name it', () => {
+  const kinds = (text: string) => undeliveredOf(text)?.kinds ?? []
+  // A real session's own words: done its part, waiting on the PM to release.
+  expect(kinds('尚未 commit，等 PM 通知 2.4.1 上線後才發布 2.4.2。')).toEqual(['commit', 'release'])
+  expect(kinds('功能修改仍未 commit 或 push，繼續等 PM 放行 2.4.2。')).toEqual(['commit', 'push', 'release'])
+  expect(kinds('這次只改了清單，程式沒有動，也沒有 commit 或 push。等 PM 放行 2.4.2 後我再發布。')).toEqual(['commit', 'push', 'release'])
+  expect(kinds('已推上 main（3fa1c2e），CI 通過，但還沒部署到正式站。')).toEqual(['release'])
+  expect(kinds('2.4.2 還沒上線。')).toEqual(['release'])
+  expect(kinds('Committed locally as 3fa1c2e; not pushed yet, waiting for your go-ahead.')).toEqual(['push', 'release'])
+  // Committed here, pushed only once the PM confirms: not delivered either, and the commit is named for git to check.
+  expect(undeliveredOf('commit 是 `9638755`，在本機 main，沒有 push，照 PM 的確認流程走。')).toEqual({ kinds: ['push'], sha: '9638755' })
+  expect(undeliveredOf('commit 是 `532590d`，在本機 main，沒有 push。已回報 PM local_0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d。')?.sha).toBe('532590d')
+
+  const named = [
+    // Double negatives and work done.
+    '我這邊沒有任何未提交的修改，交接已完成。',
+    '沒有未推送的 commit。',
+    '已 commit 並推上 main，CI 通過，已部署 v2.4.1。',
+    '原本還沒部署，現在已部署到正式站並驗證通過。',
+    'The fix is committed, pushed and deployed.',
+    // A rule, a status or a phrase named, not the work.
+    '收尾摘要提到「尚未部署」這類字眼時，看板會列為『待發布』。',
+    '還沒上線就不能顯示已結束。',
+    '回報說還沒交付時，看板會判成待發布，不再顯示已結束。',
+    '任務清單全勾，不能蓋過摘要裡寫明還沒做的內容。',
+    '回報寫明工作還沒交付時就不會再顯示「已結束」。',
+    // Someone else's work, in a folder shared with other sessions.
+    '共用資料夾裡其他 Session 還沒提交的修改，以及別人暫存的刪除，都原樣留著。',
+    // Not about delivering.
+    '還要等 PM 下一輪確認。',
+    '沒動到部署設定。',
+    // A delivery word as a noun.
+    '這只動本機、還沒公開的 commit。',
+  ]
+  expect(named.filter(t => undeliveredOf(t))).toEqual([])
+})
+
+test('a session whose words leave its work undelivered is not ended, however ticked its list', async ($, on) => {
+  const files: Files = new Map()
+  const item = { id: 1, text: '商品圖片可貼連結上傳', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
+  const at = Date.parse('2026-10-17T11:50:00.000Z')
+  const steps = ['定位商品圖片儲存流程', '實作伺服器端安全下載圖片', '補測試並跑相關測試', '等 PM 放行後升版 2.4.2 發布', '正式站唯讀驗證並回報 PM']
+  files.set(
+    `${DIR}/sessions/local_open.json`,
+    JSON.stringify(
+      track('local_open', {
+        // wrap_up ticked every step, the two it had put back to pending included.
+        plan: steps.map(content => ({ content, status: 'completed' })),
+        recap: '已依 PM 要求修正任務清單：前 5 步維持完成，「升版 2.4.2 發布」和「正式站唯讀驗證並回報 PM」改回待辦。功能修改仍未 commit 或 push，繼續等 PM 放行 2.4.2。',
+        recapAt: at - 5000,
+        lastAnswer: '這次只改了清單，程式沒有動，也沒有 commit 或 push。等 PM 放行 2.4.2 後我再發布，到正式站唯讀驗證，最後回報 PM。',
+        turnAt: at,
+        planAt: at,
+      }),
+    ),
+  )
+  mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+
+  const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(board).toMatch(/- \[待發布・未完成\] 「商品列表頁」\(local_open\) 最後回報尚未交付（commit、push、發布／部署／上線）/)
+  expect(board).toMatch(/### \[待發布・未完成\] 商品列表頁/)
+  expect(board).not.toMatch(/\[已結束\] 商品列表頁/)
+
+  const close = async (extra: object = {}) =>
+    String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done', ...extra } as never)) as { result?: unknown }).result)
+  expect(await close()).toMatch(/無法將 T-01 標記為完成：負責的 Session「商品列表頁」最後回報尚未交付/)
+  expect(await close({ force: true, note: '使用者確認 2.4.2 已上線' })).toMatch(/已更新工作項目 T-01/)
+})
+
+test('a commit kept here until the PM confirms is undelivered until git shows it pushed', async ($, on) => {
+  const files: Files = new Map()
+  const item = { id: 1, text: '收緊背景判斷', owner: 'local_open', status: 'open', note: '', createdAt: NOW, updatedAt: NOW }
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
+  const at = Date.parse('2026-10-17T11:50:00.000Z')
+  files.set(
+    `${DIR}/sessions/local_open.json`,
+    JSON.stringify(track('local_open', { lastAnswer: 'T-04 修好了：commit 是 `9638755`，在本機 main 上，沒有 push、也沒有打 tag。19 項測試全部通過。', turnAt: at, planAt: at })),
+  )
+  let remotes = ''
+  const asked: string[] = []
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files, [], (argv, cwd) => {
+    asked.push(`${argv.join(' ')} @ ${cwd}`)
+
+    return argv[0] === 'git' && argv[1] === 'branch' ? { exitCode: 0, stdout: remotes } : null
+  })
+  await $.session.start(START)
+  const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  const close = async () =>
+    String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done' } as never)) as { result?: unknown }).result)
+
+  expect(await board()).toMatch(/\[待發布・未完成\] 「商品列表頁」\(local_open\) 最後回報尚未交付（push）/)
+  expect(asked).toContain(`git branch -r --contains 9638755 @ ${PROJECT}`)
+  expect(await close()).toMatch(/無法將 T-01 標記為完成/)
+
+  // The PM pushes it from this machine: origin/main holds it now.
+  remotes = '  origin/HEAD -> origin/main\n  origin/main\n'
+  await clock.advance(61_000)
+  expect(await board()).toMatch(/### \[已結束\] 商品列表頁|另有 \d+ 個已結束/)
+  expect(await board()).not.toMatch(/待發布・未完成\] 「商品列表頁」/)
+  expect(await close()).toMatch(/已更新工作項目 T-01/)
+})
+
+test('CI named in quotes or in a rule is not CI still running', () => {
+  const running = [
+    '已推上 main（3fa1c2e），CI 還在跑，通過後才會打標籤和部署。',
+    'CI 還要跑 1 小時，跑完再部署。',
+    '同時 CI 還在跑。',
+    '已推上 main（CI 還在跑）。',
+    'Pushed to main; waiting for CI before tagging.',
+    'The checks are still running.',
+  ]
+  // A real session's report about this very board, its own CI long passed.
+  const report = `T-04 修好了：看板現在只有在回報說工作「還在進行」時，才會判成「背景執行」。commit 是 \`9638755\`，在本機 main 上，沒有 push、也沒有打 tag。19 項測試全部通過，validate 也通過。
+
+**問題出在哪**
+- 只要回報裡出現「背景」兩個字就會命中，所以我上一輪那份講背景判斷修正的回報被當成還在背景跑。
+- 同一類的誤判還有一種：回報引用狀態名稱「等待 CI」時，也會被當成在等 CI。我更早的回報就有這種句子。
+
+**現在的判斷規則**
+- **中文：** 例如「正在…背景執行」「我在背景等」「背景執行中」「背景…完成後」「等 CI 通過後」。
+- 「等」前面是引號、括號，或「不用、不必、別」的也不算。
+- **英文：** 例如 "still running in the background"、句首的 "Waiting for CI to finish"、"I'll … once the checks pass"。表格裡的 "Waiting on CI" 這種狀態名稱不算。`
+  const named = [
+    report,
+    '**「商品列表頁」一直卡在「等待 CI」的原因**',
+    '- **用 GitHub 確認 CI：** 文字看起來像「CI 還在跑」時，會在該 Session 的資料夾用 `gh` 查實際狀態。',
+    '- 查不到時照原本的文字判斷，CI 真的還在跑時一樣會擋結案。',
+    '- 如果一則已經完成的回報寫成「CI 通過後才打標籤並部署」，單看文字仍可能被當成還在跑。',
+    '- **修正：** PM 每一輪、以及每 30 秒的定時更新，都會檢查兩個工具還在不在，不在就重新註冊。',
+    'CI 已通過就不算「等待 CI」(等待 CI)。',
+    // The status named without quotes.
+    '其他 PM 那句仍然判成等待 CI。',
+    '看板查到自己的 commit 結果 success，不再標等待 CI。',
+    '- HEAD 比回報晚時維持等待 CI。',
+    // A name in code.
+    'WAITING 和 CI_PENDING 都一樣。',
+  ]
+  expect(running.filter(t => !isCiPending(t))).toEqual([])
+  expect(named.filter(isCiPending)).toEqual([])
+  // Nor do they read as work going on in the background.
+  const waits = (text: string) => parseLastWord(`[assistant] ${text}\n[result] done (success), 1 turns`, '').isWaiting
+  expect(named.filter(waits)).toEqual([])
+})
+
+test('the CI a report names: nearest its own CI words first, never part of an id', () => {
+  expect(ciTargets('另外參考了別的專案 b8e41f0 的寫法。本次 commit `3fa1c2e` 已推上 main，CI 還在跑。').shas).toEqual(['3fa1c2e', 'b8e41f0'])
+  expect(ciTargets('commit 是 `532590d`，CI 還在跑，已回報 PM local_0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d。').shas).toEqual(['532590d'])
+  expect(ciTargets('CI 還在跑：https://github.com/o/r/actions/runs/41022337760，前一次是 run 39030000001。').runs[0]).toBe('41022337760')
+})
+
+test('GitHub is asked about a commit of this repository, else about its HEAD', async ($, on) => {
+  const files: Files = new Map()
+  const at = Date.parse('2026-10-17T11:50:00.000Z')
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  // Hashes quoted from an example and another project come before its own, nearer its CI words.
+  const words = 'CI 還在跑，寫法照 demo 的 8c41d2e 和另一個專案的 b8e41f0；這次推上去的是 3fa1c2e。'
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { lastAnswer: words, turnAt: at, planAt: at })))
+  const FULL = '3fa1c2e9d84b07a6c5e1f2039b8d7c6a5e4f3d21'
+  const HEAD = '7d2e4b1c0a9f8e7d6c5b4a3928170f6e5d4c3b2a'
+  let headAt = Math.floor(at / 1000) - 60
+  let isOwnNamed = true
+  const asked: string[] = []
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files, [], argv => {
+    asked.push(argv.join(' '))
+    if (argv[1] === 'rev-parse') return isOwnNamed && argv[4] === '3fa1c2e^{commit}' ? { exitCode: 0, stdout: FULL } : { exitCode: 1, stdout: '' }
+    if (argv[1] === 'log') return { exitCode: 0, stdout: `${HEAD} ${headAt}` }
+    if (argv[0] === 'gh') return { exitCode: 0, stdout: JSON.stringify([{ status: 'completed', conclusion: 'success' }]) }
+
+    return null
+  })
+  await $.session.start(START)
+  const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+
+  // The two quoted hashes are not commits here: the session's own one answers.
+  expect(await board()).not.toMatch(/等待 CI・未完成\] 「商品列表頁」/)
+  expect(asked.filter(a => a.startsWith('git rev-parse')).map(a => a.split(' ')[4])).toEqual(['8c41d2e^{commit}', 'b8e41f0^{commit}', '3fa1c2e^{commit}'])
+  expect(asked).toContain(`gh run list --commit ${FULL} --limit 20 --json status,conclusion`)
+
+  // None of the named hashes is here: the folder's HEAD, committed before the words, answers instead.
+  isOwnNamed = false
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { lastAnswer: `${words} `, turnAt: at, planAt: at })))
+  await clock.advance(31_000)
+  expect(await board()).not.toMatch(/等待 CI・未完成\] 「商品列表頁」/)
+  expect(asked).toContain(`gh run list --commit ${HEAD} --limit 20 --json status,conclusion`)
+
+  // A HEAD committed after the words is not what they waited on: the words decide.
+  headAt = Math.floor(at / 1000) + 60
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { lastAnswer: `${words}  `, turnAt: at, planAt: at })))
+  await clock.advance(31_000)
+  expect(await board()).toMatch(/\[等待 CI・未完成\] 「商品列表頁」/)
 })
