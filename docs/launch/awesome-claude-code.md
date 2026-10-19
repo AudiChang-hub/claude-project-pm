@@ -38,10 +38,10 @@ Form: https://github.com/hesreallyhim/awesome-claude-code/issues/new?template=re
 | Author Name | `AudiChang-hub` |
 | Author Link | `https://github.com/AudiChang-hub` |
 
-**Description**, a starting point to rewrite in your own words (406 characters, one line):
+**Description**, a starting point to rewrite in your own words (449 characters, one line):
 
 ```
-A plugin that makes one Claude Code session per project its PM: a board of every session's task list, open question and status (waiting on the user, stopped mid-plan, CI still running or failed on GitHub, committed but not pushed or released, background work), and a ledger of assigned work that cannot be closed until its owner has finished. Built with Claude Code, using itself to manage its development.
+A plugin that makes one Claude Code session per project its PM: a board of every session's task list, open question and status (waiting on the user, stopped mid-plan, CI still running or failed on GitHub, committed but not pushed or released, background work), and a ledger of assigned work that cannot be closed until its owner has finished. English and Traditional Chinese interface. Built with Claude Code, using itself to manage its development.
 ```
 
 **Checklist:** tick each required box only after doing that thing yourself (visiting the

@@ -6,8 +6,8 @@ after the owner has approved it. Steps 1–3 are done; the posts have not been m
 | File | What it is | Status |
 | --- | --- | --- |
 | [repo-metadata.md](repo-metadata.md) | Repository description, topics and the `gh` command that sets them | Applied 2026-10-19 |
-| [release-v0.4.0.md](release-v0.4.0.md) | Release notes for `v0.4.0`, as published | Published 2026-10-19 |
-| [reddit-claudeai.md](reddit-claudeai.md) | r/ClaudeAI post: a first-person share, with a Traditional Chinese reading copy | Two spots for the owner's own words |
+| [release-v0.4.0.md](release-v0.4.0.md) | Release notes for `v0.4.0`, as published (before the English UI) | Published 2026-10-19 |
+| [reddit-claudeai.md](reddit-claudeai.md) | r/ClaudeAI post: a first-person share (mentions the English and Traditional Chinese UI), with a Traditional Chinese reading copy | Two spots for the owner's own words |
 | [awesome-claude-code.md](awesome-claude-code.md) | Notes for the awesome-claude-code "Recommend a Resource" web form | On or after 2026-10-31, by the owner |
 | [show-hn.md](show-hn.md) | Show HN title and first comment | On hold, not posting |
 
@@ -25,7 +25,7 @@ after the owner has approved it. Steps 1–3 are done; the posts have not been m
    gh release create v<version> --repo AudiChang-hub/claude-project-pm --target main --title "v<version>" --notes-file docs/launch/release-v<version>.md
    ```
 
-4. **r/ClaudeAI**: fill in the two `[In your own words: …]` spots in
+4. **r/ClaudeAI**, after the release that ships the English interface (the draft mentions it): fill in the two `[In your own words: …]` spots in
    [reddit-claudeai.md](reddit-claudeai.md), check the subreddit's rules and flair, then post by hand.
 
 5. **awesome-claude-code**, on or after **2026-10-31** (14 days after the first commit, 2026-10-17):

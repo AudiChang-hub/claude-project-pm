@@ -2,11 +2,13 @@
 <!--
   Offline demo of the Project PM board, used for the README screenshots.
   Fixture data only (a made-up "Acme Storefront" project): nothing here reads a real session.
-  The marks (ring, status dots, step bars), status labels and colors are copied from
+  The marks (ring, status dots, step bars) and status colors are copied from
   hooks/view.tsx and hooks/sessions.ts; the layout follows renderPane().
 
-  Views:  board.html?view=hero            light, annotated (docs/images/board-hero.png)
-          board.html?view=pane&theme=dark  the pane alone (docs/images/board-dark.png)
+  Views:  board.html?view=hero                         light, annotated (docs/images/board-hero.png)
+          board.html?view=pane&theme=dark               the pane alone (docs/images/board-dark.png)
+          add &lang=zh-TW for the Traditional Chinese board (docs/images/*-zh-TW.png); the default is en.
+  The board's words are copied from hooks/messages.ts; keep them in step when that file changes.
   Capture: see docs/demo/README.md
 -->
 <html lang="en">
@@ -16,7 +18,7 @@
 <title>Project PM Board Demo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&family=Noto+Sans+TC:wght@400;500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&family=Noto+Sans+TC:wght@400;500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Noto+Serif+TC:wght@600;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --canvas: #f3efe6;
@@ -83,6 +85,12 @@
   .eyebrow i { width: 22px; height: 1.5px; background: currentColor; display: inline-block; }
   h1 { font: 500 54px/1.04 var(--serif); letter-spacing: -.02em; margin-top: 22px; font-variation-settings: "opsz" 144; }
   h1 em { font-style: italic; color: var(--claude); padding-right: .14em; }
+  :lang(zh-TW) h1 { font: 700 50px/1.16 "Noto Serif TC", var(--serif); letter-spacing: .01em; }
+  :lang(zh-TW) h1 em { font-style: normal; padding-right: 0; }
+  :lang(zh-TW) .eyebrow { letter-spacing: .12em; }
+  :lang(zh-TW) .callouts { row-gap: 30px; margin-top: 44px; }
+  :lang(zh-TW) .callouts p { line-height: 1.6; }
+  .callouts code { font: 500 13px var(--mono); }
   .lede { margin-top: 20px; font-size: 17px; line-height: 1.55; color: var(--ink-2); max-width: 520px; }
   .callouts { list-style: none; margin-top: 36px; display: grid; row-gap: 20px; }
   .callouts li { display: grid; grid-template-columns: 34px 1fr; column-gap: 16px; align-items: start; }
@@ -184,52 +192,173 @@ function stepsSvg(plan, hex) {
   }).join('')
   return `<svg class="steps" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" viewBox="0 0 ${width} 4">${rects}</svg>`
 }
-const STATUS = {
-  asking: { label: '待回覆', color: 'warning', hex: '#f59e0b' },
-  failed: { label: 'CI 失敗', color: 'error', hex: '#ef4444' },
-  open: { label: '未完成', color: 'claude', hex: '#d97757' },
-  unreleased: { label: '待發布', color: 'planMode', hex: '#0d9488' },
-  ci: { label: '等待 CI', color: 'permission', hex: '#8b5cf6' },
-  running: { label: '執行中', color: 'success', hex: '#22c55e' },
-  waiting: { label: '背景執行', color: 'suggestion', hex: '#3b82f6' },
+// ── Copied verbatim from hooks/messages.ts: only the keys the pane below uses ──
+const MESSAGES = {
+  en: {
+    'status.asking.label': 'Waiting on you',
+    'status.failed.label': 'CI failed',
+    'status.open.label': 'Unfinished',
+    'status.unreleased.label': 'Not released',
+    'status.ci.label': 'Waiting on CI',
+    'status.running.label': 'Running',
+    'status.waiting.label': 'In the background',
+    'time.now': 'just now',
+    'time.minutes': '{n} min ago',
+    'pane.titlePm': '{project} · PM',
+    'pane.pmSelf': 'PM: this session',
+    'pane.itemsDone': 'Work items done {done}/{total}',
+    'pane.itemsOpen': '{n} open',
+    'pane.itemsUnassigned': '　·　{n} unassigned',
+    'pane.kpiRunning': 'Running',
+    'pane.kpiAsking': 'Waiting on you',
+    'pane.kpiOpen': 'Not finished',
+    'pane.project': 'PROJECT',
+    'pane.sessionsCount': '{n} {n|session|sessions}　·　{role}',
+    'pane.scopeProject': 'This project',
+    'pane.scopeAll': 'All',
+    'pane.question': 'Question: {text}',
+    'pane.instruction': 'Instruction: {text}',
+    'pane.steps': 'Steps {done}/{total}',
+    'pane.prOpen': 'PR open',
+    'pane.moreSteps': '　(+{n} more)',
+    'pane.caveat': 'Follow up',
+    'pane.ownerNone': 'Unassigned',
+    'pane.owner': 'Owner　{title} · {status}{elsewhere}',
+    'pane.items': 'WORK ITEMS',
+    'pane.sessions': 'SESSIONS',
+    'pane.sessionsMeta': '{live} active　·　{ended} ended',
+    'pane.showEnded': 'Show ended sessions ({n})',
+    'pane.synced': 'Synced {ago}　·　updates every 30 s',
+    'pane.refresh': 'Sync now',
+  },
+  'zh-TW': {
+    'status.asking.label': '待回覆',
+    'status.failed.label': 'CI 失敗',
+    'status.open.label': '未完成',
+    'status.unreleased.label': '待發布',
+    'status.ci.label': '等待 CI',
+    'status.running.label': '執行中',
+    'status.waiting.label': '背景執行',
+    'time.now': '剛剛',
+    'time.minutes': '{n} 分鐘前',
+    'pane.titlePm': '{project} · PM',
+    'pane.pmSelf': 'PM：本 Session',
+    'pane.itemsDone': '工作項目完成 {done}/{total}',
+    'pane.itemsOpen': '{n} 項進行中',
+    'pane.itemsUnassigned': '　·　{n} 項未指派',
+    'pane.kpiRunning': '執行中',
+    'pane.kpiAsking': '待回覆',
+    'pane.kpiOpen': '尚未完成',
+    'pane.project': 'PROJECT',
+    'pane.sessionsCount': '{n} Sessions　·　{role}',
+    'pane.scopeProject': '本專案',
+    'pane.scopeAll': '全部',
+    'pane.question': '問題：{text}',
+    'pane.instruction': '指令：{text}',
+    'pane.steps': '步驟 {done}/{total}',
+    'pane.prOpen': 'PR 開啟中',
+    'pane.moreSteps': '　（另 {n} 項）',
+    'pane.caveat': '需追蹤',
+    'pane.ownerNone': '尚未指派',
+    'pane.owner': '負責　{title}・{status}{elsewhere}',
+    'pane.items': '工作項目',
+    'pane.sessions': 'SESSIONS',
+    'pane.sessionsMeta': '{live} 進行中　·　{ended} 已結束',
+    'pane.showEnded': '顯示已結束的 Session（{n}）',
+    'pane.synced': '同步於 {ago}　·　每 30 秒自動更新',
+    'pane.refresh': '重新同步',
+  },
 }
 
-// ── Fixture: a made-up project ──
+const q = new URLSearchParams(location.search)
+const lang = q.get('lang') === 'zh-TW' ? 'zh-TW' : 'en'
+document.documentElement.lang = lang
+/** The same filling as t() in hooks/messages.ts: `{name}` from params, `{n|one|other}` picked by n. */
+const t = (key, params = {}) =>
+  MESSAGES[lang][key].replace(/\{(\w+)(?:\|([^|}]*)\|([^}]*))?\}/g, (whole, name, one, other) => {
+    const value = params[name]
+    if (one !== undefined) return Number(value) === 1 ? one : (other ?? '')
+    return value === undefined ? whole : String(value)
+  })
+
+// Colors and hues from hooks/sessions.ts (STATUS); labels from the messages above.
+const STATUS = Object.fromEntries(Object.entries({
+  asking: { color: 'warning', hex: '#f59e0b' },
+  failed: { color: 'error', hex: '#ef4444' },
+  open: { color: 'claude', hex: '#d97757' },
+  unreleased: { color: 'planMode', hex: '#0d9488' },
+  ci: { color: 'permission', hex: '#8b5cf6' },
+  running: { color: 'success', hex: '#22c55e' },
+  waiting: { color: 'suggestion', hex: '#3b82f6' },
+}).map(([key, look]) => [key, { ...look, label: t(`status.${key}.label`) }]))
+
+// ── Fixture: a made-up project, written in the board's language ──
 const C = 'completed', P = 'in_progress', _ = 'pending'
-const sessions = [
-  { pin: 2, status: 'asking', title: 'Retire v1 coupon fields', ago: '12 分鐘前', plan: [C, C, C, C, C], pr: true,
-    summary: '問題：Drop the coupon_v1 columns in this release, or keep them read-only until 0.9?' },
-  { pin: 3, status: 'failed', title: 'Fix tax rounding at checkout', ago: '26 分鐘前', plan: [C, C, C, C], pr: true,
-    summary: 'Pushed 8c41d2e; waiting for CI on GitHub Actions before merging.' },
-  { pin: 4, status: 'open', title: 'Search ranking for in-stock items', ago: '41 分鐘前', plan: [C, C, C, P, _, _, _],
-    current: 'Boost in-stock items in the ranker', summary: 'Indexed stock levels per warehouse; the ranker change is next.' },
-  { pin: 5, status: 'unreleased', title: 'Holiday banner on the home page', ago: '17 分鐘前', plan: [C, C, C, C, C],
-    caveat: 'Merged locally as a3f9c21; not pushed yet, waiting for your go-ahead to deploy.' },
-  { status: 'ci', title: 'Export product list as CSV', ago: '8 分鐘前', plan: [C, C, C, C, C, C], pr: true,
-    summary: 'Committed 4f2d9e1 and pushed. CI is still running on GitHub Actions; deploy once it passes.' },
-  { status: 'running', title: 'Monthly payouts reconciliation', ago: '剛剛', plan: [C, C, P, _, _],
-    current: 'Match payouts to orders by reference', summary: '指令：Reconcile October payouts against orders and flag mismatches' },
-  { status: 'waiting', title: 'Image CDN backfill', ago: '5 分鐘前', plan: [C, C, C, C],
-    summary: 'Backfill is still running in the background; about 20 minutes left.' },
-]
-const ledger = [
-  { id: 4, text: 'Export the product list as CSV', owner: 'Export product list as CSV', status: 'ci' },
-  { id: 6, text: 'Fix tax rounding at checkout', owner: 'Fix tax rounding at checkout', status: 'failed' },
-  { id: 7, text: 'Retire the v1 coupon fields', owner: 'Retire v1 coupon fields', status: 'asking' },
-  { id: 11, text: 'Holiday banner on the home page', owner: 'Holiday banner on the home page', status: 'unreleased' },
-  { id: 12, text: 'Let shoppers save cards for checkout', owner: null },
-]
+const FIXTURE = {
+  en: {
+    sessions: [
+      { pin: 2, status: 'asking', title: 'Retire v1 coupon fields', min: 12, plan: [C, C, C, C, C], pr: true,
+        ask: 'Drop the coupon_v1 columns in this release, or keep them read-only until 0.9?' },
+      { pin: 3, status: 'failed', title: 'Fix tax rounding at checkout', min: 26, plan: [C, C, C, C], pr: true,
+        recap: 'Pushed 8c41d2e; waiting for CI on GitHub Actions before merging.' },
+      { pin: 4, status: 'open', title: 'Search ranking for in-stock items', min: 41, plan: [C, C, C, P, _, _, _],
+        current: 'Boost in-stock items in the ranker', recap: 'Indexed stock levels per warehouse; the ranker change is next.' },
+      { pin: 5, status: 'unreleased', title: 'Holiday banner on the home page', min: 17, plan: [C, C, C, C, C],
+        caveat: 'Merged locally as a3f9c21; not pushed yet, waiting for your go-ahead to deploy.' },
+      { status: 'ci', title: 'Export product list as CSV', min: 8, plan: [C, C, C, C, C, C], pr: true,
+        recap: 'Committed 4f2d9e1 and pushed. CI is still running on GitHub Actions; deploy once it passes.' },
+      { status: 'running', title: 'Monthly payouts reconciliation', min: 0, plan: [C, C, P, _, _],
+        current: 'Match payouts to orders by reference', prompt: 'Reconcile October payouts against orders and flag mismatches' },
+      { status: 'waiting', title: 'Image CDN backfill', min: 5, plan: [C, C, C, C],
+        recap: 'Backfill is still running in the background; about 20 minutes left.' },
+    ],
+    ledger: [
+      { id: 4, text: 'Export the product list as CSV', owner: 'Export product list as CSV', status: 'ci' },
+      { id: 6, text: 'Fix tax rounding at checkout', owner: 'Fix tax rounding at checkout', status: 'failed' },
+      { id: 7, text: 'Retire the v1 coupon fields', owner: 'Retire v1 coupon fields', status: 'asking' },
+      { id: 11, text: 'Holiday banner on the home page', owner: 'Holiday banner on the home page', status: 'unreleased' },
+      { id: 12, text: 'Let shoppers save cards for checkout', owner: null },
+    ],
+  },
+  'zh-TW': {
+    sessions: [
+      { pin: 2, status: 'asking', title: '停用 v1 優惠券欄位', min: 12, plan: [C, C, C, C, C], pr: true,
+        ask: '這次發布就刪掉 coupon_v1 欄位，還是保留唯讀到 0.9 版？' },
+      { pin: 3, status: 'failed', title: '修正結帳稅額四捨五入', min: 26, plan: [C, C, C, C], pr: true,
+        recap: '已 push 8c41d2e，等 GitHub Actions 的 CI 通過後再合併。' },
+      { pin: 4, status: 'open', title: '搜尋排序：有庫存的商品優先', min: 41, plan: [C, C, C, P, _, _, _],
+        current: '在排序器中提高有庫存商品的權重', recap: '已建立各倉庫的庫存量索引，接下來改排序器。' },
+      { pin: 5, status: 'unreleased', title: '首頁節慶橫幅', min: 17, plan: [C, C, C, C, C],
+        caveat: '已在本機合併為 a3f9c21，尚未 push，等你放行再部署。' },
+      { status: 'ci', title: '商品列表匯出 CSV', min: 8, plan: [C, C, C, C, C, C], pr: true,
+        recap: '已提交 4f2d9e1 並 push，GitHub Actions 的 CI 還在跑，通過後再部署。' },
+      { status: 'running', title: '每月撥款對帳', min: 0, plan: [C, C, P, _, _],
+        current: '依參考編號比對撥款與訂單', prompt: '核對 10 月撥款與訂單，標出不一致的地方' },
+      { status: 'waiting', title: '圖片 CDN 回填', min: 5, plan: [C, C, C, C],
+        recap: '回填仍在背景執行中，大約還要 20 分鐘。' },
+    ],
+    ledger: [
+      { id: 4, text: '匯出商品列表 CSV', owner: '商品列表匯出 CSV', status: 'ci' },
+      { id: 6, text: '修正結帳稅額四捨五入', owner: '修正結帳稅額四捨五入', status: 'failed' },
+      { id: 7, text: '停用 v1 優惠券欄位', owner: '停用 v1 優惠券欄位', status: 'asking' },
+      { id: 11, text: '首頁節慶橫幅', owner: '首頁節慶橫幅', status: 'unreleased' },
+      { id: 12, text: '讓顧客儲存信用卡以便結帳', owner: null },
+    ],
+  },
+}
+const { sessions, ledger } = FIXTURE[lang]
 const items = { done: 4, total: 9 }
 const ended = 4
+const PROJECT = 'Acme Storefront'
 
 // ── Render (mirrors renderPane) ──
-const q = new URLSearchParams(location.search)
 const view = q.get('view') || 'hero'
 if (q.get('theme') === 'dark') document.documentElement.dataset.theme = 'dark'
 const hero = view === 'hero'
 const esc = s => s.replace(/[&<>]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]))
 const colorVar = key => `var(--${key})`
 const code = id => `T-${String(id).padStart(2, '0')}`
+const ago = min => (min < 1 ? t('time.now') : t('time.minutes', { n: min }))
 const count = s => sessions.filter(x => x.status === s).length
 const ratio = items.done / items.total
 const open = ledger.length
@@ -243,25 +372,27 @@ const metric = (value, label, color) => `
     <div class="caption dim trunc">${label}</div>
   </div>`
 
+const summaryOf = s => (s.ask ? t('pane.question', { text: s.ask }) : s.recap || t('pane.instruction', { text: s.prompt }))
+
 const card = s => {
   const look = STATUS[s.status]
   const left = s.plan.filter(x => x !== C).length
-  const meta = [`步驟 ${s.plan.length - left}/${s.plan.length}`, s.pr ? 'PR 開啟中' : ''].filter(Boolean)
+  const meta = [t('pane.steps', { done: s.plan.length - left, total: s.plan.length }), s.pr ? t('pane.prOpen') : ''].filter(Boolean)
   return `
   <div class="card box${hero && s.pin ? ' hl' : ''}" style="--c:${PIN[s.pin] || 'transparent'}">
     ${pinOn(s.pin, PIN[s.pin])}
-    <div class="head">${dotSvg(look.hex, s.status === 'running')}<span class="t trunc">${esc(s.title)}</span><span class="caption dim tab">${s.ago}</span></div>
+    <div class="head">${dotSvg(look.hex, s.status === 'running')}<span class="t trunc">${esc(s.title)}</span><span class="caption dim tab">${ago(s.min)}</span></div>
     <div class="caption trunc"><span class="medium" style="color:${colorVar(look.color)}">${look.label}</span><span class="dim">${meta.map(m => `　·　${m}`).join('')}</span></div>
     ${stepsSvg(s.plan, look.hex)}
-    ${s.current ? `<div class="footnote trunc" style="${s.status === 'open' ? 'color:var(--claude)' : ''}">▸ ${esc(s.current)}${left > 1 ? `　（另 ${left - 1} 項）` : ''}</div>` : ''}
+    ${s.current ? `<div class="footnote trunc" style="${s.status === 'open' ? 'color:var(--claude)' : ''}">▸ ${esc(s.current)}${left > 1 ? t('pane.moreSteps', { n: left - 1 }) : ''}</div>` : ''}
     ${s.caveat
-      ? `<div class="footnote trunc"><span class="medium" style="color:var(--warning)">需追蹤</span><span class="dim">　${esc(s.caveat)}</span></div>`
-      : `<div class="footnote dim trunc">${esc(s.summary)}</div>`}
+      ? `<div class="footnote trunc"><span class="medium" style="color:var(--warning)">${t('pane.caveat')}</span><span class="dim">　${esc(s.caveat)}</span></div>`
+      : `<div class="footnote dim trunc">${esc(summaryOf(s))}</div>`}
   </div>`
 }
 
 const ledgerRow = i => {
-  const ownerText = i.owner ? `負責　${esc(i.owner)}・${STATUS[i.status].label}` : '尚未指派'
+  const ownerText = i.owner ? t('pane.owner', { title: esc(i.owner), status: STATUS[i.status].label, elsewhere: '' }) : t('pane.ownerNone')
   return `
   <div class="ledger">
     <code>${code(i.id)}</code>
@@ -274,16 +405,16 @@ const ledgerRow = i => {
 
 const pane = `
 <div class="pane">
-  <div class="pane-head"><span>Acme Storefront · PM</span>
+  <div class="pane-head"><span>${t('pane.titlePm', { project: PROJECT })}</span>
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg></div>
   <div class="body">
     <div class="row" style="justify-content:space-between;align-items:flex-start;column-gap:8px">
       <div style="min-width:0">
-        <div class="caption medium" style="color:var(--claude);letter-spacing:.04em">PROJECT</div>
-        <div class="heading trunc">Acme Storefront</div>
-        <div class="caption dim tab">${sessions.length + ended} Sessions　·　PM：本 Session</div>
+        <div class="caption medium" style="color:var(--claude);letter-spacing:.04em">${t('pane.project')}</div>
+        <div class="heading trunc">${PROJECT}</div>
+        <div class="caption dim tab">${t('pane.sessionsCount', { n: sessions.length + ended, role: t('pane.pmSelf') })}</div>
       </div>
-      <div class="row" style="column-gap:6px;flex-shrink:0"><span class="btn primary">本專案</span><span class="btn">全部</span></div>
+      <div class="row" style="column-gap:6px;flex-shrink:0"><span class="btn primary">${t('pane.scopeProject')}</span><span class="btn">${t('pane.scopeAll')}</span></div>
     </div>
     <div class="kpi box${hero ? ' hl' : ''}" style="--c:${PIN[1]};position:relative">
       ${pinOn(1, PIN[1])}
@@ -291,47 +422,75 @@ const pane = `
         ${ringSvg(ratio)}
         <div style="flex:1;min-width:0">
           <div class="title tab">${Math.round(ratio * 100)}%</div>
-          <div class="caption dim trunc tab">工作項目完成 ${items.done}/${items.total}</div>
-          <div class="caption trunc tab"><span class="dim">${open} 項進行中</span>${unassigned ? `<span style="color:var(--warning)">　·　${unassigned} 項未指派</span>` : ''}</div>
+          <div class="caption dim trunc tab">${t('pane.itemsDone', { done: items.done, total: items.total })}</div>
+          <div class="caption trunc tab"><span class="dim">${t('pane.itemsOpen', { n: open })}</span>${unassigned ? `<span style="color:var(--warning)">${t('pane.itemsUnassigned', { n: unassigned })}</span>` : ''}</div>
         </div>
       </div>
       <div class="row">
-        ${metric(count('running') + count('waiting'), '執行中', 'success')}
-        ${metric(count('asking'), '待回覆', 'warning')}
-        ${metric(count('open') + count('ci') + count('failed') + count('unreleased'), '尚未完成', 'claude')}
+        ${metric(count('running') + count('waiting'), t('pane.kpiRunning'), 'success')}
+        ${metric(count('asking'), t('pane.kpiAsking'), 'warning')}
+        ${metric(count('open') + count('ci') + count('failed') + count('unreleased'), t('pane.kpiOpen'), 'claude')}
       </div>
     </div>
-    <div class="section"><span class="caption semibold dim">工作項目</span><span class="caption dim tab">${open} 項進行中</span></div>
+    <div class="section"><span class="caption semibold dim">${t('pane.items')}</span><span class="caption dim tab">${t('pane.itemsOpen', { n: open })}</span></div>
     ${ledger.map(ledgerRow).join('')}
-    <div class="section"><span class="caption semibold dim">SESSIONS</span><span class="caption dim tab">${sessions.length} 進行中　·　${ended} 已結束</span></div>
+    <div class="section"><span class="caption semibold dim">${t('pane.sessions')}</span><span class="caption dim tab">${t('pane.sessionsMeta', { live: sessions.length, ended })}</span></div>
     ${sessions.map(card).join('')}
-    <div class="row" style="margin-top:4px"><span class="btn plain">顯示已結束的 Session（${ended}）</span></div>
+    <div class="row" style="margin-top:4px"><span class="btn plain">${t('pane.showEnded', { n: ended })}</span></div>
     <div class="row" style="justify-content:space-between;margin-top:6px">
-      <span class="caption dim tab">同步於 剛剛　·　每 30 秒自動更新</span><span class="btn plain">重新同步</span>
+      <span class="caption dim tab">${t('pane.synced', { ago: t('time.now') })}</span><span class="btn plain">${t('pane.refresh')}</span>
     </div>
   </div>
 </div>`
 
-const callout = (n, title, text) => `
+// ── The hero's own words (not the board's) ──
+const STORY = {
+  en: {
+    eyebrow: 'Project PM for Claude Code',
+    title: 'Many sessions.<br><em>Nothing</em> slips.',
+    lede: 'One PM session per project keeps a live board of every Claude Code session you have running, and a ledger of everything you asked for.',
+    callouts: [
+      ['Progress is the work you asked for', 'The ring counts ledger items the PM has verified, not each session’s own checklist.'],
+      ['Waiting on you comes first', 'Sessions blocked on your answer rise to the top, question quoted.'],
+      ['CI is not done until GitHub says so', 'Left-running CI stays open; the PM checks the run with <code>gh</code> and flags failures.'],
+      ['Stopped with steps left', 'A session that halted mid-plan shows where it stopped.'],
+      ['Not shipped is not done', 'Committed but not pushed, released or deployed stays open, every step ticked or not.'],
+    ],
+    tryIt: 'Try it in Claude Code',
+    fine: 'Demo data. <span>The board speaks English or Traditional Chinese, following your system language.</span>',
+  },
+  'zh-TW': {
+    eyebrow: 'Claude Code 的專案 PM',
+    title: 'Session 再多，<br><em>一件</em>也不漏',
+    lede: '每個專案一個 PM Session：即時看板掌握你開著的每個 Claude Code Session，工作清單記下你交辦的每一件事。',
+    callouts: [
+      ['進度看的是你交辦的工作', '圓環計算 PM 驗收過的工作項目，而不是各 Session 自己的勾選清單。'],
+      ['等你回覆的排最前面', '卡在你身上的 Session 排到最上方，並附上它的問題。'],
+      ['CI 要 GitHub 說通過才算', 'CI 還在跑就維持未完成；PM 用 <code>gh</code> 查實際結果，失敗會標出來。'],
+      ['停在半路的一眼看到', '計畫做到一半就停下的 Session，會顯示停在哪一步。'],
+      ['沒上線就不算完成', '已 commit 但還沒 push、發布或部署，就算步驟全勾也維持未完成。'],
+    ],
+    tryIt: '在 Claude Code 中試用',
+    fine: '示範資料。<span>看板有英文與繁體中文介面，預設跟隨系統語言。</span>',
+  },
+}[lang]
+
+const callout = (n, [title, text]) => `
   <li><div class="pin" style="--c:${PIN[n]}">${n}</div><div><b>${title}</b><p>${text}</p></div></li>`
 
 document.getElementById('app').innerHTML = hero ? `
 <main class="hero">
   <section class="story">
-    <div class="eyebrow"><i></i>Project PM for Claude Code</div>
-    <h1>Many sessions.<br><em>Nothing</em> slips.</h1>
-    <p class="lede">One PM session per project keeps a live board of every Claude Code session you have running, and a ledger of everything you asked for.</p>
+    <div class="eyebrow"><i></i>${STORY.eyebrow}</div>
+    <h1>${STORY.title}</h1>
+    <p class="lede">${STORY.lede}</p>
     <ol class="callouts">
-      ${callout(1, 'Progress is the work you asked for', 'The ring counts ledger items the PM has verified, not each session’s own checklist.')}
-      ${callout(2, 'Waiting on you comes first', 'Sessions blocked on your answer rise to the top, question quoted.')}
-      ${callout(3, 'CI is not done until GitHub says so', 'Left-running CI stays open; the PM checks the run with <code style="font:500 13px var(--mono)">gh</code> and flags failures.')}
-      ${callout(4, 'Stopped with steps left', 'A session that halted mid-plan shows where it stopped.')}
-      ${callout(5, 'Not shipped is not done', 'Committed but not pushed, released or deployed stays open, every step ticked or not.')}
+      ${STORY.callouts.map((c, i) => callout(i + 1, c)).join('')}
     </ol>
-    <div class="install"><small>Try it in Claude Code</small><i>/plugin install</i> project-pm \n  <u>--marketplace</u> AudiChang-hub/claude-project-pm</div>
+    <div class="install"><small>${STORY.tryIt}</small><i>/plugin install</i> project-pm \n  <u>--marketplace</u> AudiChang-hub/claude-project-pm</div>
   </section>
   <div class="pane-wrap">${pane}</div>
-  <p class="fine">Demo data. <span>Board labels appear in Traditional Chinese, the mod’s current UI language.</span></p>
+  <p class="fine">${STORY.fine}</p>
 </main>` : `<div class="solo">${pane}</div>`
 </script>
 </body>

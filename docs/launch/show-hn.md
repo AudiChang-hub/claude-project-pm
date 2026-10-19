@@ -1,7 +1,8 @@
 # Show HN draft
 
 > **On hold: not posting for now** (decided 2026-10-19). Kept for later. If it is revived, update it
-> to the current features first (the *not released* status, background work; v0.4.0 is out) and give
+> to the current features first (the *not released* status, background work, the English and
+> Traditional Chinese interface) and give
 > the first comment the same plain, built-with-Claude-Code framing as the r/ClaudeAI draft.
 
 Rules checked against https://news.ycombinator.com/showhn.html: it must be something people can
@@ -47,8 +48,10 @@ A few rules it enforces, because they are where work slips most often:
 Everything stays in ~/.claude/project-pm/ as JSON; the only network traffic is `gh` asking GitHub
 about CI with your own login.
 
-Limitations, honestly: it needs the Claude Code desktop app (it uses the app's session tools), the
-board's labels are in Traditional Chinese for now (status detection reads English and Chinese), and
+The board, the PM and its tools speak English or Traditional Chinese (following the system
+language, or /pm lang), and read sessions' reports in either.
+
+Limitations, honestly: it needs the Claude Code desktop app (it uses the app's session tools), and
 "CI is still running" is detected from what the session wrote, so phrasing it does not recognise
 slips through to the plain ended/idle status.
 

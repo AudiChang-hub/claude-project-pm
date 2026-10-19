@@ -10,10 +10,10 @@
 一個專案往往同時開著好幾個 Claude Code Session，各自做不同的事。**Project PM** 會為每個專案指派一個 PM Session：你只要跟 PM 對話，它就能掌握所有子 Session 的進度、等你回覆的問題、中途停下的工作，以及你交辦過的每一件事；只要還有 Session 在等你、做到一半停下、或 CI 還沒跑完，PM 就不會說「都完成了」。
 
 <p align="center">
-  <img src="docs/images/board-hero.png" alt="示範專案的 Project PM 看板：工作項目完成 44%，一個 Session 待回覆、一個 CI 失敗、一個中斷且還有 4 項步驟未完成、一個已合併但還沒 push。" width="100%">
+  <img src="docs/images/board-hero-zh-TW.png" alt="示範專案的 Project PM 看板：工作項目完成 44%，一個 Session 待回覆、一個 CI 失敗、一個中斷且還有 4 項步驟未完成、一個已合併但還沒 push。" width="100%">
 </p>
 
-<sub>畫面為示範資料。</sub>
+<sub>畫面為示範資料。看板有英文與繁體中文介面，預設跟隨系統語言（見[介面語言](#介面語言)）。</sub>
 
 ## 解決什麼問題
 
@@ -86,7 +86,7 @@ Project PM 會讀取每個 Session 的任務清單、收尾摘要與待決策問
 **整理 Session。** 卡片上的封存按鈕要滑過才會出現，按下後還需再確認一次（會提醒未完成步驟、開啟中的 PR 或已釘選）。還沒有 PM 的專案，輸入框上方會出現「建立 PM Session」或「由此 Session 擔任」的選項。
 
 <p align="center">
-  <img src="docs/images/board-dark.png" alt="深色模式的完整看板：工作項目與七個進行中的 Session，包含待發布、執行中與背景執行。" width="420">
+  <img src="docs/images/board-dark-zh-TW.png" alt="深色模式的完整看板：工作項目與七個進行中的 Session，包含待發布、執行中與背景執行。" width="420">
 </p>
 
 ## 使用方式
@@ -96,6 +96,7 @@ Project PM 會讀取每個 Session 的任務清單、收尾摘要與待決策問
 | `/pm` | 指定目前的 Session 為這個專案的 PM，並開啟專案看板 |
 | `/pm off` | 卸任 PM（工作項目會保留，由下一任 PM 接手） |
 | `/board` | 在任何 Session 開啟或收合專案看板 |
+| `/pm lang en`・`/pm lang zh-TW`・`/pm lang auto` | 立即切換看板、PM 與工具的語言，並存成 `language` 選項；`auto` 跟隨系統 |
 
 PM 有兩個專屬工具（不需要你自己呼叫）：
 
@@ -113,7 +114,13 @@ PM 有兩個專屬工具（不需要你自己呼叫）：
 
 ## 介面語言
 
-看板、PM 的指示與工具輸出目前是繁體中文。狀態判斷同時讀得懂中文與英文，子 Session 用哪種語言工作都可以。
+看板、輸入框上方的提示列、指令的回覆、通知、PM 的指示與工具，都有**英文**與**繁體中文**兩種介面。
+
+- **預設跟隨系統語言**（Windows 為顯示語言）：任何中文語系都顯示繁體中文，其他語系顯示英文。簡體中文語系也會顯示繁體中文；想看英文可以執行 `/pm lang en`。
+- **指定語言**：把 Plugin 的 `language` 選項設為 `auto`、`en` 或 `zh-TW`（即 `/config` 裡的 `project-pm.language`，存在 `settings.json` 的 `pluginConfigs`），或在任何 Session 輸入 `/pm lang en`、`/pm lang zh-TW`、`/pm lang auto`。指令會立即生效，並存成選項。
+- 不論看板顯示哪種語言，狀態判斷都讀得懂中文與英文的回報，子 Session 用哪種語言工作都可以。
+
+所有介面文字都在 [`hooks/messages.ts`](hooks/messages.ts)，每種語言一份。
 
 ## 運作方式與資料
 

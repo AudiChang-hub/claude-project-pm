@@ -57,9 +57,12 @@ item.
 [In your own words: one honest sentence about what it's been like, e.g. what changed in how you
 work, or what still bugs you.]
 
-Caveats: it needs the Claude Code desktop app (Code tab), and the board's labels are in Traditional
-Chinese for now. Status detection reads English and Chinese. Everything stays in local JSON files;
-the only network call is `gh` asking GitHub about CI with your own login.
+The board, the PM and its tools come in English and Traditional Chinese. It follows your system
+language, `/pm lang en` or `/pm lang zh-TW` switches, and it reads sessions' reports in either
+language whichever one it shows.
+
+Caveats: it needs the Claude Code desktop app (Code tab). Everything stays in local JSON files; the
+only network call is `gh` asking GitHub about CI with your own login.
 
 It's open source (MIT) if you want to look or borrow the idea:
 https://github.com/AudiChang-hub/claude-project-pm
@@ -102,7 +105,9 @@ rule of only N at a time? Curious what works for other people.
 
 [用你自己的話：一句誠實的話講使用感受，例如工作方式有什麼改變，或還有什麼讓你困擾。]
 
-限制：需要 Claude Code 桌面版（Code 分頁），看板文字目前是繁體中文；狀態判斷讀得懂英文和中文。資料都存在本機的 JSON 檔，唯一的網路呼叫是 `gh` 用你自己的登入向 GitHub 查 CI。
+看板、PM 和它的工具都有英文與繁體中文介面：預設跟隨系統語言，可以用 `/pm lang en` 或 `/pm lang zh-TW` 切換；不論顯示哪種語言，都讀得懂子 Session 用中文或英文寫的回報。
+
+限制：需要 Claude Code 桌面版（Code 分頁）。資料都存在本機的 JSON 檔，唯一的網路呼叫是 `gh` 用你自己的登入向 GitHub 查 CI。
 
 開源（MIT），想看看或借用這個做法的話：
 https://github.com/AudiChang-hub/claude-project-pm

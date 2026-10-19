@@ -13,7 +13,7 @@ Project PM gives each project one PM session. You talk to the PM; the PM keeps a
   <img src="docs/images/board-hero.png" alt="The Project PM board for a demo project: 44% of ledger items done, one session waiting on an answer, one with failed CI, one stopped with four steps left, one merged but not pushed." width="100%">
 </p>
 
-<sub>Demo data. The board's labels are in Traditional Chinese, the mod's current UI language (see [Language](#language)).</sub>
+<sub>Demo data. The board speaks English or Traditional Chinese, following your system language (see [Language](#language)).</sub>
 
 ## Why
 
@@ -96,6 +96,7 @@ At the top: a completion ring and three counters (running, waiting on you, not f
 | `/pm` | Makes this session the project's PM and opens the board. |
 | `/pm off` | Steps down as PM. The ledger stays with the project for the next PM. |
 | `/board` | Opens or closes the board in any session. |
+| `/pm lang en` · `/pm lang zh-TW` · `/pm lang auto` | Switches the language of the board, the PM and its tools at once, and saves it as the `language` option. `auto` follows the system. |
 
 The PM has two tools of its own, which you do not call directly:
 
@@ -113,7 +114,13 @@ A project is the folder a session works in; a git worktree under `.claude/worktr
 
 ## Language
 
-The board, the PM's instructions and its tool output are currently in Traditional Chinese. Status detection reads both English and Chinese, so sessions can work in either language. English UI strings are welcome as a contribution.
+The board, the band above the prompt, the commands' replies, the notifications, the PM's instructions and its tools speak **English** or **Traditional Chinese**.
+
+- **By default it follows the system language** (on Windows, the display language): any Chinese locale shows Traditional Chinese, everything else English. Simplified Chinese locales show Traditional Chinese too; run `/pm lang en` if you would rather read English.
+- **To choose one**, set the plugin's `language` option to `auto`, `en` or `zh-TW` (the `project-pm.language` row in `/config`, stored under `pluginConfigs` in `settings.json`), or type `/pm lang en`, `/pm lang zh-TW` or `/pm lang auto` in any session. The command takes effect at once and saves the option.
+- Reading what sessions report works in both languages whichever one the board speaks, so sessions can work in English or Chinese.
+
+Every string lives in [`hooks/messages.ts`](hooks/messages.ts), one table per language.
 
 ## Data and privacy
 
