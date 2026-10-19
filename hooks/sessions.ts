@@ -74,8 +74,8 @@ const WAITING = new RegExp(
 const CI_PENDING = new RegExp(
   [
     // CI 還在跑 / checks still running / CI 尚未完成: the run's own state, not "檢查兩個工具還在", a name like CI_PENDING
-    // or the next status in a list (CI 失敗／等待 CI → 背景執行 → 未完成)
-    /(CI|GitHub Actions|workflow|pipeline|checks?)[^。\n→／、]{0,16}(還在|仍在|正在|尚未|還沒|未(?!來|知)|進行中|執行中|跑(?!完)|\b(running|pending|in progress|queued|not (yet )?(finished|done|passed)))/,
+    // or the next status in a list (CI 失敗／等待 CI → 背景執行 → 未完成); a re-run told of (重跑, 又跑) is not one running
+    /(CI|GitHub Actions|workflow|pipeline|checks?)[^。\n→／、]{0,16}(還在|仍在|正在|尚未|還沒|未(?!來|知)|進行中|執行中|(?<![重又])跑(?!完)|[重又]跑[中著]|\b(running|pending|in progress|queued|not (yet )?(finished|done|passed)))/,
     /檢查[^。\n]{0,10}(還在(跑|執行|進行)|仍在(跑|執行|進行)|正在(跑|執行|進行)|尚未(跑完|完成|通過)|還沒(跑完|完成|通過|過)|進行中|執行中)/,
     // 正在等 9f8e7d6 的 CI: room for a hash between
     /(還在|仍在|正在)(跑|等)[^。\n]{0,16}(CI|測試|workflow|pipeline|檢查|checks?)/,

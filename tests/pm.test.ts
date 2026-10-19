@@ -704,6 +704,8 @@ test('CI named in quotes or in a rule is not CI still running', () => {
     '修正已推上 9f8e7d6，正在等 9f8e7d6 的 CI。',
     '接下來：推送、等 CI 通過後部署。',
     '等待 CI 通過後再部署。',
+    'CI 重跑中，大約 10 分鐘。',
+    'CI 還要跑 20 分鐘。',
   ]
   // A real session's report about this very board, its own CI long passed.
   const report = `T-04 修好了：看板現在只有在回報說工作「還在進行」時，才會判成「背景執行」。commit 是 \`9638755\`，在本機 main 上，沒有 push、也沒有打 tag。19 項測試全部通過，validate 也通過。
@@ -733,6 +735,8 @@ test('CI named in quotes or in a rule is not CI still running', () => {
     // The status in a list or a chain of statuses.
     '- 優先順序：待回覆 → CI 失敗／等待 CI → 背景執行 → 未完成 → 待發布 → 已結束。CI 通過後如果回報還說沒部署，會從等待 CI 轉成待發布。',
     '- 第三個指標改名「尚未完成」，把未完成、等待 CI、CI 失敗、待發布都算進去。',
+    // Re-runs told of in a rule.
+    '同一個 commit 上，同一個 workflow 還有別的 run（重跑，或取消後又跑一次），被取消的那個就略過。',
   ]
   expect(running.filter(t => !isCiPending(t))).toEqual([])
   expect(named.filter(isCiPending)).toEqual([])
