@@ -124,6 +124,9 @@ function lastIndex(re: RegExp, text: string): number {
  */
 export function reportedText(text: string): string {
   const parts = text.replace(QUOTED, quoted => ' '.repeat(quoted.length)).split(/([。！？!?；;，,\n]+|\.\s+)/)
+  // Blanking keeps lengths, so a sentence's offsets in `parts` are its offsets in `text`, quotes and all.
+  const lengths = parts.map(part => part.length)
+  const offsetOf = (i: number) => lengths.slice(0, i).reduce((sum, n) => sum + n, 0)
   // Blanked to as many spaces, so an offset in it is one in `text`.
   const blank = (i: number) => {
     parts[i] = ' '.repeat(parts[i]!.length)
@@ -142,6 +145,16 @@ export function reportedText(text: string): string {
       // with no I of its own (我還沒 push，別人的修改我沒碰 keeps its first half).
       if (i >= 2 && /^[，,]+$/.test(parts[i - 1]!) && !FIRST_PERSON.test(parts[i - 2]!)) blank(i - 2)
     }
+  }
+  // A sentence that tells how something is judged (判成, 誤判, 列為, flags as) describes the judging: all of it,
+  // before and after that clause, but a clause with an I of its own (看板會判成待發布，因為我還沒 push).
+  for (let start = 0; start < parts.length; ) {
+    let end = start
+    while (end + 2 < parts.length && /^[，,]+$/.test(parts[end + 1]!)) end += 2
+    if (isJudging(text.slice(offsetOf(start), offsetOf(end) + parts[end]!.length))) {
+      for (let i = start; i <= end; i += 2) if (!FIRST_PERSON.test(parts[i]!)) blank(i)
+    }
+    start = end + 2
   }
 
   return parts.join('')
@@ -446,7 +459,7 @@ const AWAITING_GO = new RegExp(
  * (其他 Session 還沒提交的修改都原樣留著: a folder shared with other sessions).
  */
 const ABOUT_A_RULE =
-  /另一個 ?Session|另個 ?Session|另外一個 ?Session|(?:另一個|另個|另外一個|另一|其他|別的|別個)\s*(?:Session|session|工作階段|人|同事|版本|分支|專案|工作|任務|項目)|(?:由|交給|交由)\s*[^\s，,。]{1,12}?\s*(?:負責|管|處理|接手|主導)|子 ?Session|子工作階段|它(?:們)?(?=會|將|就|再|要|先|已|還|也|正|在|自己|負責)|\(#local_|其他人|別人|他人|其餘|another session|other sessions?|someone else|someone's|判|列為|列進|標成|標為|視為|字眼|說法|正則|regex|正例|反例|這類|例如|像是|顯示|不能是|不算|才算|當成|當作|被當|(?<![小同即當準及按暫])時\s*$|(?<![小同即當準及按暫])時(?:就|會|才|便|也|一樣|照樣|仍|都)|的時候|的話|如果|假如|只要|一旦|回報(?:裡|中|上)?[^，,。]{0,4}?(?:說|寫|宣告|聲明|提到)|(?:流程|步驟|順序|做法|規則|規範|規定|慣例)(?:是|為|：|:)|\bthe (?:process|flow|order|rule) is\b|摘要[^，,。]{0,4}?(?:說|寫|宣告|聲明|提到)|提到|e\.g\.|for example|such as|\bif\b|\bwhen\b/i
+  /另一個 ?Session|另個 ?Session|另外一個 ?Session|(?:另一個|另個|另外一個|另一|其他|別的|別個)\s*(?:Session|session|工作階段|人|同事|版本|分支|專案|工作|任務|項目)|(?:由|交給|交由)\s*[^\s，,。]{1,12}?\s*(?:負責|管|處理|接手|主導)|子 ?Session|子工作階段|的\s*(?:[A-Za-z0-9_.-]+\s*)?(?:Session|工作階段)|它(?:們)?(?=會|將|就|再|要|先|已|還|也|正|在|自己|負責)|\(#local_|其他人|別人|他人|其餘|another session|other sessions?|someone else|someone's|判|列為|列進|標成|標為|視為|字眼|說法|正則|regex|正例|反例|這類|例如|像是|顯示|不能是|不算|才算|當成|當作|被當|(?<![小同即當準及按暫])時\s*$|(?<![小同即當準及按暫])時(?:就|會|才|便|也|一樣|照樣|仍|都)|的時候|的話|如果|假如|只要|一旦|回報(?:裡|中|上)?[^，,。]{0,4}?(?:說|寫|宣告|聲明|提到)|(?:流程|步驟|順序|做法|規則|規範|規定|慣例)(?:是|為|：|:)|\bthe (?:process|flow|order|rule) is\b|摘要[^，,。]{0,4}?(?:說|寫|宣告|聲明|提到)|提到|e\.g\.|for example|such as|\bif\b|\bwhen\b/i
 /**
  * A clause that disowns what it speaks of: 我都沒有動, 沒碰, 不是我的, 不屬於這次, not mine, I didn't touch.
  * Its words, and the subject-less clause it disowns just before it, say nothing about this session's work.
@@ -458,7 +471,23 @@ const THEIRS = /它(?:們)?(?=會|將|就|再|要|先|已|還|也|正|在|自己
 /** A rule or a process laid out, whose words may run on into the next clauses: 流程是, 規範是, the process is. */
 const RULE_LEAD = /(?:流程|步驟|順序|做法|規則|規範|規定|慣例)(?:是|為|：|:)|\bthe (?:process|flow|order|rule) is\b/i
 /** A clause with its own I: what it says is this session's own. */
-const FIRST_PERSON = /我|自己|\bI\b|\bwe\b|\bmy\b|\bour\b/i
+const FIRST_PERSON = /我|自己|這次|本次|\bI\b|\bwe\b|\bmy\b|\bour\b/i
+/** The board, or what judges for it. */
+const BOARD = /看板|\bboard\b|偵測器?|\bdetector\b/i
+/** Judging, but not a misjudgment fixed (修了一個誤判, 誤判已修好: the work done, not the board's judging). */
+const JUDGE =
+  /判成|判定|判為|(?<!修[好掉正了復]?\s*(?:了|完)?\s*(?:一個|這個|那個|兩個|幾個)?\s*小?)(?:誤判|漏判|誤擋|漏擋)(?!\s*(?:已經?|都)?(?:修好|修正|修掉|解決))|列為|列進|標成|標為|顯示成|顯示為|\bflag(?:s|ged)? (?:it |them |this |that )?as\b|\bmark(?:s|ed)? (?:it |them |this |that )?as\b|\breads? (?:it |them |this |that )?as\b|\bmisread/i
+/** A judging verb with a status after it: 列為待發布, 判成「已結束」, 標成需追蹤. */
+const JUDGED_AS = /(?:判成|判為|列為|列進|標成|標為|顯示成|顯示為)\s*[「『"]?\s*(?:待發布|需追蹤|已結束|等待 ?CI|背景執行|待回覆|未完成|CI ?失敗|長期閒置|中斷)/
+
+/**
+ * A sentence that describes a judgment (the board's, a rule's) rather than this session's work: the board and a
+ * judging word in it, or a judging verb with a status after it. Not 看板 or a status name alone (a product may
+ * have a dashboard; 「2.4.3 待發布，還沒 push」 is a session's own state), not 列為 alone (列為待確認事項).
+ */
+function isJudging(sentence: string): boolean {
+  return (BOARD.test(sentence) && JUDGE.test(sentence)) || JUDGED_AS.test(sentence)
+}
 /** What a possessive (X 的未提交修改) may name and still be this session's own: 我, this turn, now, here. */
 const OWN = /我|自己|本次|這次|這個 ?Session|這邊|目前|現在|本機|本地|手上|剩下|剩餘|\bmy\b|\bour\b|this session/i
 

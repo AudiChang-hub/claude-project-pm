@@ -820,6 +820,40 @@ test('a commit kept here shows no "follow up" once git finds it pushed', ZH, asy
   expect(after).not.toMatch(/待發布・未完成\] 「商品列表頁」/)
 })
 
+test("a sentence that tells how something is judged is about the judging, not this session's work", () => {
+  const kinds = (text: string) => (undeliveredOf(text)?.kinds ?? []).join(',') || 'none'
+  const judging = [
+    // A real session's report on a fix to this very board.
+    '結果是 commit 一出現在遠端，看板就會誤判成「已結束」，但發布其實還在等 PM。',
+    '看板把它判成待發布，但它其實還沒 push 的只是別的分支。',
+    '這句會被列為待發布，而且 commit 還沒 push 的情況也一樣。',
+    '舊規則漏判了，結果還沒部署的 Session 顯示成已結束。',
+    'The board flags it as not released, yet nothing was left to push.',
+    '沒有待發布的工作，這是看板誤判。',
+    '這句會被列為『待發布』，而且 commit 還沒 push 的情況也一樣。',
+    // Another session described by what it waits on.
+    '現有紀錄有三筆判斷改變，以及一個正在等 PM 通知才發布的 Acme Session。',
+    '還沒 push 的 Session 有兩個。',
+  ]
+  expect(judging.filter(text => kinds(text) !== 'none')).toEqual([])
+
+  const own: [string, string][] = [
+    // Its own state in the same sentence: the clause says I.
+    ['看板會判成待發布，因為我還沒 push。', 'push'],
+    ['這次還沒 commit，看板顯示待發布是對的。', 'commit'],
+    ['我還沒部署，所以看板列為待發布。', 'release'],
+    // A board or a status named alone does not make a sentence a description.
+    ['業績看板還沒部署。', 'release'],
+    ['2.4.3 待發布，還沒 push。', 'push'],
+    ['還沒 push。', 'push'],
+    // A misjudgment fixed is work done; 列為 alone is a listing.
+    ['看板誤判已修好，commit 是 3fa1c2e，只在本機，沒有 push。', 'push'],
+    ['又修了一個小誤判，所以 amend 進同一個還沒推送的 commit。', 'push'],
+    ['2.4.3 已經在 main 上但還沒發布，我已在現況文件列為待確認事項。', 'release'],
+  ]
+  expect(own.filter(([text, want]) => kinds(text) !== want)).toEqual([])
+})
+
 test('work with no code to deliver is not left undelivered by a bare "no push"; work still to come is', () => {
   const kinds = (text: string) => (undeliveredOf(text)?.kinds ?? []).join(',') || 'none'
   // A real session's report on a data fix: nothing was ever going to be pushed.
