@@ -2,6 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { applyPlan, betterCi, caveatOf, ciTarget, ciTargets, ciVerdict, isCiPending, isPushedContent, keyFile, parseLastWord, projectKey, statusOf, undeliveredOf } from '../hooks/sessions'
+import { closesBoard } from '../hooks/actions'
 import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hooks/messages'
 import type { Lang, MessageKey } from '../hooks/messages'
 
@@ -34,6 +35,7 @@ const track = (id: string, extra: object) => ({
 })
 
 type Files = Map<string, string>
+type Pane = { id: string; title: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }
 
 /** The test host spells paths its own way: compare them by what follows the data folder. */
 const norm = (path: string) => path.replace(/\\/g, '/').replace(/^.*\/\.claude\/project-pm/, DIR)
@@ -42,7 +44,7 @@ const norm = (path: string) => path.replace(/\\/g, '/').replace(/^.*\/\.claude\/
 type Host = (argv: readonly string[], cwd: string | undefined) => { exitCode: number; stdout: string } | null
 
 /** The desktop app, the disk and the host's commands, from memory: `self` is this session's id. */
-function world(on: On, self: string, files: Files, archived: string[] = [], host: Host = () => null, tools: string[] = []) {
+function world(on: On, self: string, files: Files, archived: string[] = [], host: Host = () => null, tools: string[] = [], panes: Pane[] = []) {
   let list = [...SESSIONS]
   on('process.run', ($, e) => {
     const out = host(e.argv, e.init?.cwd)
@@ -61,8 +63,21 @@ function world(on: On, self: string, files: Files, archived: string[] = [], host
     return { value: { tool: `mcp__project-pm__${e.name}` } }
   })
   on('tool.list', () => ({ value: tools.map(name => ({ name: `mcp__project-pm__${name}`, description: name, mcp: true })) }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('ui.panes', () => ({ value: [] }))
+  // The engine's panes: a test empties `panes` where the engine drops them (a new process, an unload).
+  on('ui.open', ($, e) => {
+    const open = panes.find(pane => pane.id === e.id)
+    if (open) open.isPlaced = true
+    else panes.push({ id: e.id, title: e.title ?? e.id, isShown: true, isFocused: false, isPlaced: true })
+
+    return { value: { isPlaced: true } }
+  })
+  on('ui.panes', () => ({ value: [...panes] }))
+  on('ui.close', ($, e) => {
+    const at = panes.findIndex(pane => pane.id === e.id)
+    if (at >= 0) panes.splice(at, 1)
+
+    return { value: undefined }
+  })
   on('fs.exists', ($, e) => ({ value: files.has(norm(e.path)) || [...files.keys()].some(k => k.startsWith(`${norm(e.path)}/`)) }))
   on('fs.read', ($, e) => {
     const text = files.get(norm(e.path))
@@ -1401,4 +1416,112 @@ test('/pm lang switches the language and saves it as the option', { options: { l
   refusal = 'locked by policy'
   expect(await pm('lang zh-TW')).toBe('看板語言已在這個 Session 改為 zh-TW，但無法存進設定（locked by policy）；下次啟動會恢復原設定。')
   expect(await board()).toMatch(/^# 專案狀態報告：/)
+})
+
+test('the board stays open until the person closes it: after a restart, an unload, or a window too narrow', ZH, async ($, on) => {
+  const files: Files = new Map()
+  const clock = mock.clock(on, { now: NOW })
+  const panes: Pane[] = []
+  world(on, 'local_me', files, [], undefined, [], panes)
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  const board = async () => String(((await $.command.run({ command: 'board', args: '' } as never)) as { text?: unknown }).text)
+  const isUp = () => panes.some(pane => pane.id === 'project-pm')
+  const kept = () => JSON.parse(files.get(`${DIR}/sessions/local_me.json`)!).isBoardOpen
+  await $.session.start(START)
+  // Not the PM, nothing said yet: no board.
+  expect(isUp()).toBe(false)
+
+  expect(await board()).toBe('已開啟專案看板。')
+  expect(isUp()).toBe(true)
+  expect(kept()).toBe(true)
+
+  // The process restarts (the app resumes a session it stopped): a new process has no panes.
+  panes.length = 0
+  await $.session.start(START)
+  expect(isUp()).toBe(true)
+
+  // The engine drops it: the person's next prompt brings it back, and so does the poll.
+  panes.length = 0
+  await $.prompt.submit({ text: '看板呢？' } as never)
+  expect(isUp()).toBe(true)
+  panes.length = 0
+  await clock.advance(31_000)
+  expect(isUp()).toBe(true)
+  // Gone again at once: the poll waits five minutes before it tries again.
+  panes.length = 0
+  await clock.advance(31_000)
+  expect(isUp()).toBe(false)
+  await clock.advance(5 * 60_000)
+  expect(isUp()).toBe(true)
+
+  // Opened unasked on a narrow window, it waits undrawn: /board places it rather than closing it.
+  panes[0]!.isPlaced = false
+  expect(await board()).toBe('已開啟專案看板。')
+  expect(panes[0]!.isPlaced).toBe(true)
+  // So does the person's next prompt.
+  panes[0]!.isPlaced = false
+  await $.prompt.submit({ text: '再看一次。' } as never)
+  expect(panes[0]!.isPlaced).toBe(true)
+
+  // /board turns it off: it stays closed, through prompts, the poll and a restart.
+  expect(await board()).toBe('已收合專案看板，再次執行 /board 可重新開啟。')
+  expect(isUp()).toBe(false)
+  expect(kept()).toBe(false)
+  await $.prompt.submit({ text: '繼續。' } as never)
+  await clock.advance(6 * 60_000)
+  await $.session.start(START)
+  expect(isUp()).toBe(false)
+
+  // And on again.
+  expect(await board()).toBe('已開啟專案看板。')
+  expect(isUp()).toBe(true)
+  expect(kept()).toBe(true)
+})
+
+test("the person's close keeps the board closed; the engine's unload does not", () => {
+  const close = (kind: string, id = 'project-pm') => closesBoard({ id, origin: { kind } })
+  expect(close('person')).toBe(true)
+  expect(close('plugin')).toBe(true)
+  expect(close('unload')).toBe(false)
+  // Another pane of the mod's, were there one, is not the board.
+  expect(close('person', 'something-else')).toBe(false)
+})
+
+test('a new process opens the board as the person left it', ZH, async ($, on) => {
+  const files: Files = new Map()
+  files.set(`${DIR}/sessions/local_me.json`, JSON.stringify(track('local_me', { isBoardOpen: true })))
+  mock.clock(on, { now: NOW })
+  const panes: Pane[] = []
+  world(on, 'local_me', files, [], undefined, [], panes)
+  await $.session.start(START)
+  expect(panes.map(pane => pane.id)).toEqual(['project-pm'])
+})
+
+test('the PM gets its board at the start unless the person closed it', ZH, async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  files.set(`${DIR}/sessions/local_pm.json`, JSON.stringify(track('local_pm', { isBoardOpen: false })))
+  const clock = mock.clock(on, { now: NOW })
+  const panes: Pane[] = []
+  world(on, 'local_pm', files, [], undefined, [], panes)
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(START)
+  await $.prompt.submit({ text: '看一下。' } as never)
+  await clock.advance(6 * 60_000)
+  expect(panes).toEqual([])
+
+  // /pm opens it again, and it is kept open.
+  await $.command.run({ command: 'pm', args: '' } as never)
+  expect(panes.map(pane => pane.id)).toEqual(['project-pm'])
+  expect(JSON.parse(files.get(`${DIR}/sessions/local_pm.json`)!).isBoardOpen).toBe(true)
+})
+
+test('the PM with nothing said gets its board at the start', ZH, async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  mock.clock(on, { now: NOW })
+  const panes: Pane[] = []
+  world(on, 'local_pm', files, [], undefined, [], panes)
+  await $.session.start(START)
+  expect(panes.map(pane => [pane.id, pane.title])).toEqual([['project-pm', 'Acme 商店後台 · PM']])
 })

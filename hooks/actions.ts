@@ -553,6 +553,63 @@ export async function ensureTools($: EngineInterface) {
   }
 }
 
+// ── The board pane ──
+
+/** A pane the poll brought back and that closed again at once waits this long, or for the person's next prompt. */
+const REOPEN_MS = 5 * 60_000
+/** When the poll last brought the board back. */
+let reopenedAt = 0
+
+/**
+ * Whether this session's board should be up: what the person last did with it (/board, the pane's close), kept in
+ * the session's file so it outlives a reload of the module and a restart of the session's process; with nothing said
+ * yet, up for the PM.
+ */
+export function isBoardWanted(self: Me | null): boolean {
+  return getMine()?.isBoardOpen ?? !!self?.isPm
+}
+
+/**
+ * Whether a close of a pane keeps the board closed: the person's (the pane's close mark or key, the app closing it)
+ * and /board's own. Not the engine's unload, which drops a pane nothing draws any more.
+ */
+export function closesBoard(e: { id: string; origin: { kind: string } }): boolean {
+  return e.id === PANE && e.origin.kind !== 'unload'
+}
+
+/** Keeps what the person did with the board. */
+export async function rememberBoard($: EngineInterface, isOpen: boolean) {
+  await changeMine($, t => (t.isBoardOpen === isOpen ? t : { ...t, isBoardOpen: isOpen }))
+}
+
+export async function openBoard($: EngineInterface, self: Me | null) {
+  const title = self?.isPm ? t('pane.titlePm', { project: self.projectName }) : self ? t('pane.titleBoard', { project: self.projectName }) : t('pane.titleBoardNone')
+
+  return $.ui.open({ id: PANE, title })
+}
+
+/**
+ * Brings the board back when it should be up and is not. The panes are the session's process's: when the desktop app
+ * stops an idle session (under memory pressure) and resumes it later, the new process starts with none; and a pane
+ * the engine drops (an unload) goes without a word to the hooks. The person's own close is kept and stays closed.
+ *
+ * `start` is a new process or copy of the module; `prompt` the person's input, which also places a pane left
+ * undrawn (an open nobody asked for waits on a narrow window); `poll` the timer, which tries once in REOPEN_MS so a
+ * pane that cannot be drawn is not opened over and over.
+ */
+export async function ensureBoard($: EngineInterface, why: 'start' | 'prompt' | 'poll') {
+  const self = await identify($)
+  if (!isBoardWanted(self)) return
+  const pane = (await $.ui.panes()).find(one => one.id === PANE)
+  if (pane && (pane.isPlaced || why !== 'prompt')) return
+  if (why === 'poll') {
+    const now = await $.clock.now()
+    if (now - reopenedAt < REOPEN_MS) return
+    reopenedAt = now
+  }
+  await openBoard($, self)
+}
+
 export async function registerTools($: EngineInterface) {
   await $.tool.register({
     name: 'board',
@@ -596,7 +653,8 @@ export async function claim($: EngineInterface): Promise<string> {
   await update($, me, m => (m ? { ...m, isPm: true } : m))
   await registerTools($)
   statusesBefore = null
-  await $.ui.open({ id: PANE, title: t('pane.titlePm', { project: self.projectName }) })
+  await rememberBoard($, true)
+  await openBoard($, { ...self, isPm: true })
   refreshSoon($)
 
   return before && before !== self.id ? t('claim.tookOver', { project: self.projectName, before }) : t('claim.done', { project: self.projectName })

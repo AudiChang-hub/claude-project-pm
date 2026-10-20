@@ -47,6 +47,8 @@ export type Track = {
   recapAt?: number
   /** Background commands the session started and has not been notified of yet. */
   background?: BackgroundTask[]
+  /** Whether the person left this session's board open (/board, the pane's close): absent while they have not said. */
+  isBoardOpen?: boolean
 }
 
 /** Whether the commit a session's words left unpushed has reached a remote branch since (`git branch -r --contains`). */

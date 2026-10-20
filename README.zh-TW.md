@@ -124,11 +124,12 @@ PM 有兩個專屬工具（不需要你自己呼叫）：
 
 ## 運作方式與資料
 
-- 每個 Session 只寫自己的紀錄檔：`~/.claude/project-pm/sessions/<session id>.json`（任務清單、最後的收尾摘要、待決策問題、最新指令與最後回報，皆有截斷）。
+- 每個 Session 只寫自己的紀錄檔：`~/.claude/project-pm/sessions/<session id>.json`（任務清單、最後的收尾摘要、待決策問題、最新指令與最後回報，皆有截斷，以及看板是否開著）。
 - 每個專案一份檔案，記錄 PM 與工作項目：`~/.claude/project-pm/projects/<專案>-<hash>.json`。
 - Mod 本身不會把資料傳到任何地方。Session 清單、紀錄讀取與封存，都是透過桌面版內建的工具完成。查 CI 時會在該 Session 的資料夾執行 `git` 與 `gh`，`gh` 會用你自己的登入向 GitHub 查詢，和你手動執行一樣。
 - Mod 安裝前就開著的 Session 沒有追蹤紀錄，看板只會顯示它們最後一則訊息。
 - PM 的 `board`／`ledger` 工具被引擎移除時（執行 `/reload-plugins` 後，或 Mod 資料夾有變動、執行 `/board` 這類指令時被重新載入），會在 PM 的下一輪（下一則訊息或通知叫醒）重新註冊，PM 閒置時也會在 30 秒內補回，不必重開 Session。
+- 看板會維持你留下的狀態：`/board` 或 `/pm` 會開啟，`/board` 或面板的關閉鈕會收合。桌面版為了釋放記憶體暫停閒置的 Session、之後再恢復，或引擎收掉面板時，原本開著的看板會在 Session 恢復時、你下一則訊息時，或閒置時 30 秒內重新開啟。
 
 ## 開發
 

@@ -15,15 +15,19 @@ import {
   board,
   changeMine,
   claim,
+  closesBoard,
+  ensureBoard,
   ensureTools,
   getMine,
   identify,
   ledger,
+  openBoard,
   reason,
   refresh,
   refreshSoon,
   registerTools,
   release,
+  rememberBoard,
   str,
   textOf,
 } from './actions'
@@ -68,26 +72,36 @@ async function changeLanguage($: EngineInterface, wanted: string): Promise<strin
   return value === 'auto' ? t('lang.setAuto', { lang: getLang() }) : t('lang.set', { lang: getLang() })
 }
 
+/** Brings the board back when it should be up (ensureBoard): a failure is logged, never in the way. */
+async function keepBoard($: EngineInterface, why: 'start' | 'prompt' | 'poll') {
+  try {
+    await ensureBoard($, why)
+  } catch (err) {
+    $.ui.log(`project-pm: ${reason(err)}`)
+  }
+}
+
 /**
  * The commands, the PM's tools and the polling timer. `session.start` does it at the session's
  * start; /reload-plugins loads a fresh copy without one (and the engine drops the old copy's
  * tools), so the first hook to run in that copy does it instead. Tools the engine drops later
  * (a change to the mod's folder reloads it before a command of it runs) come back by ensureTools.
  */
-async function start($: EngineInterface, isOpeningPane: boolean) {
+async function start($: EngineInterface) {
   if (isStarted) return
   isStarted = true
   await registerCommands($)
   try {
     const self = await identify($)
-    if (self?.isPm) {
-      await registerTools($)
-      if (isOpeningPane) void $.ui.open({ id: PANE, title: t('pane.titlePm', { project: self.projectName }) })
-    }
+    if (self?.isPm) await registerTools($)
   } catch (err) {
     $.ui.log(`project-pm: ${reason(err)}`)
   }
-  $.clock.every(POLL_MS, () => void refresh($))
+  await keepBoard($, 'start')
+  // A round still running when its copy of the module goes (a reload) has nowhere left to report.
+  $.clock.every(POLL_MS, () => void keepBoard($, 'poll')
+    .then(() => refresh($))
+    .catch(() => undefined))
   refreshSoon($, 300)
 }
 
@@ -99,7 +113,9 @@ export const register: Register = (on, options) => {
   setLang(resolveLang(options.language, systemLocale()))
 
   on('session.start', async ($, e, next) => {
-    await start($, true)
+    await start($)
+    // A new process has no panes: the board comes back if it was left open (a start in the same copy, too).
+    await keepBoard($, 'start')
     // A new process: background commands of the one before it ended with it.
     await changeMine($, t => (t.background?.length ? { ...t, background: [] } : t))
 
@@ -107,8 +123,9 @@ export const register: Register = (on, options) => {
   })
 
   on('prompt.submit', async ($, e, next) => {
-    await start($, false)
+    await start($)
     await ensureTools($)
+    await keepBoard($, 'prompt')
     if (e.text.includes(CLAIM)) {
       try {
         await claim($)
@@ -225,7 +242,7 @@ export const register: Register = (on, options) => {
   }).catch(() => ({ deny: t('command.denyLedger') }))
 
   on('prompt.compose', async ($, e, next) => {
-    await start($, false)
+    await start($)
     await ensureTools($)
     const composed = await next(e)
     const self = await read($, me)
@@ -235,7 +252,7 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'pm' }, async ($, e) => {
-    await start($, false)
+    await start($)
     if (/^\s*(off|卸任|取消)\s*$/i.test(e.args)) return { text: await release($) }
     const lang = /^\s*(?:lang|language|語言)(?:\s+(\S+))?\s*$/i.exec(e.args)
     if (lang) return { text: await changeLanguage($, lang[1] ?? '') }
@@ -251,18 +268,33 @@ export const register: Register = (on, options) => {
     }
   })
 
+  // /board turns the board on and off, and the board stays as the person leaves it. A board left undrawn (opened
+  // unasked on a narrow window) is not on yet: /board places it.
   on('command.run', { command: 'board' }, async $ => {
-    await start($, false)
-    if ((await $.ui.panes()).some(pane => pane.id === PANE)) {
+    await start($)
+    if ((await $.ui.panes()).some(pane => pane.id === PANE && pane.isPlaced)) {
+      // The close itself keeps it closed (ui.close below).
       await $.ui.close({ id: PANE })
 
       return { text: t('command.boardClosed') }
     }
     const self = await identify($)
-    await $.ui.open({ id: PANE, title: self ? t('pane.titleBoard', { project: self.projectName }) : t('pane.titleBoardNone') })
-    void refresh($, true)
+    await rememberBoard($, true)
+    await openBoard($, self)
+    // As the poll's round: nowhere to report once this copy of the module is gone.
+    void refresh($, true).catch(() => undefined)
 
     return { text: t('command.boardOpened') }
+  })
+
+  // The person's close (the pane's close mark or key, the app closing it) and /board's own: the board stays closed
+  // until /board. An unload (the engine dropping a pane nothing draws) never reaches the hooks, and a process that
+  // ends closes nothing: those come back (ensureBoard).
+  on('ui.close', async ($, e, next) => {
+    const result = await next(e)
+    if (closesBoard(e)) await rememberBoard($, false)
+
+    return result
   })
 
   // ── Drawing ──

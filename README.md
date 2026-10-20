@@ -124,11 +124,12 @@ Every string lives in [`hooks/messages.ts`](hooks/messages.ts), one table per la
 
 ## Data and privacy
 
-- Each session writes only its own record: `~/.claude/project-pm/sessions/<session id>.json` (its task list, last recap, open question, latest prompt and last answer, clipped).
+- Each session writes only its own record: `~/.claude/project-pm/sessions/<session id>.json` (its task list, last recap, open question, latest prompt and last answer, clipped, and whether you left its board open).
 - Each project has one file for its PM and ledger: `~/.claude/project-pm/projects/<project>-<hash>.json`.
 - The mod itself sends nothing anywhere. Listing, reading and archiving sessions go through the desktop app's built-in tools. To check CI it runs `git` and `gh` in the session's folder, so `gh` contacts GitHub with your own login, as it would if you ran it yourself.
 - Sessions opened before the install keep no record; the board shows their last message, read from the transcript.
 - When the engine drops the PM's `board` and `ledger` tools (after `/reload-plugins`, or when the mod's folder changed and a command of it such as `/board` reloads it), they come back on the PM's next turn (your next message or a notification) or within 30 seconds while the PM is idle; no need to restart the session.
+- The board stays as you leave it: `/board` or `/pm` opens it, `/board` or the pane's close closes it. When the desktop app stops an idle session to free memory and resumes it later, or the engine drops the pane, a board you left open comes back when the session resumes, on your next message, or within 30 seconds while the session is idle.
 
 ## Development
 
