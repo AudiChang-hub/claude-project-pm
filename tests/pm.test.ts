@@ -854,6 +854,48 @@ test("a sentence that tells how something is judged is about the judging, not th
   expect(own.filter(([text, want]) => kinds(text) !== want)).toEqual([])
 })
 
+test('a release told step by step after it went out is done; how and in what order is not work left', () => {
+  const kinds = (text: string) => (undeliveredOf(text)?.kinds ?? []).join(',') || 'none'
+  // A real session's recap: released, then each step in the past, in order.
+  const told = [
+    '2.4.1 已上線，兩次 CI 都 success，正式站驗證通過，暫存目錄和分支都清掉了，已回報 PM。',
+    '- 以 3fa1c2e 為基準 cherry-pick。',
+    '- CI success 之後才推標籤，推之前檢查通過。',
+    '- 部署前有備份。',
+    '- 部署：腳本執行成功，沒有先手動 merge。',
+    '- 對齊時沒有用 reset。',
+  ].join('\n')
+  expect(kinds(told)).toBe('none')
+  const idle = { id: 'x', title: 't', cwd: '', isRunning: false, lastActivityAt: new Date(NOW - 5 * 60000).toISOString(), isPinned: false, hasOpenPr: false }
+  expect(statusOf(idle, track('x', { recap: told, recapAt: NOW - 600000 - 1, lastAnswer: '已回報 PM。' }) as never, undefined, NOW)).toBe('done')
+
+  const notWorkLeft = [
+    '部署：腳本執行成功，沒有先手動 merge。',
+    '沒有直接 push 到 main，走 PR 合併。',
+    '沒有手動部署，用腳本部署完成。',
+    'CI success 之後才推標籤，推之前檢查通過。',
+    '部署前有備份。',
+    // A step for whoever does the next version.
+    '2.4.1 已完成；2.4.2 推送前要先 rebase 到 3fa1c2e 上，這點已經告訴 PM。',
+  ]
+  expect(notWorkLeft.filter(text => kinds(text) !== 'none')).toEqual([])
+
+  const left: [string, string][] = [
+    ['我部署了 2.4.1，2.4.2 部署前還要等 PM。', 'release'],
+    ['2.4.1 已上線；2.4.2 還沒部署。', 'release'],
+    ['還沒 merge。', 'release'],
+    ['推送前要等 CI 跑完。', 'push'],
+    ['CI 通過後我再推標籤。', 'push'],
+    ['通過後才會打標籤和部署。', 'release'],
+    // 才 in a sentence still looking ahead is the plan.
+    ['我還在等 2.4.0 部署完成，之後才推 2.4.1。', 'push'],
+    ['我會先申請放行，放行後才 push。', 'push'],
+    ['CI 通過後才由我推標籤。', 'push'],
+    ['審核後才能部署。', 'release'],
+  ]
+  expect(left.filter(([text, want]) => kinds(text) !== want)).toEqual([])
+})
+
 test('work with no code to deliver is not left undelivered by a bare "no push"; work still to come is', () => {
   const kinds = (text: string) => (undeliveredOf(text)?.kinds ?? []).join(',') || 'none'
   // A real session's report on a data fix: nothing was ever going to be pushed.

@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Versions match `version` in `.claude-plugin/plugin.json`.
 
+## [Unreleased]
+
+### Fixed
+- A release report that said it was out (2.4.1 已上線，兩次 CI 都 success) and then told each step in the past showed as *Not released*. How a step was done is no work left: the manner words now take in 先, 手動, 自動, 直接, 透過, 經由, 用, manually, directly and first (沒有先手動 merge, 沒有直接 push 到 main, 對齊時沒有用 reset). The order things went is not a step to come: 之後才推標籤 or 部署完成後才推送 is told after the fact when nothing in the sentence still looks ahead (會, 要, 等, 再, 將, 打算, 還在, yet) and no one is named after the 才 (才由我推) and it is not 才能; 我還在等 2.4.0 部署完成，之後才推 2.4.1 is still a push to come. What came before a delivery (部署前有備份, 推之前檢查通過) is a fact, and a delivery that waits on something before it (2.4.2 部署前還要等 PM, 推送前要等 CI) now reads as still to come; a step for whoever goes next (推送前要先 rebase) does not. Each kind's last word still stands, so 2.4.1 已上線；2.4.2 還沒部署 still reads as not released.
+
 ## [0.5.1] - 2026-10-20
 
 ### Fixed

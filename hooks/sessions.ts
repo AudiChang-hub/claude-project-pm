@@ -404,6 +404,25 @@ const FUTURE = new RegExp(
   String.raw`(?:之後|稍後|待會兒?|晚點|接下來|下一步|再來|明天|今晚|下午|下週|隨後|然後|預計|打算|準備|將|(?:確認|通過|審核|審查|放行|review|合併|完成|跑完|結束)後)[^。，,；;：:\n]{0,6}?(?<![個筆次條份的]\s*)((?:${VERBS})|推(?![薦測論動進出廣]))(?!\s*(?:[就便]?會|時|的))|\b(?:I'll|I will|I'm going to|I am going to|we'll|we will|will|going to|next[:,]|then|later|tomorrow)\s+(?:then\s+)?((?:${VERBS}))`,
   'gi',
 )
+/** The time or step a future match opens with, to read what follows it. */
+const FUTURE_MARKER = /^(?:之後|稍後|待會兒?|晚點|接下來|下一步|再來|明天|今晚|下午|下週|隨後|然後|預計|打算|準備|將|(?:確認|通過|審核|審查|放行|review|合併|完成|跑完|結束)後)/i
+/**
+ * What follows the marker when the order is told after the fact: 才 with no one doing it next (CI success 之後才推標籤,
+ * a step in the order things went). Not 才能, not 才由我推: those are still to come.
+ */
+const AFTER_THE_FACT = /^\s*才(?!能)(?![^。，,；;\n]*?我)/
+/**
+ * A sentence still looking ahead, anywhere in it: then 之後才推 is the plan (我還在等 2.4.0 部署完成，之後才推 2.4.1;
+ * 我會先申請放行，放行後才 push), not the order things went.
+ */
+const STILL_AHEAD = /會|要|等|再|將|打算|準備|預計|還在|\byet\b/i
+/**
+ * A delivery that waits on something before it: 2.4.2 部署前還要等 PM, 推送前要等 CI. The kind is still to come.
+ * Not a fact of what came before (部署前有備份, 推之前檢查通過), nor a step to take first (推送前要先 rebase): an
+ * instruction, often for whoever does it next.
+ */
+const BEFORE_IT = new RegExp(String.raw`((?:${VERB})|推(?![薦測論動進出廣]))\s*(?:之)?前[^。，,；;\n]{0,6}?(?:還要等|要等|得等|需等|需要等|等待|待)`, 'gi')
+
 /**
  * After a future verb, what makes it a consequence, a noun or a fact: (more verbs, then) 就會, 便會, 會, 時, 的;
  * a commit hash (之後另外提交 7fcc930: a commit to come has none yet); a 就/便…會 soon after (之後推送、SSH 就不會再詢問).
@@ -431,9 +450,10 @@ const YOURS = /(?<![幫給替向跟和對讓與知訴])(?:你|您)(?!的)|\byou(
 
 /**
  * Between a negation and its verb, how the work was done rather than that it was not: 沒有另開 commit, 沒有另外 commit,
- * 沒有新增 commit, 沒有拆成兩個 commit, 沒有用 force push.
+ * 沒有新增 commit, 沒有拆成兩個 commit, 沒有用 force push, 沒有先手動 merge, 沒有直接 push 到 main.
  */
-const MANNER = /另(?:開|外|行|起)?|新增|再開|多開|額外|單獨|拆成|拆開|分成|分開|force|強制|separate|another|extra|additional|split/i
+const MANNER =
+  /另(?:開|外|行|起)?|新增|再開|多開|額外|單獨|拆成|拆開|分成|分開|先|手動|自動|直接|透過|經由|用|force|強制|separate|another|extra|additional|split|manually|directly|first/i
 /**
  * A commit made, named by its hash: commit 是 3fa1c2e, 新的 commit 為 3fa1c2e, amend 成 3fa1c2e, 併進 3fa1c2e,
  * committed (as) 3fa1c2e, amended into 3fa1c2e.
@@ -552,6 +572,10 @@ export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: strin
       }
       for (const m of sentence.matchAll(DONE)) for (const kind of verbsIn(m[1] ?? m[2] ?? m[3] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: false })
       for (const m of sentence.matchAll(COMMITTED)) said.push({ at: m.index ?? 0, kind: 'commit', isLeft: false })
+      for (const m of sentence.matchAll(BEFORE_IT)) {
+        const named = m[1] ?? ''
+        for (const kind of /^推$/.test(named) ? (['push'] as const) : verbsIn(named)) said.push({ at: m.index ?? 0, kind, isLeft: true })
+      }
       for (const m of sentence.matchAll(NO_NEED)) {
         const named = m[1] ?? m[2] ?? ''
         const kinds = /版號|升版|標籤|tag/i.test(named) ? (['release'] as const) : verbsIn(named)
@@ -562,6 +586,7 @@ export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: strin
       if (!OFFER.test(sentence) && !YOURS.test(sentence) && !isQuestion) {
         for (const m of sentence.matchAll(FUTURE)) {
           // The marker's own words (通過後) aside: a negation or a past in what follows it.
+          if (AFTER_THE_FACT.test(m[0].replace(FUTURE_MARKER, '')) && !STILL_AHEAD.test(whole)) continue
           if (NOT_FUTURE.test(m[0].replace(/^(?:之後|稍後|待會兒?|晚點|接下來|下一步|再來|明天|今晚|下午|下週|隨後|然後|預計|打算|準備|將|(?:確認|通過|審核|審查|放行|review|合併|完成|跑完|結束)後)/i, ''))) continue
           // A verb that goes on into a consequence or a noun (commit 再 push 就會更新, 部署時, 部署的): not a step to take.
           if (NOUN_AFTER.test(sentence.slice((m.index ?? 0) + m[0].length))) continue
