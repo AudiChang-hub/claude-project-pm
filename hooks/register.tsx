@@ -21,6 +21,7 @@ import {
   getMine,
   identify,
   ledger,
+  loadRound,
   openBoard,
   reason,
   refresh,
@@ -94,6 +95,8 @@ async function start($: EngineInterface) {
   try {
     const self = await identify($)
     if (self?.isPm) await registerTools($)
+    // A new process draws the board from the last round at once; its own first round follows.
+    await loadRound($)
   } catch (err) {
     $.ui.log(`project-pm: ${reason(err)}`)
   }

@@ -4,7 +4,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, McpToolResult } from 'claude-code'
 
-import type { CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Session, Sessions, Track } from '../types'
+import type { CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Track } from '../types'
 import {
   boardText,
   betterCi,
@@ -48,6 +48,7 @@ const confirm = atom({ plugin: 'project-pm', key: 'confirm' } as const, null as 
 const busy = atom({ plugin: 'project-pm', key: 'busy' } as const, null as string | null)
 const notice = atom({ plugin: 'project-pm', key: 'notice' } as const, null as Notice | null)
 const isBandHidden = atom({ plugin: 'project-pm', key: 'isBandHidden' } as const, false)
+const scope = atom({ plugin: 'project-pm', key: 'scope' } as const, 'project' as Scope)
 
 export const MGMT = 'ccd_session_mgmt'
 export const STARTER = 'ccd_session'
@@ -59,8 +60,12 @@ export const WORDS_PER_ROUND = 8
 export const CI_CHECKS_PER_ROUND = 3
 export const GIT_TIMEOUT_MS = 4_000
 export const GH_TIMEOUT_MS = 8_000
-/** How soon an answer is asked again: a pass stands, a failure may be re-run, a running or unknown CI moves on. */
-const CI_RECHECK_MS: Record<CiCheck['state'], number> = { success: Infinity, failure: 5 * 60_000, pending: 60_000, unknown: 60_000 }
+/**
+ * How soon an answer is asked again: a pass stands, a failure may be re-run, a running CI moves on. Unknown (no run
+ * GitHub knows of, no gh, no network) seldom changes by the minute: asked every minute, it cost a `gh` or three each
+ * time for as long as the words stood.
+ */
+const CI_RECHECK_MS: Record<CiCheck['state'], number> = { success: Infinity, failure: 5 * 60_000, pending: 60_000, unknown: 10 * 60_000 }
 /** Put in a new PM session's brief: the session that reads it claims its project. */
 export const CLAIM = '[project-pm:claim]'
 export const BOARD_TOOL = 'mcp__project-pm__board'
@@ -179,9 +184,12 @@ export async function identify($: EngineInterface): Promise<Me | null> {
   } catch {
     // Outside the desktop app there is no session id: this session is not tracked.
   }
+  if (id) await rememberTranscript($, id)
+  // A session the app has just resumed gets its tools only once the person looks at it: its transcript says who it is.
+  else id = await transcriptOwner($)
   const key = projectKey(cwd)
   const project = await loadProject($, key, projectName(cwd), projectPath(cwd))
-  await update($, projects, all => ({ ...all, [key]: project }))
+  if (!sameJson((await read($, projects))[key], project)) await update($, projects, all => ({ ...all, [key]: project }))
   const found: Me = {
     id,
     title,
@@ -191,10 +199,47 @@ export async function identify($: EngineInterface): Promise<Me | null> {
     isScratch: isScratch(cwd),
     isPm: !!id && project.pmId === id,
   }
-  await update($, me, () => found)
+  if (!sameJson(known, found)) await update($, me, () => found)
   if (id) await loadMine($, id, title, cwd)
 
   return found
+}
+
+/** Whether two values hold the same data: a write of the same value would redraw the board for nothing. */
+export function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+/** How many transcripts the file of desktop ids keeps, the latest last. */
+const TRANSCRIPTS_KEPT = 300
+
+/** The file that says which desktop session each transcript (`$.session.id()`) belongs to. */
+async function transcriptsFile($: EngineInterface): Promise<string> {
+  return `${await dataDir($)}/transcripts.json`
+}
+
+/** Keeps this process's transcript under its desktop id, so a later process of the same session knows it at once. */
+async function rememberTranscript($: EngineInterface, id: string) {
+  try {
+    const transcript = await $.session.id()
+    const path = await transcriptsFile($)
+    const all = (await readJson<Record<string, string>>($, path)) ?? {}
+    if (all[transcript] === id) return
+    delete all[transcript]
+    const kept = Object.entries({ ...all, [transcript]: id }).slice(-TRANSCRIPTS_KEPT)
+    await $.fs.write(path, JSON.stringify(Object.fromEntries(kept)))
+  } catch {
+    // Knowing it sooner is a nicety: the app's tools still say who this is.
+  }
+}
+
+/** The desktop id this process's transcript was last seen under, or null. */
+async function transcriptOwner($: EngineInterface): Promise<string | null> {
+  try {
+    return (await readJson<Record<string, string>>($, await transcriptsFile($)))?.[await $.session.id()] ?? null
+  } catch {
+    return null
+  }
 }
 
 // ── Reading the other sessions ──
@@ -248,11 +293,11 @@ export async function readTracks($: EngineInterface, list: Session[]) {
 }
 
 /** Reads the last word of sessions untracked, or tracked but behind, that did something since they were last read. */
-export async function catchUp($: EngineInterface, list: Session[]) {
+export async function catchUp($: EngineInterface, list: Session[], asked = list) {
   const known = await read($, lastWords)
   const tracked = await read($, tracks)
   const isUnread = (one: Session) => !tracked[one.id] || isBehind(one, tracked[one.id]!)
-  const stale = list.filter(one => isUnread(one) && known[one.id]?.activity !== one.lastActivityAt).slice(0, WORDS_PER_ROUND)
+  const stale = asked.filter(one => isUnread(one) && known[one.id]?.activity !== one.lastActivityAt).slice(0, WORDS_PER_ROUND)
   if (stale.length === 0) return
   const fresh: Record<string, LastWord> = {}
   for (const one of stale) fresh[one.id] = await readLastWord($, one)
@@ -395,7 +440,7 @@ export async function checkCi($: EngineInterface, id: string, cwd: string, text:
 let isCheckingCi = false
 
 /** Asks GitHub about the CI each idle session's latest words left running, a few per refresh. */
-export async function verifyCi($: EngineInterface, list: Session[]) {
+export async function verifyCi($: EngineInterface, list: Session[], candidates = list) {
   if (isCheckingCi) return
   isCheckingCi = true
   try {
@@ -404,7 +449,7 @@ export async function verifyCi($: EngineInterface, list: Session[]) {
     const held = await read($, ciChecks)
     const now = await $.clock.now()
     let asked = 0
-    for (const one of list) {
+    for (const one of candidates) {
       if (one.isRunning) continue
       const text = ciWords(all[one.id], words[one.id])
       if (!isCiPending(text)) continue
@@ -445,10 +490,10 @@ export async function checkPush($: EngineInterface, id: string, cwd: string, tex
 }
 
 /** Asks git about each idle session whose latest words leave only a push undone. */
-export async function verifyPushes($: EngineInterface, list: Session[]) {
+export async function verifyPushes($: EngineInterface, list: Session[], asked = list) {
   const words = await read($, lastWords)
   const all = liveTracks(list, await read($, tracks), words)
-  for (const one of list) {
+  for (const one of asked) {
     if (!one.isRunning) await checkPush($, one.id, one.cwd, ciWords(all[one.id], words[one.id]))
   }
   const held = await read($, pushChecks)
@@ -457,14 +502,36 @@ export async function verifyPushes($: EngineInterface, list: Session[]) {
   }
 }
 
+/** Each project file's mtime when it was last read: an unchanged file is not read again. */
+const projectSeen = new Map<string, number>()
+
 export async function readProjects($: EngineInterface, list: Session[]) {
   const seen = new Map<string, { name: string; path: string }>()
   for (const one of list) seen.set(projectKey(one.cwd), { name: projectName(one.cwd), path: projectPath(one.cwd) })
   const self = await read($, me)
   if (self) seen.set(self.projectKey, { name: self.projectName, path: self.projectPath })
+  const dir = `${await dataDir($)}/projects`
+  let mtimes = new Map<string, number>()
+  try {
+    if (await $.fs.exists(dir)) mtimes = new Map((await $.fs.list(dir)).map(entry => [entry.name, entry.mtimeMs]))
+  } catch {
+    // Read each one, as before.
+  }
+  const held = await read($, projects)
   const loaded: Record<string, ProjectFile> = {}
-  for (const [key, at] of seen) loaded[key] = await loadProject($, key, at.name, at.path)
-  await update($, projects, () => loaded)
+  for (const [key, at] of seen) {
+    const name = `${keyFile(key)}.json`
+    const mtime = mtimes.get(name)
+    const kept = held[key]
+    if (kept && mtime !== undefined && projectSeen.get(name) === mtime) loaded[key] = kept
+    // No file yet: a project nobody has claimed.
+    else if (mtimes.size > 0 && mtime === undefined) loaded[key] = emptyProject(key, at.name, at.path)
+    else {
+      loaded[key] = await loadProject($, key, at.name, at.path)
+      if (mtime !== undefined) projectSeen.set(name, mtime)
+    }
+  }
+  if (!sameJson(held, loaded)) await update($, projects, () => loaded)
   if (self) {
     const isPm = !!self.id && loaded[self.projectKey]?.pmId === self.id
     if (isPm !== self.isPm) await update($, me, m => (m ? { ...m, isPm } : m))
@@ -499,9 +566,20 @@ export async function announce($: EngineInterface) {
   }
 }
 
-export async function refresh($: EngineInterface, isForced = false) {
+/** How soon a refresh the app's tools could not answer tries again, and how many times: a resumed session gets them once the person looks at it. */
+const RETRY_MS = 3_000
+const RETRIES = 20
+let retriesLeft = RETRIES
+
+/**
+ * One round: the sessions the app lists, their files and last words, and what git and GitHub say about the
+ * work their words left. Only this session's project is asked about, unless `isWide` (the board tool's every
+ * project, a ledger owner's work) or the board shows every project: each PM asks about its own.
+ */
+export async function refresh($: EngineInterface, isForced = false, isWide = false) {
   const self = await read($, me)
-  const isPaneOpen = (await $.ui.panes()).some(pane => pane.id === PANE)
+  const pane = (await $.ui.panes()).find(one => one.id === PANE)
+  const isPaneOpen = pane !== undefined
   if (!isForced && !self?.isPm && !isPaneOpen) return
   await ensureTools($)
   const started = Date.now()
@@ -512,23 +590,76 @@ export async function refresh($: EngineInterface, isForced = false) {
     const text = textOf(result)
     if (result.isError) throw new Error(text || t('error.listFailed'))
     const list = parseSessions(text)
-    await update($, sessions, () => ({ list, fetchedAt: started, error: null }))
+    retriesLeft = RETRIES
+    const held = await read($, sessions)
+    // The same list as before is no news: the board is drawn again for it only while it is on screen, where
+    // its times (synced, last active) move on.
+    const isNews = !sameJson(held.list, list) || held.error !== null || held.fetchedAt === 0
+    if (isNews || (pane?.isShown && pane.isPlaced)) await update($, sessions, () => ({ list, fetchedAt: started, error: null }))
+    const isEvery = isWide || !self || (isPaneOpen && (await read($, scope)) === 'all')
+    const asked = isEvery ? list : list.filter(one => projectKey(one.cwd) === self.projectKey)
     await readTracks($, list)
     await readProjects($, list)
-    await catchUp($, list)
-    await verifyCi($, list)
-    await verifyPushes($, list)
+    await catchUp($, list, asked)
+    await verifyCi($, list, asked)
+    await verifyPushes($, list, asked)
     await announce($)
+    await saveRound($)
   } catch (err) {
     const message = reason(err)
     await update($, sessions, s => (s.error === message ? s : { ...s, error: message }))
+    if (retriesLeft > 0) {
+      retriesLeft -= 1
+      refreshSoon($, RETRY_MS)
+    }
   } finally {
     if (fetchingSince === started) fetchingSince = 0
   }
 }
 
+// ── The last round, kept for the next process ──
+
+/** What a round found, so a new process of this session draws the board at once, not "syncing" until a round ends. */
+type Round = { sessions: Sessions; lastWords: Record<string, LastWord>; ciChecks: Record<string, CiCheck>; pushChecks: Record<string, PushCheck> }
+
+/** The round last written, so an unchanged one is not written again. */
+let roundWritten = ''
+
+async function roundFile($: EngineInterface): Promise<string | null> {
+  const id = (await read($, me))?.id
+
+  return id ? `${await dataDir($)}/rounds/${id}.json` : null
+}
+
+async function saveRound($: EngineInterface) {
+  const path = await roundFile($)
+  if (!path) return
+  const round: Round = { sessions: await read($, sessions), lastWords: await read($, lastWords), ciChecks: await read($, ciChecks), pushChecks: await read($, pushChecks) }
+  const text = JSON.stringify({ ...round, sessions: { ...round.sessions, fetchedAt: 0 } })
+  if (text === roundWritten) return
+  roundWritten = text
+  try {
+    await $.fs.write(path, JSON.stringify(round))
+  } catch {
+    // The next process waits for its first round instead.
+  }
+}
+
+/** Draws from the last round this session kept while a new process has none of its own yet. */
+export async function loadRound($: EngineInterface) {
+  if ((await read($, sessions)).fetchedAt !== 0) return
+  const path = await roundFile($)
+  const round = path ? await readJson<Round>($, path) : null
+  if (!round?.sessions?.list) return
+  await update($, sessions, s => (s.fetchedAt !== 0 ? s : { ...round.sessions, error: null }))
+  await update($, lastWords, all => ({ ...round.lastWords, ...all }))
+  await update($, ciChecks, all => ({ ...round.ciChecks, ...all }))
+  await update($, pushChecks, all => ({ ...round.pushChecks, ...all }))
+}
+
 export function refreshSoon($: EngineInterface, ms = 0) {
-  $.clock.after(ms, () => void refresh($))
+  // Nowhere to report once this copy of the module is gone (a reload).
+  $.clock.after(ms, () => void refresh($).catch(() => undefined))
 }
 
 // ── Being the PM ──
@@ -734,7 +865,7 @@ export function str(v: unknown): string | undefined {
 
 export async function board($: EngineInterface, input: Record<string, unknown>): Promise<string> {
   const self = await identify($)
-  await refresh($, true)
+  await refresh($, true, input.scope === 'all')
   const state = await read($, sessions)
   if (state.error && state.list.length === 0) return t('board.cannotRead', { error: state.error })
   const all = await read($, tracks)
@@ -770,7 +901,7 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
 
 /** Why the owner's work cannot be counted done yet, or null when nothing stands in the way. */
 async function ownerBlocker($: EngineInterface, ownerId: string): Promise<string | null> {
-  await refresh($, true)
+  await refresh($, true, true)
   const list = (await read($, sessions)).list
   const one = list.find(s => s.id === ownerId)
   const words = await read($, lastWords)

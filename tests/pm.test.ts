@@ -36,6 +36,8 @@ const track = (id: string, extra: object) => ({
 
 type Files = Map<string, string>
 type Pane = { id: string; title: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }
+/** What the mod asked of the disk and the app: files read and written, the app's tools called; `isAppAway` while a resumed session has no app tools yet. */
+type Counts = { reads: number; calls: string[]; writes?: string[]; isAppAway?: boolean }
 
 /** The test host spells paths its own way: compare them by what follows the data folder. */
 const norm = (path: string) => path.replace(/\\/g, '/').replace(/^.*\/\.claude\/project-pm/, DIR)
@@ -44,7 +46,7 @@ const norm = (path: string) => path.replace(/\\/g, '/').replace(/^.*\/\.claude\/
 type Host = (argv: readonly string[], cwd: string | undefined) => { exitCode: number; stdout: string } | null
 
 /** The desktop app, the disk and the host's commands, from memory: `self` is this session's id. */
-function world(on: On, self: string, files: Files, archived: string[] = [], host: Host = () => null, tools: string[] = [], panes: Pane[] = []) {
+function world(on: On, self: string, files: Files, archived: string[] = [], host: Host = () => null, tools: string[] = [], panes: Pane[] = [], counts: Counts = { reads: 0, calls: [] }) {
   let list = [...SESSIONS]
   on('process.run', ($, e) => {
     const out = host(e.argv, e.init?.cwd)
@@ -55,6 +57,7 @@ function world(on: On, self: string, files: Files, archived: string[] = [], host
   mock.env(on, { USERPROFILE: 'C:\\home' })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: PROJECT }))
+  on('session.id', () => ({ value: `transcript-${self}` }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   // `tools` holds what the engine has registered now: a test empties it where the engine drops them.
   on('tool.register', ($, e) => {
@@ -80,12 +83,14 @@ function world(on: On, self: string, files: Files, archived: string[] = [], host
   })
   on('fs.exists', ($, e) => ({ value: files.has(norm(e.path)) || [...files.keys()].some(k => k.startsWith(`${norm(e.path)}/`)) }))
   on('fs.read', ($, e) => {
+    counts.reads += 1
     const text = files.get(norm(e.path))
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
 
     return { value: text }
   })
   on('fs.write', ($, e) => {
+    counts.writes?.push(norm(e.path))
     files.set(norm(e.path), e.text)
 
     return { value: undefined }
@@ -100,6 +105,8 @@ function world(on: On, self: string, files: Files, archived: string[] = [], host
     }
   })
   on('mcp.call', ($, e) => {
+    counts.calls.push(e.tool)
+    if (counts.isAppAway) return { value: { content: [{ type: 'text' as const, text: 'not connected' }], isError: true } }
     const text = (t: string) => ({ value: { content: [{ type: 'text' as const, text: t }], isError: false } })
     if (e.tool === 'get_session') return text(JSON.stringify({ sessionId: self, title: '我', cwd: PROJECT }))
     if (e.tool === 'list_sessions') return text(JSON.stringify(list))
@@ -394,9 +401,11 @@ test('GitHub decides whether CI the words left running is still running', ZH, as
   await clock.advance(61_000)
   expect(await board()).toMatch(/\[等待 CI・未完成\] 「商品列表頁」/)
 
-  // Failed: something to handle, not something to wait on.
+  // Failed: something to handle, not something to wait on. An unknown answer is asked again after ten minutes.
   runs = [{ status: 'completed', conclusion: 'success' }, { status: 'completed', conclusion: 'failure' }]
   await clock.advance(61_000)
+  expect(await board()).toMatch(/\[等待 CI・未完成\] 「商品列表頁」/)
+  await clock.advance(9 * 60_000)
   const failed = await board()
   expect(failed).toMatch(/\[CI 失敗・需處理\] 「商品列表頁」\(local_open\) GitHub 上的 CI（commit 3fa1c2e）失敗/)
   expect(failed).not.toMatch(/等待 CI・未完成\] 「商品列表頁」/)
@@ -1524,4 +1533,75 @@ test('the PM with nothing said gets its board at the start', ZH, async ($, on) =
   world(on, 'local_pm', files, [], undefined, [], panes)
   await $.session.start(START)
   expect(panes.map(pane => [pane.id, pane.title])).toEqual([['project-pm', 'Acme 商店後台 · PM']])
+})
+
+test('a quiet PM asks again only what can have changed', ZH, async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  // A session of this project waiting on CI GitHub knows nothing about, and one of another project with a push left.
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { lastAnswer: '已 push 3fa1c2e，CI 還在跑。' })))
+  files.set(`${DIR}/sessions/local_other.json`, JSON.stringify(track('local_other', { cwd: 'C:\Users\dev\Projects\Weather app', lastAnswer: '已 commit 9b8c7d6，還沒 push。' })))
+  const clock = mock.clock(on, { now: NOW })
+  const asked: string[] = []
+  const host: Host = argv => {
+    asked.push(argv[0] === 'gh' ? `gh ${argv[1]} ${argv[2]}` : `git ${argv[1]}`)
+    if (argv[0] === 'gh') return { exitCode: 0, stdout: '[]' }
+    if (argv[1] === 'rev-parse') return { exitCode: 0, stdout: '3fa1c2e0000000000000000000000000000000ab' }
+    return { exitCode: 1, stdout: '' }
+  }
+  const counts: Counts = { reads: 0, calls: [], writes: [] }
+  world(on, 'local_pm', files, [], host, [], [], counts)
+  await $.session.start(START)
+  await clock.advance(1000)
+  // The first round asks GitHub about this project's CI; the other project's push is the other project's PM's.
+  expect(asked.filter(a => a.startsWith('gh'))).toEqual(['gh run list'])
+  // Its transcript is kept under its desktop id, for its next process.
+  expect(JSON.parse(files.get(`${DIR}/transcripts.json`)!)).toEqual({ 'transcript-local_pm': 'local_pm' })
+  const at = { asked: asked.length, reads: counts.reads, calls: counts.calls.length, writes: counts.writes!.length }
+
+  // Ten quiet minutes: the app's list each round, and nothing else read, run or written.
+  for (let i = 0; i < 20; i++) await clock.advance(30_000)
+  expect(asked.slice(at.asked)).toEqual([])
+  expect(counts.reads - at.reads).toBe(0)
+  expect(counts.writes!.slice(at.writes)).toEqual([])
+  expect(counts.calls.slice(at.calls).filter(c => c !== 'list_sessions')).toEqual([])
+  expect(counts.calls.slice(at.calls).length).toBe(20)
+
+  // An unknown answer is asked again after ten minutes.
+  await clock.advance(30_000)
+  expect(asked.slice(at.asked).filter(a => a.startsWith('gh'))).toEqual(['gh run list'])
+
+  // The board tool over every project asks about the other project's push too.
+  const before = asked.length
+  await $.tool.call({ tool: 'mcp__project-pm__board', scope: 'all' } as never)
+  expect(asked.slice(before).filter(a => a.startsWith('git')).length).toBeGreaterThan(0)
+})
+
+test("a resumed session draws its board at once, before the app's tools reach it", ZH, async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  files.set(`${DIR}/sessions/local_pm.json`, JSON.stringify(track('local_pm', {})))
+  // What the session's last process kept: its transcript's desktop id, and its last round.
+  files.set(`${DIR}/transcripts.json`, JSON.stringify({ 'transcript-local_pm': 'local_pm' }))
+  const kept = { list: [{ id: 'local_open', title: '商品列表頁', cwd: PROJECT, isRunning: false, lastActivityAt: '2026-10-17T11:50:00.000Z', isPinned: false, hasOpenPr: false }], fetchedAt: NOW - 60_000, error: null }
+  files.set(`${DIR}/rounds/local_pm.json`, JSON.stringify({ sessions: kept, lastWords: {}, ciChecks: {}, pushChecks: {} }))
+  const clock = mock.clock(on, { now: NOW })
+  const panes: Pane[] = []
+  const counts: Counts = { reads: 0, calls: [], isAppAway: true }
+  world(on, 'local_pm', files, [], undefined, [], panes, counts)
+  await $.session.start(START)
+  // The PM's board is up at the start, drawn from the last round.
+  expect(panes.map(pane => [pane.id, pane.title])).toEqual([['project-pm', 'Acme 商店後台 · PM']])
+  const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board', include_done: true } as never)) as { result?: unknown }).result)
+  expect(await board()).toMatch(/商品列表頁 \(local_open\)/)
+
+  // The first round finds no app yet.
+  await clock.advance(1_000)
+  // The person looks at it and the app's tools arrive: a round follows within seconds, not at the next poll.
+  counts.isAppAway = false
+  const asked = counts.calls.length
+  await clock.advance(3_000)
+  expect(counts.calls.slice(asked)).toContain('list_sessions')
+  // And it knows its transcript from now on.
+  expect(JSON.parse(files.get(`${DIR}/transcripts.json`)!)).toEqual({ 'transcript-local_pm': 'local_pm' })
 })

@@ -126,10 +126,12 @@ PM 有兩個專屬工具（不需要你自己呼叫）：
 
 - 每個 Session 只寫自己的紀錄檔：`~/.claude/project-pm/sessions/<session id>.json`（任務清單、最後的收尾摘要、待決策問題、最新指令與最後回報，皆有截斷，以及看板是否開著）。
 - 每個專案一份檔案，記錄 PM 與工作項目：`~/.claude/project-pm/projects/<專案>-<hash>.json`。
+- 看板會把上一輪的結果（列出的 Session、它們的最後訊息、git 與 GitHub 的回答）存在 `~/.claude/project-pm/rounds/<session id>.json`，並用 `~/.claude/project-pm/transcripts.json` 記錄每份對話紀錄屬於哪個 Session，讓恢復的 Session 能立刻畫出看板。
 - Mod 本身不會把資料傳到任何地方。Session 清單、紀錄讀取與封存，都是透過桌面版內建的工具完成。查 CI 時會在該 Session 的資料夾執行 `git` 與 `gh`，`gh` 會用你自己的登入向 GitHub 查詢，和你手動執行一樣。
 - Mod 安裝前就開著的 Session 沒有追蹤紀錄，看板只會顯示它們最後一則訊息。
 - PM 的 `board`／`ledger` 工具被引擎移除時（執行 `/reload-plugins` 後，或 Mod 資料夾有變動、執行 `/board` 這類指令時被重新載入），會在 PM 的下一輪（下一則訊息或通知叫醒）重新註冊，PM 閒置時也會在 30 秒內補回，不必重開 Session。
-- 看板會維持你留下的狀態：`/board` 或 `/pm` 會開啟，`/board` 或面板的關閉鈕會收合。桌面版為了釋放記憶體暫停閒置的 Session、之後再恢復，或引擎收掉面板時，原本開著的看板會在 Session 恢復時、你下一則訊息時，或閒置時 30 秒內重新開啟。
+- 看板會維持你留下的狀態：`/board` 或 `/pm` 會開啟，`/board` 或面板的關閉鈕會收合。桌面版為了釋放記憶體暫停閒置的 Session、之後再恢復，或引擎收掉面板時，原本開著的看板會在 Session 恢復時，以上一輪的結果立刻畫出來。
+- 可用記憶體低於 5% 時，桌面版會暫停所有閒置一分鐘以上的 Session；除了可用記憶體，也會看 Windows 的認可上限（記憶體加分頁檔）。看板常常消失，通常是認可上限不夠用：加大分頁檔，或減少吃記憶體的程式，Session 就不會被暫停。這個 Mod 本身每個 Session 約增加 40 MB 的認可記憶體；每個 PM 只向 git 與 GitHub 詢問自己專案的狀態（看板切到全部專案時才問全部），GitHub 查不到的 CI 每十分鐘才再問一次，看板也只在有變化或顯示在畫面上時才重畫。
 
 ## 開發
 
