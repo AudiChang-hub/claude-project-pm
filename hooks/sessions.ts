@@ -257,9 +257,8 @@ export function liveTracks(list: Session[], tracks: Record<string, Track>, words
   return live
 }
 
-/** Words a recap uses for what is left: not committed, not verified, not deployed. */
-const CAVEAT =
-  /(還沒|尚未|沒有|未)(完成|驗證|確認|測試|提交|commit|推|push|部署|合併|merge|處理|做)|not (yet )?(done|verified|tested|committed|pushed|deployed|merged)|still (needs|to do)|TODO/i
+/** Words a recap uses for work left other than delivering it: not done, not verified, not tested (delivery: undeliveredOf). */
+const CAVEAT = /(還沒|尚未|沒有|未)(完成|驗證|確認|測試|處理|做)|not (yet )?(done|verified|tested)|still (needs|to do)|TODO/i
 
 /** A double negative that says nothing is left: 沒有任何未提交的修改, 沒有未推送的 commit. */
 const NOTHING_LEFT = /(沒有|没有|並無|并无|無|不再有)(任何|其他|別的|剩下|剩餘|留下)?[^。，,；;！!\n]{0,4}?(還沒|尚未|未)/g
@@ -351,7 +350,7 @@ export type DeliveryKind = 'commit' | 'push' | 'release'
 
 const VERB = String.raw`commit(?:ted)?|push(?:ed)?|deploy(?:ed)?|release[sd]?|merge[sd]?|ship(?:ped)?|提交|推送|推上|發布|發佈|部署|上線|合併|交付|升版`
 /** A delivery verb, and those joined to it: 沒有 commit 或 push, not committed or pushed. */
-const VERBS = String.raw`(?:${VERB})(?![^\s，。,；;]{0,2}(?:設定|腳本|流程|文件|檔案|權限|環境|相關|說明|紀錄))(?:\s*(?:或|和|、|及|跟|與|並|再|也沒有?|/|／|,|and|or|nor)\s*(?:${VERB}))*`
+const VERBS = String.raw`(?:${VERB})(?![^\s，。,；;]{0,2}(?:設定|腳本|流程|文件|檔案|權限|環境|相關|說明|紀錄|動詞))(?:\s*(?:或|和|、|及|跟|與|並|再|也沒有?|/|／|,|and|or|nor)\s*(?:${VERB}))*`
 /** 尚未 commit, 還沒上線, 仍未 commit 或 push, 也沒有 push: the negation a few characters before the verb (a verb after 的 is a noun: 還沒公開的 commit). */
 const NOT_DONE = new RegExp(String.raw`(尚未|還沒有?|仍未|仍然沒有|並未|并未|沒有?|未)[^。，,；;：:\n]{0,4}?(?<!的\s*)(${VERBS})|\b(not(?: yet)?|haven't(?: yet)?|hasn't(?: yet)?|have not(?: yet)?|has not(?: yet)?|didn't|did not)\s+(?:been\s+)?(${VERBS})`, 'gi')
 /**
@@ -417,6 +416,18 @@ const OFFER = /你可以|您可以|你也可以|您也可以|你要|可以|建�
  */
 const YOURS = /(?<![幫給替向跟和對讓與知訴])(?:你|您)(?!的)|\byou(?:'ll| will| plan| were going| are going)\b/i
 
+/**
+ * Between a negation and its verb, how the work was done rather than that it was not: 沒有另開 commit, 沒有另外 commit,
+ * 沒有新增 commit, 沒有拆成兩個 commit, 沒有用 force push.
+ */
+const MANNER = /另(?:開|外|行|起)?|新增|再開|多開|額外|單獨|拆成|拆開|分成|分開|force|強制|separate|another|extra|additional|split/i
+/**
+ * A commit made, named by its hash: commit 是 3fa1c2e, 新的 commit 為 3fa1c2e, amend 成 3fa1c2e, 併進 3fa1c2e,
+ * committed (as) 3fa1c2e, amended into 3fa1c2e.
+ */
+const COMMITTED =
+  /\bcommit\s*(?:是|為|:|：)\s*`?[0-9a-f]{7,40}\b|\bamend(?:ed)?\s*(?:成|為|到|into|to|as)?\s*`?[0-9a-f]{7,40}\b|(?:併進|併入|合進|合入)\s*`?[0-9a-f]{7,40}\b|\bcommitted\s+(?:it\s+)?(?:as\s+|to\s+|in\s+)?`?[0-9a-f]{7,40}\b/gi
+
 /** What may stand before a bare negation for it to be the report's own, with no other subject: 也沒有 push, 我也沒有 push. */
 const BARE_PREFIX = /^[\s,，、]*(?:(?:我們|我|也|都|並|而且|且|另外|同時|所以|因此|則|就|then|and|also|so|I|we)[\s,，、]*)*$/i
 /** 已推上 main, 已部署, 部署完成, 上線了, pushed to main: the same kinds done, which a later word may say. */
@@ -426,7 +437,7 @@ const DONE = new RegExp(String.raw`(?:已經?|都已|也已|皆已|完成(?!後)
  * your go-ahead. Not 等 PM 下一輪確認 (a check to come, with nothing to deliver after it).
  */
 const AWAITING_GO = new RegExp(
-  String.raw`等[^。，,；;\n]{0,10}?(?:放行|批准|核准|同意)|等[^。，,；;\n]{0,12}?(?:通知|確認)[^。；;\n]{0,16}?(?:後|再|才)[^。；;\n]{0,6}?(?:${VERB})|\bwaiting (?:for|on) (?:the PM's |the PM |your |a |an |the )?(?:go-ahead|approval|sign-off|OK)\b`,
+  String.raw`等[^。，,；;\n]{0,10}?(?:放行|批准|核准|同意)|等[^。，,；;\n]{0,12}?(?:通知|確認)[^。；;\n]{0,16}?(?:後|再|才)[^。；;\n]{0,16}?(?:${VERB})|\bwaiting (?:for|on) (?:the PM's |the PM |your |a |an |the )?(?:go-ahead|approval|sign-off|OK)\b`,
   'gi',
 )
 /**
@@ -501,12 +512,17 @@ export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: strin
         if (owner && !OWN.test(owner)) continue
         // 沒有改程式，也沒有 push: nothing was there to push. Not 還沒 push (or "not pushed yet"), not 設定檔沒有 commit,
         // not while it waits.
-        const isYet = YET.test(m[1] ?? m[3] ?? '') || /^\s*yet\b/i.test(sentence.slice((m.index ?? 0) + m[0].length))
+        // 沒有另開 commit, 沒有新增 commit, 沒有用 force push: how it was done, not that it was not.
+        const negation = m[1] ?? m[3] ?? ''
+        const verbs = m[2] ?? m[4] ?? ''
+        if (MANNER.test(m[0].slice(negation.length, m[0].length - verbs.length))) continue
+        const isYet = YET.test(negation) || /^\s*yet\b/i.test(sentence.slice((m.index ?? 0) + m[0].length))
         // The no-code statement itself may stand just before it (沒有改程式、沒有 push): it is no other subject.
         if (isNoCode && !isYet && !isWaiting && BARE_PREFIX.test(before.replace(new RegExp(NO_CODE.source, 'gi'), ''))) continue
         for (const kind of verbsIn(m[2] ?? m[4] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: true })
       }
       for (const m of sentence.matchAll(DONE)) for (const kind of verbsIn(m[1] ?? m[2] ?? m[3] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: false })
+      for (const m of sentence.matchAll(COMMITTED)) said.push({ at: m.index ?? 0, kind: 'commit', isLeft: false })
       for (const m of sentence.matchAll(NO_NEED)) {
         const named = m[1] ?? m[2] ?? ''
         const kinds = /版號|升版|標籤|tag/i.test(named) ? (['release'] as const) : verbsIn(named)
@@ -631,8 +647,17 @@ export function deliveryText(kinds: DeliveryKind[]): string {
   return kinds.map(k => t(`delivery.${k}`)).join(t('list.joiner'))
 }
 
-export function caveatOf(track: Track | undefined): string | null {
-  return track?.recap && CAVEAT.test(track.recap.replace(NOTHING_LEFT, '')) ? track.recap : null
+/**
+ * The recap, when it says something is left: work not done, verified or tested (read like every report, quotes,
+ * rules and someone else's work aside), or delivery left that the latest words still leave undone, as the
+ * board reads it: gone once git shows the one push left done (the same check as *Not released*).
+ */
+export function caveatOf(track: Track | undefined, push?: PushCheck): string | null {
+  const recap = track?.recap
+  if (!recap) return null
+  if (CAVEAT.test(reportedText(recap.replace(NOTHING_LEFT, '')))) return recap
+
+  return undeliveredOf(recap) && isUndelivered(latestWords(track), push) ? recap : null
 }
 
 /**
@@ -845,7 +870,7 @@ export function boardText(input: BoardInput): string {
       const target = ci[r.one.id]?.target || t('board.attention.failedTarget')
       attention.push(t('board.attention.failed', { name, target, said: clip(ciWords(r.track, r.word), 200) }))
     }
-    const caveat = caveatOf(r.track)
+    const caveat = caveatOf(r.track, push[r.one.id])
     if (caveat && !['running', 'ci', 'failed', 'unreleased'].includes(r.status)) attention.push(t('board.attention.caveat', { name, said: clip(caveat, 200) }))
     if (r.one.hasOpenPr && r.status !== 'running') attention.push(t('board.attention.pr', { name }))
   }
@@ -879,7 +904,7 @@ export function boardText(input: BoardInput): string {
   let listed = 0
   for (const r of rows) {
     const isOwner = openLedger.some(item => item.owner === r.one.id)
-    if (!input.isIncludingDone && !isActive(r.status) && !caveatOf(r.track) && !r.one.hasOpenPr && !isOwner) continue
+    if (!input.isIncludingDone && !isActive(r.status) && !caveatOf(r.track, push[r.one.id]) && !r.one.hasOpenPr && !isOwner) continue
     listed += 1
     const flags = [r.one.hasOpenPr ? t('board.flag.pr') : '', r.one.isPinned ? t('board.flag.pinned') : ''].filter(Boolean).join(t('list.joiner'))
     lines.push(`### [${STATUS[r.status].tag}] ${r.one.title} (${r.one.id})`)

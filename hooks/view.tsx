@@ -284,7 +284,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
     const track = all[one.id]
     const plan = track?.plan ?? []
     const left = openSteps(track)
-    const caveat = status === 'running' ? null : caveatOf(track)
+    const caveat = status === 'running' ? null : caveatOf(track, push[one.id])
     const summary = summaryOf(track, one)
     const isPm = files[projectKey(one.cwd)]?.pmId === one.id
     const meta = [
@@ -401,7 +401,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   // A session that owns open work stays in sight, whatever it is doing.
   const owners = new Set(ledgers.map(({ item }) => item.owner).filter(Boolean))
   const active = (list: Session[]) =>
-    list.filter(one => isActive(statusOfOne(one)) || !!caveatOf(all[one.id]) || one.hasOpenPr || owners.has(one.id)).sort(byRank)
+    list.filter(one => isActive(statusOfOne(one)) || !!caveatOf(all[one.id], push[one.id]) || one.hasOpenPr || owners.has(one.id)).sort(byRank)
   const ended = (list: Session[]) => list.filter(one => !active(list).includes(one))
 
   const sessionsBlock = (project: Project) => {

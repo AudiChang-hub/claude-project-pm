@@ -755,6 +755,71 @@ test("a release handed on to the next version, or the person's own plan, is not 
   expect(own.filter(([text, want]) => kinds(text) !== want)).toEqual([])
 })
 
+test('how a commit was made is not a commit left; a commit named by its hash is made', () => {
+  const read = (text: string) => {
+    const u = undeliveredOf(text)
+    return u ? `${u.kinds.join(',')}${u.sha ? `@${u.sha}` : ''}` : 'none'
+  }
+  const cases: [string, string][] = [
+    // A real session's report: amended rather than a new commit, then named the commit; only the push is left.
+    ['已照 PM 的要求直接 amend，沒有另開 commit：新的 commit 是 `3fa1c2e`，取代原本的 `9b8c7d6`，在本機 main，沒有 push、沒有打 tag。', 'push@3fa1c2e'],
+    ['沒有另外 commit，改動併進 3fa1c2e，沒有 push。', 'push@3fa1c2e'],
+    ['沒有新增 commit，直接 amend 成 3fa1c2e。沒有 push。', 'push@3fa1c2e'],
+    ['沒有拆成兩個 commit，commit 是 3fa1c2e，沒有 push。', 'push@3fa1c2e'],
+    ['Not a separate commit: amended into 3fa1c2e. Not pushed.', 'push@3fa1c2e'],
+    ['已 commit 為 3fa1c2e，沒有 push。', 'push@3fa1c2e'],
+    ['剛才還沒 commit，現在新的 commit 是 3fa1c2e，沒有 push。', 'push@3fa1c2e'],
+    ['The first attempt was not committed; committed as 3fa1c2e now. Not pushed.', 'push@3fa1c2e'],
+    ['沒有用 force push，已正常 push 上去。', 'none'],
+    // Left on purpose, and no delivery.
+    ['沒有打 tag，也沒有另外寫 CHANGELOG。', 'none'],
+    ['這句沒有交付動詞，不會擋。', 'none'],
+    // Still not committed.
+    ['還沒 commit。', 'commit'],
+    ['沒有 commit，也沒有 push。', 'commit,push'],
+    ['修改還沒 commit，新的 commit 之後再開。', 'commit'],
+    ['上一個 commit 是 3fa1c2e，這次的修改還沒 commit。', 'commit@3fa1c2e'],
+    // Pushing is not all: the release waits on the PM's word, however long what stands between.
+    ['2.4.3 已在 worktree 本機 commit 9b8c7d6（未 push）。等 PM 通知 2.4.1／2.4.2 上線後再 cherry-pick 發布。', 'push,release@9b8c7d6'],
+  ]
+  expect(cases.filter(([text, want]) => read(text) !== want)).toEqual([])
+})
+
+test('"follow up" reads a recap the way the board does, and goes once git shows the push done', () => {
+  const recap = 'Committed 3fa1c2e locally (not pushed, no tag).'
+  const one = track('x', { recap }) as never
+  expect(caveatOf(one)).toBe(recap)
+  const pushed = { words: recap, sha: '3fa1c2e', isPushed: true, checkedAt: NOW }
+  expect(caveatOf(one, pushed)).toBe(null)
+  // Work left other than delivering still shows, pushed or not; words about a rule or someone else's do not.
+  const unverified = track('x', { recap: '已部署到正式站，但還沒驗證結帳流程。' }) as never
+  expect(caveatOf(unverified)).not.toBe(null)
+  expect(caveatOf(track('x', { recap: '收尾摘要提到「尚未驗證」這類字眼時會列為需追蹤。' }) as never)).toBe(null)
+  expect(caveatOf(track('x', { recap: '另一個 Session 還沒測試它的修改，我這邊已部署並驗證。' }) as never)).toBe(null)
+})
+
+test('a commit kept here shows no "follow up" once git finds it pushed', ZH, async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  const at = Date.parse('2026-10-17T11:50:00.000Z')
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { recap: 'Committed 3fa1c2e locally (not pushed, no tag).', recapAt: at - 1000, lastAnswer: 'Done.', turnAt: at, planAt: at })))
+  let remotes = ''
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files, [], argv => (argv[0] === 'git' && argv[1] === 'branch' ? { exitCode: 0, stdout: remotes } : null))
+  await $.session.start(START)
+  const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+
+  const before = await board()
+  expect(before).toMatch(/\[待發布・未完成\] 「商品列表頁」\(local_open\) 最後回報尚未交付（push）/)
+  expect(before).not.toMatch(/\[需追蹤\] 「商品列表頁」/)
+
+  remotes = '  origin/main\n'
+  await clock.advance(61_000)
+  const after = await board()
+  expect(after).not.toMatch(/\[需追蹤\] 「商品列表頁」/)
+  expect(after).not.toMatch(/待發布・未完成\] 「商品列表頁」/)
+})
+
 test('work with no code to deliver is not left undelivered by a bare "no push"; work still to come is', () => {
   const kinds = (text: string) => (undeliveredOf(text)?.kinds ?? []).join(',') || 'none'
   // A real session's report on a data fix: nothing was ever going to be pushed.
