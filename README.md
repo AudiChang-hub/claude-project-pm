@@ -63,7 +63,7 @@ Requires the **Claude Code desktop app (Code tab)**; see [Requirements](#require
 | Waiting on you (待回覆) | The session ended its turn with a question for you. |
 | CI failed (CI 失敗) | Its last words left CI running, and GitHub reports that run failed. |
 | Unfinished (未完成) | It stopped with steps of its task list still open, and nothing it waits on is still running. |
-| Not released (待發布) | Its latest recap or answer says its work is not delivered yet: not committed, not pushed, not released, deployed or live, or waiting on a go-ahead (等 PM 放行). A fully ticked task list does not override it (`wrap_up` ticks every step). Sentences about a rule or an example, quoted words, someone else's work and double negatives (沒有任何未提交的修改) do not count. When only a push is left and the words name the commit, it clears once that commit, or its content (rebased or squashed with others), is on a remote branch, as when the PM pushes it from this machine. |
+| Not released (待發布) | Work is left to deliver, judged facts first (see *How delivery is judged* below): a commit or push git shows is left, a release the session declared pending, or, with neither to go on, words that say the work is still to come. A fully ticked task list does not override it (`wrap_up` ticks every step). |
 | Waiting on CI (等待 CI) | Its last words say CI has not finished, and GitHub has not said it passed. |
 | Running (執行中) | The session is working right now. |
 | In the background (背景執行) | A command it started in the background (`run_in_background`, or moved there) has not reported back yet, for up to 6 hours; or, for a session without that record, it said work goes on in the background (for up to 45 minutes). Open steps on its task list do not make it *Unfinished* meanwhile. |
@@ -88,6 +88,16 @@ At the top: a completion ring and three counters (running, waiting on you, not f
 <p align="center">
   <img src="docs/images/board-dark.png" alt="The full board in dark mode: ledger items and seven active sessions, including one not released, one running and one in the background." width="420">
 </p>
+
+## How delivery is judged
+
+Facts first, words last:
+
+1. **Git, for commit and push.** For each session of its own project the PM reads the session's folder, read-only and without fetching. A folder with no uncommitted changes has nothing left to commit. The commit the report names as its own (commit 是 3fa1c2e, 提交為 3fa1c2e, amended into 3fa1c2e), or a clean folder's HEAD, on a remote branch has nothing left to push; a named commit on no remote branch has its push left, whatever the words say. Git only settles or confirms what it can check: a folder shared with other sessions may hold their changes, so a dirty folder alone adds nothing.
+2. **The session's declaration, for a release.** In a project with a PM, the other sessions are asked to end their recap (or last answer) with one line: `交付：不需要部署`, `交付：已部署（…）` or `交付：待部署（等…）` (`Delivery: not needed`, `deployed (…)`, `pending (…)`). That line decides the release. Sessions of projects without a PM are told nothing.
+3. **Words, only where neither answers.** A report leaves work only when it says the work is still to come: not yet (還沒, 尚未, 未, not yet), what comes next (之後再部署, I'll push after review), a wait (等 PM 放行後部署), or work still sitting here (只在本機，沒有 push). A plain "not done" (沒有打標籤也沒有部署, didn't push) does not count: as often as not it means this time needed none. Rules, examples, quoted words, someone else's work and descriptions of the board are set aside first.
+
+What this lets through: a plain "沒有 commit" of changes that really are uncommitted, or "沒有部署" of a release that really is due, from a session that neither declared it nor named a commit of its own. A declaration, a commit named in the report, or the open steps of its task list bring those back.
 
 ## Usage
 
@@ -127,7 +137,8 @@ Every string lives in [`hooks/messages.ts`](hooks/messages.ts), one table per la
 - Each session writes only its own record: `~/.claude/project-pm/sessions/<session id>.json` (its task list, last recap, open question, latest prompt and last answer, clipped, and whether you left its board open).
 - Each project has one file for its PM and ledger: `~/.claude/project-pm/projects/<project>-<hash>.json`.
 - A board keeps its last round (the sessions listed, their last messages, what git and GitHub said) in `~/.claude/project-pm/rounds/<session id>.json`, and `~/.claude/project-pm/transcripts.json` says which session each transcript belongs to, so a resumed session draws its board at once.
-- The mod itself sends nothing anywhere. Listing, reading and archiving sessions go through the desktop app's built-in tools. To check CI it runs `git` and `gh` in the session's folder, so `gh` contacts GitHub with your own login, as it would if you ran it yourself.
+- The mod itself sends nothing anywhere. Listing, reading and archiving sessions go through the desktop app's built-in tools. To check CI and delivery it runs `git` and `gh` in the session's folder, read-only (`git status` without refreshing the index, `branch -r --contains`, `rev-parse`; no fetch), so `gh` contacts GitHub with your own login, as it would if you ran it yourself.
+- In a project with a PM, the other sessions get one short instruction each turn: end the recap with a delivery line (see *How delivery is judged*). Sessions of other projects get nothing.
 - Sessions opened before the install keep no record; the board shows their last message, read from the transcript.
 - When the engine drops the PM's `board` and `ledger` tools (after `/reload-plugins`, or when the mod's folder changed and a command of it such as `/board` reloads it), they come back on the PM's next turn (your next message or a notification) or within 30 seconds while the PM is idle; no need to restart the session.
 - The board stays as you leave it: `/board` or `/pm` opens it, `/board` or the pane's close closes it. When the desktop app stops an idle session to free memory and resumes it later, or the engine drops the pane, a board you left open comes back as the session resumes, drawn from its last round.

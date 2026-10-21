@@ -16,6 +16,7 @@ import {
   changeMine,
   claim,
   closesBoard,
+  deliveryAsk,
   ensureBoard,
   ensureTools,
   getMine,
@@ -249,7 +250,12 @@ export const register: Register = (on, options) => {
     await ensureTools($)
     const composed = await next(e)
     const self = await read($, me)
-    if (!self?.isPm) return composed
+    if (!self?.isPm) {
+      // A session of a project with a PM declares its delivery at its end; other projects' sessions hear nothing.
+      const ask = await deliveryAsk($)
+
+      return ask ? { sections: [...composed.sections, { id: 'project-pm:delivery', text: ask, scope: 'session' as const }] } : composed
+    }
 
     return { sections: [...composed.sections, { id: 'project-pm:role', text: ROLE(self), scope: 'session' as const }] }
   })

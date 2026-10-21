@@ -70,6 +70,11 @@ const zhTW = {
 7. 子 Session 在等使用者回覆時，把它的問題原文轉述給使用者，使用者回答後用 SendMessage 轉達回去。
 8. 封存 Session 前先確認它沒有未完成步驟、沒有開著的 PR，並問過使用者。
 9. 提到 Session 時用 [標題](#local_…) 連結它。`,
+  'role.delivery': `「{project}」有 PM Session 在追蹤各 Session 的交付狀態。完成一項改動程式或資料的工作、收尾時，請在 wrap_up 摘要（沒有 wrap_up 時就是最後的回答）最後加一行交付宣告，三選一：
+交付：不需要部署
+交付：已部署（版本或位置）
+交付：待部署（等什麼）
+只有改動需要發布、但還沒發布時才寫「待部署」。commit 和 push 由 git 判斷，不用寫在這行；這行是給 PM 看板用的，不需要向使用者解釋。`,
   'role.justClaimed': '使用者剛用 /pm 把這個 Session 設成 PM。先呼叫 {board}，用幾句話報告專案現況：哪些 Session 在等使用者回覆、哪些停下但還有步驟、工作項目有沒有沒完成的。',
 
   // The PM's tools.
@@ -317,6 +322,11 @@ Rules:
 7. When a sub-session is waiting on the user, pass its question on word for word, then relay the user's answer back with SendMessage.
 8. Before archiving a session, make sure it has no steps left and no open PR, and ask the user.
 9. When you mention a session, link it as [title](#local_…).`,
+  'role.delivery': `"{project}" has a PM session tracking each session's delivery. When you finish a piece of work that changed code or data, end your wrap_up recap (or, without wrap_up, your final answer) with one delivery line, one of:
+Delivery: not needed
+Delivery: deployed (version or where)
+Delivery: pending (what it waits on)
+Write pending only when the change needs releasing and has not gone out yet. Commit and push are read from git, not from this line. The line is for the PM's board: no need to explain it to the user.`,
   'role.justClaimed': 'The user just made this session the PM with /pm. Call {board} first, then report the state of the project in a few sentences: which sessions are waiting on the user, which stopped with steps left, and whether any work item is still open.',
 
   'tool.board.description':

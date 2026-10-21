@@ -23,8 +23,10 @@ import {
   itemCode,
   keyFile,
   latestWords,
+  leftOf,
   liveTracks,
   openSteps,
+  ownCommitOf,
   parseLastWord,
   parseSessions,
   projectKey,
@@ -468,28 +470,36 @@ export async function verifyCi($: EngineInterface, list: Session[], candidates =
   }
 }
 
-// ── Asking git whether a commit the words left unpushed has been pushed since ──
+// ── Asking git about the commit and push the words leave ──
 
 /**
- * Whether the push the words leave undone (and nothing else) has happened since: the commit they name, or
- * its content (rebased, squashed), is on a remote-tracking branch in `cwd`. A push from this machine moves
- * that branch; no fetch.
+ * What git says of the commit and push the words leave, read-only in `cwd`, no fetch: whether the folder has
+ * uncommitted changes, and whether the commit the words name (or its content, rebased or squashed) or, with none
+ * named, a clean folder's HEAD is on a remote-tracking branch. Facts only settle: a dirty folder adds nothing the
+ * words did not say (a shared folder holds other sessions' changes).
  */
 export async function checkPush($: EngineInterface, id: string, cwd: string, text: string): Promise<PushCheck | undefined> {
   const left = undeliveredOf(text)
-  if (!left?.sha || left.kinds.length !== 1 || left.kinds[0] !== 'push' || !cwd) return undefined
+  const own = ownCommitOf(text)
+  if (!cwd || (!own && !left?.kinds.some(kind => kind === 'commit' || kind === 'push'))) return undefined
   const now = await $.clock.now()
   const held = (await read($, pushChecks))[id]
-  // Pushed stays pushed; not yet is asked again after a minute.
-  if (held && held.words === text && (held.isPushed || now - held.checkedAt < 60_000)) return held
-  const isPushed = await isPushedContent(args => run($, ['git', ...args], cwd, GIT_TIMEOUT_MS), left.sha)
-  const check: PushCheck = { words: text, sha: left.sha, isPushed, checkedAt: now }
+  // Settled stays settled; not yet is asked again after a minute.
+  if (held && held.words === text && ((held.isPushed && held.isClean) || now - held.checkedAt < 60_000)) return held
+  const git = (args: string[]) => run($, ['git', ...args], cwd, GIT_TIMEOUT_MS)
+  // No index refresh: another session's folder is read, never written.
+  const isClean = (await git(['--no-optional-locks', 'status', '--porcelain'])) === ''
+  const sha = own ?? left?.sha ?? null
+  // A hash of another repository, or none at all, says nothing here.
+  const isHere = !!sha && !!(await git(['rev-parse', '--verify', '--quiet', `${sha}^{commit}`]))
+  const isPushed = isHere ? await isPushedContent(git, sha) : !sha && isClean && !!(await git(['branch', '-r', '--contains', 'HEAD']))
+  const check: PushCheck = { words: text, sha: sha ?? '', isPushed, isClean, isOwn: isHere && sha === own, checkedAt: now }
   await update($, pushChecks, all => ({ ...all, [id]: check }))
 
   return check
 }
 
-/** Asks git about each idle session whose latest words leave only a push undone. */
+/** Asks git about each idle session whose latest words leave a commit or a push. */
 export async function verifyPushes($: EngineInterface, list: Session[], asked = list) {
   const words = await read($, lastWords)
   const all = liveTracks(list, await read($, tracks), words)
@@ -666,6 +676,20 @@ export function refreshSoon($: EngineInterface, ms = 0) {
 
 /** The PM's instructions, in the language the mod speaks now. */
 export const ROLE = (self: Me) => t('role.text', { project: self.projectName, path: self.projectPath, board: BOARD_TOOL, ledger: LEDGER_TOOL })
+
+/**
+ * What a session of a project with a PM is asked to say at its end, so the board need not guess a release from its
+ * words (declaredOf): null for the PM itself, a scratch folder, and a project nobody has claimed, whose sessions
+ * are told nothing.
+ */
+export async function deliveryAsk($: EngineInterface): Promise<string | null> {
+  const self = await read($, me)
+  if (!self || self.isPm || self.isScratch) return null
+  const project = (await read($, projects))[self.projectKey]
+  if (!project?.pmId || project.isDismissed) return null
+
+  return t('role.delivery', { project: self.projectName })
+}
 
 /**
  * Puts the PM's tools back when the engine has dropped them: a reload of the module (/reload-plugins,
@@ -920,10 +944,10 @@ async function ownerBlocker($: EngineInterface, ownerId: string): Promise<string
         return t('blocker.quoted', { title, why, said: clip(said, 120) })
       }
     }
-    const left = undeliveredOf(said)
-    if (!left || (await checkPush($, ownerId, track.cwd, said))?.isPushed) return null
+    const left = leftOf(said, await checkPush($, ownerId, track.cwd, said))
+    if (left.length === 0) return null
 
-    return t('blocker.quoted', { title, why: t('blocker.undelivered', { kinds: deliveryText(left.kinds) }), said: clip(said, 120) })
+    return t('blocker.quoted', { title, why: t('blocker.undelivered', { kinds: deliveryText(left) }), said: clip(said, 120) })
   }
   await checkPush($, ownerId, one.cwd, ciWords(track, words[ownerId]))
   const status = statusOf(one, track, words[ownerId], await $.clock.now(), (await read($, ciChecks))[ownerId], (await read($, pushChecks))[ownerId])

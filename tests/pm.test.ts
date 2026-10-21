@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { applyPlan, betterCi, caveatOf, ciTarget, ciTargets, ciVerdict, isCiPending, isPushedContent, keyFile, parseLastWord, projectKey, statusOf, undeliveredOf } from '../hooks/sessions'
+import { applyPlan, betterCi, caveatOf, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, statusOf, undeliveredOf } from '../hooks/sessions'
 import { closesBoard } from '../hooks/actions'
 import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hooks/messages'
 import type { Lang, MessageKey } from '../hooks/messages'
@@ -430,7 +430,9 @@ test('a recap that says nothing is left is not a caveat', () => {
   expect(recap('之後版號和發布接力都由 PM 管，我這邊沒有任何未提交的修改。')).toBe(null)
   expect(recap('交接完成，沒有未推送的 commit。')).toBe(null)
   expect(recap('欄位已移除，還沒部署。')).not.toBe(null)
-  expect(recap('改好了，但沒有提交。')).not.toBe(null)
+  expect(recap('改好了，但還沒提交。')).not.toBe(null)
+  // Not done this time is no work left: only tests changed, the project's rules ask no tag.
+  expect(recap('只改了測試，沒有打標籤也沒有部署。')).toBe(null)
 })
 
 test('the CI a session names: a run id, else a commit', () => {
@@ -621,13 +623,17 @@ test('words that leave work undelivered, and words that only name it', () => {
   // A real session's own words: done its part, waiting on the PM to release.
   expect(kinds('尚未 commit，等 PM 通知 2.4.1 上線後才發布 2.4.2。')).toEqual(['commit', 'release'])
   expect(kinds('功能修改仍未 commit 或 push，繼續等 PM 放行 2.4.2。')).toEqual(['commit', 'push', 'release'])
-  expect(kinds('這次只改了清單，程式沒有動，也沒有 commit 或 push。等 PM 放行 2.4.2 後我再發布。')).toEqual(['commit', 'push', 'release'])
+  // 也沒有 commit 或 push only says it was not done: git answers for commit and push (leftOf). The release waits.
+  expect(kinds('這次只改了清單，程式沒有動，也沒有 commit 或 push。等 PM 放行 2.4.2 後我再發布。')).toEqual(['release'])
   expect(kinds('已推上 main（3fa1c2e），CI 通過，但還沒部署到正式站。')).toEqual(['release'])
   expect(kinds('2.4.2 還沒上線。')).toEqual(['release'])
   expect(kinds('Committed locally as 3fa1c2e; not pushed yet, waiting for your go-ahead.')).toEqual(['push', 'release'])
-  // Committed here, pushed only once the PM confirms: not delivered either, and the commit is named for git to check.
-  expect(undeliveredOf('commit 是 `9638755`，在本機 main，沒有 push，照 PM 的確認流程走。')).toEqual({ kinds: ['push'], sha: '9638755' })
-  expect(undeliveredOf('commit 是 `532590d`，在本機 main，沒有 push。已回報 PM local_0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d。')?.sha).toBe('532590d')
+  // Committed here, pushed only once the PM confirms: the words name their commit, and git says whether it is pushed.
+  const kept = 'commit 是 `9638755`，在本機 main，沒有 push，照 PM 的確認流程走。'
+  expect(ownCommitOf(kept)).toBe('9638755')
+  expect(leftOf(kept, { words: kept, sha: '9638755', isPushed: false, isOwn: true, checkedAt: NOW })).toEqual(['push'])
+  expect(leftOf(kept, { words: kept, sha: '9638755', isPushed: true, isOwn: true, checkedAt: NOW })).toEqual([])
+  expect(ownCommitOf('commit 是 `532590d`，在本機 main，沒有 push。已回報 PM local_0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d。')).toBe('532590d')
 
   const named = [
     // Double negatives and work done.
@@ -774,15 +780,17 @@ test("a release handed on to the next version, or the person's own plan, is not 
     ['我之後會幫你部署到正式站。', 'release'],
     ['測試通過後我再通知你，然後部署。', 'release'],
     ['Next: deploy to production.', 'release'],
-    ['沒有改程式、但設定檔沒有 commit。', 'commit'],
+    ['沒有改程式、但設定檔還沒 commit。', 'commit'],
   ]
   expect(own.filter(([text, want]) => kinds(text) !== want)).toEqual([])
 })
 
 test('how a commit was made is not a commit left; a commit named by its hash is made', () => {
+  // Git says the words' own commit is in the repository and on no remote branch, the folder not clean.
   const read = (text: string) => {
-    const u = undeliveredOf(text)
-    return u ? `${u.kinds.join(',')}${u.sha ? `@${u.sha}` : ''}` : 'none'
+    const own = ownCommitOf(text)
+    const kinds = leftOf(text, own ? { words: text, sha: own, isPushed: false, isOwn: true, checkedAt: NOW } : undefined)
+    return kinds.length ? `${kinds.join(',')}${own ? `@${own}` : ''}` : 'none'
   }
   const cases: [string, string][] = [
     // A real session's report: amended rather than a new commit, then named the commit; only the push is left.
@@ -800,9 +808,10 @@ test('how a commit was made is not a commit left; a commit named by its hash is 
     ['這句沒有交付動詞，不會擋。', 'none'],
     // Still not committed.
     ['還沒 commit。', 'commit'],
-    ['沒有 commit，也沒有 push。', 'commit,push'],
+    // Not done this time: git answers, and here it has no commit of the words' own to ask about.
+    ['沒有 commit，也沒有 push。', 'none'],
     ['修改還沒 commit，新的 commit 之後再開。', 'commit'],
-    ['上一個 commit 是 3fa1c2e，這次的修改還沒 commit。', 'commit@3fa1c2e'],
+    ['上一個 commit 是 3fa1c2e，這次的修改還沒 commit。', 'commit,push@3fa1c2e'],
     // Pushing is not all: the release waits on the PM's word, however long what stands between.
     ['2.4.3 已在 worktree 本機 commit 9b8c7d6（未 push）。等 PM 通知 2.4.1／2.4.2 上線後再 cherry-pick 發布。', 'push,release@9b8c7d6'],
   ]
@@ -829,7 +838,11 @@ test('a commit kept here shows no "follow up" once git finds it pushed', ZH, asy
   files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { recap: 'Committed 3fa1c2e locally (not pushed, no tag).', recapAt: at - 1000, lastAnswer: 'Done.', turnAt: at, planAt: at })))
   let remotes = ''
   const clock = mock.clock(on, { now: NOW })
-  world(on, 'local_pm', files, [], argv => (argv[0] === 'git' && argv[1] === 'branch' ? { exitCode: 0, stdout: remotes } : null))
+  world(on, 'local_pm', files, [], argv => {
+    if (argv[0] === 'git' && argv[1] === 'branch') return { exitCode: 0, stdout: remotes }
+    // The commit is in this repository.
+    return argv[0] === 'git' && argv[1] === 'rev-parse' ? { exitCode: 0, stdout: '3fa1c2e' } : null
+  })
   await $.session.start(START)
   const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
 
@@ -871,7 +884,7 @@ test("a sentence that tells how something is judged is about the judging, not th
     ['2.4.3 待發布，還沒 push。', 'push'],
     ['還沒 push。', 'push'],
     // A misjudgment fixed is work done; 列為 alone is a listing.
-    ['看板誤判已修好，commit 是 3fa1c2e，只在本機，沒有 push。', 'push'],
+    ['看板誤判已修好，commit 是 3fa1c2e，只在本機，還沒 push。', 'push'],
     ['又修了一個小誤判，所以 amend 進同一個還沒推送的 commit。', 'push'],
     ['2.4.3 已經在 main 上但還沒發布，我已在現況文件列為待確認事項。', 'release'],
   ]
@@ -895,6 +908,9 @@ test('a release told step by step after it went out is done; how and in what ord
 
   const notWorkLeft = [
     '部署：腳本執行成功，沒有先手動 merge。',
+    // In a sentence that waits, where a plain "not done" counts: how it was done still is no work left.
+    '沒有先手動 merge，等 CI 結果出來。',
+    '沒有直接 push 到 main，等 PM 審核。',
     '沒有直接 push 到 main，走 PR 合併。',
     '沒有手動部署，用腳本部署完成。',
     'CI success 之後才推標籤，推之前檢查通過。',
@@ -920,54 +936,102 @@ test('a release told step by step after it went out is done; how and in what ord
   expect(left.filter(([text, want]) => kinds(text) !== want)).toEqual([])
 })
 
-test('work with no code to deliver is not left undelivered by a bare "no push"; work still to come is', () => {
+test('a bare "not done" is no work left; work said to be left, or waited on, is', () => {
   const kinds = (text: string) => (undeliveredOf(text)?.kinds ?? []).join(',') || 'none'
   // A real session's report on a data fix: nothing was ever going to be pushed.
   const dataFix = '已寫入並複查通過，沒有改程式，也沒有 push。'
   expect(kinds(dataFix)).toBe('none')
   const idle = { id: 'x', title: 't', cwd: '', isRunning: false, lastActivityAt: new Date(NOW - 5 * 60000).toISOString(), isPinned: false, hasOpenPr: false }
   expect(statusOf(idle, track('x', { lastAnswer: dataFix }) as never, undefined, NOW)).toBe('done')
+  // Only tests changed, and the project's rules ask no tag or deploy for that: pushed, CI passed, nothing left.
+  const testsOnly = '只改了測試檔，已推上 main，CI success。沒有打標籤也沒有部署。'
+  expect(kinds(testsOnly)).toBe('none')
+  expect(statusOf(idle, track('x', { lastAnswer: testsOnly }) as never, undefined, NOW)).toBe('done')
 
-  const settled = [
-    // No code, anywhere in the report.
+  const notLeft = [
     '這次是純資料修正。已寫入並複查通過。沒有 push。',
-    '純資料修正，已寫入並複查。我也沒有 commit 或 push。',
     '沒有改程式，也沒有部署。',
     'No code changes. Also, we did not push.',
-    // Not needed.
     '不需要 push，也不需要升版號。',
     '無需發布，資料已修正。',
-    '沒有 push，因為不需要 push。',
-    'No code changes, so nothing to commit or push.',
     'No need to push; the data fix is applied and verified.',
+    // Not done this time, with no word that it is left: git answers for commit and push, a declaration for a release.
+    '沒有 push。',
+    '沒有 push、也沒有打 tag。',
+    '沒有改程式，但設定檔沒有 commit。',
+    '並未部署。',
+    "We didn't deploy.",
   ]
-  expect(settled.filter(t => kinds(t) !== 'none')).toEqual([])
+  expect(notLeft.filter(t => kinds(t) !== 'none')).toEqual([])
 
   const left: [string, string][] = [
-    // Still to come, whatever else the report says.
+    // Said to be left, whatever else the report says.
     ['還沒 push。', 'push'],
     ['Not pushed yet.', 'push'],
     ['沒有改程式，但設定檔還沒 commit。', 'commit'],
-    ['沒有改程式，但設定檔沒有 commit。', 'commit'],
     ['No code changes; the migration file is not committed.', 'commit'],
-    ['No code changes, but the config is not committed yet.', 'commit'],
     ['沒有改程式。2.4.2 還沒上線。', 'release'],
-    ['沒有改程式，也還沒 push。', 'push'],
-    ['No code changes, and not pushed yet.', 'push'],
+    ['2.4.2 尚未部署。', 'release'],
+    ['2.4.2 未部署。', 'release'],
+    ["The fix hasn't been deployed.", 'release'],
     ['不需要 commit，但還沒 push。', 'push'],
+    // Still to come.
+    ['之後再部署。', 'release'],
+    ['等 PM 放行後部署。', 'release'],
     // Waiting on a word before it goes out.
     ['沒有 push，等 PM 確認。', 'push'],
     ['沒有改程式，也沒有 push，等 PM 確認後再推。', 'push'],
-    // A bare "no push" with nothing to say there was nothing to push: a commit kept here until the PM confirms.
-    ['沒有 push。', 'push'],
-    ['也沒有 push。', 'push'],
-    ['沒有 push、也沒有打 tag。', 'push'],
-    // Data named as a kind of work, or a folder: no statement that this work changed no code.
-    ['這個看板只對只改資料的工作放行。commit 是 9638755，沒有 push。', 'push'],
-    ['只改資料夾結構，沒有 push。', 'push'],
-    ['放行的情況：回報裡宣告沒有改程式。commit 是 9638755，沒有 push。', 'push'],
+    // Still sitting here: as good as said to be left.
+    ['修正只在本機，沒有 push。', 'push'],
+    ['在那之前，修正放在本機，沒有 commit。', 'commit'],
+    ['改動只存在本機 repo，沒有推送到任何地方。', 'push'],
+    // Tagging is a release's.
+    ['2.4.2 還沒打標籤。', 'release'],
+    ['CI 通過後我會接著打標籤和部署。', 'release'],
   ]
   expect(left.filter(([text, want]) => kinds(text) !== want)).toEqual([])
+})
+
+test('a declared delivery decides the release; git decides commit and push', () => {
+  const idle = { id: 'x', title: 't', cwd: '', isRunning: false, lastActivityAt: new Date(NOW - 5 * 60000).toISOString(), isPinned: false, hasOpenPr: false }
+  const status = (text: string) => statusOf(idle, track('x', { lastAnswer: text }) as never, undefined, NOW)
+  const forms: [string, ReturnType<typeof declaredOf>][] = [
+    ['交付：不需要部署（只改測試檔）', 'none'],
+    ['**交付**：已部署 2.4.1', 'done'],
+    ['- 交付：待部署（等 PM 放行）', 'pending'],
+    ['交付：已部署 2.4.1；2.4.2 待部署', 'pending'],
+    ['Delivery: not needed', 'none'],
+    ['Delivery: deployed to production', 'done'],
+    ['Delivery: pending (waiting on the PM)', 'pending'],
+    ['交付：PR #12', null],
+    ['這次的交付很順利。', null],
+  ]
+  expect(forms.filter(([text, want]) => declaredOf(text) !== want)).toEqual([])
+
+  // The declaration stands over the words, either way; the last line stands.
+  expect(status('程式已推上 main。還沒部署到正式站。\n交付：不需要部署（只改測試檔）')).toBe('done')
+  expect(status('已推上 main，CI 通過。\n交付：待部署（等 PM 放行）')).toBe('unreleased')
+  expect(status('交付：待部署（等 PM 放行）\n…\n交付：已部署 2.4.1')).toBe('done')
+  // Where the words alone would say otherwise.
+  expect(status('2.4.2 還沒部署到正式站。\nDelivery: done')).toBe('done')
+  expect(status('All merged and tested.\nDelivery: pending (waiting on the PM)')).toBe('unreleased')
+  // A release only: commit and push are still git's.
+  const kept = 'commit 是 3fa1c2e，在本機。\n交付：不需要部署'
+  expect(leftOf(kept, { words: kept, sha: '3fa1c2e', isPushed: false, isOwn: true, checkedAt: NOW })).toEqual(['push'])
+
+  // Git settles commit and push however the words put it: a clean folder whose HEAD is on a remote branch.
+  const said = '還沒 commit，也還沒 push。'
+  expect(leftOf(said, undefined)).toEqual(['commit', 'push'])
+  expect(leftOf(said, { words: said, sha: '', isPushed: true, isClean: true, checkedAt: NOW })).toEqual([])
+  // A dirty folder settles nothing, and adds nothing the words did not say (a shared folder holds others' changes).
+  expect(leftOf(said, { words: said, sha: '', isPushed: false, isClean: false, checkedAt: NOW })).toEqual(['commit', 'push'])
+  expect(leftOf('已完成。', { words: '已完成。', sha: '', isPushed: false, isClean: false, checkedAt: NOW })).toEqual([])
+  // A hash named otherwise is not the words' own commit.
+  expect(ownCommitOf('以 3fa1c2e 為基準 cherry-pick，取代原本的 9b8c7d6。')).toBe(null)
+  expect(ownCommitOf('沒有另外 commit，改動併進 3fa1c2e。')).toBe('3fa1c2e')
+  expect(ownCommitOf('已在本機 main 提交為 **9b8c7d6**，沒有 push。')).toBe('9b8c7d6')
+  expect(ownCommitOf('2.4.2 已做好，只在本機提交（4028240），沒有推送。')).toBe('4028240')
+  expect(ownCommitOf('已在本機 main commit **3fa1c2e**。')).toBe('3fa1c2e')
 })
 
 test('a session whose words leave its work undelivered is not ended, however ticked its list', ZH, async ($, on) => {
@@ -1019,6 +1083,7 @@ test('a commit kept here until the PM confirms is undelivered until git shows it
   const clock = mock.clock(on, { now: NOW })
   world(on, 'local_pm', files, [], (argv, cwd) => {
     asked.push(`${argv.join(' ')} @ ${cwd}`)
+    if (argv[0] === 'git' && argv[1] === 'rev-parse') return { exitCode: 0, stdout: '9638755' }
 
     return argv[0] === 'git' && argv[1] === 'branch' ? { exitCode: 0, stdout: remotes } : null
   })
@@ -1604,4 +1669,22 @@ test("a resumed session draws its board at once, before the app's tools reach it
   expect(counts.calls.slice(asked)).toContain('list_sessions')
   // And it knows its transcript from now on.
   expect(JSON.parse(files.get(`${DIR}/transcripts.json`)!)).toEqual({ 'transcript-local_pm': 'local_pm' })
+})
+
+test('sessions of a project with a PM are asked to declare their delivery; other projects hear nothing', ZH, async ($, on) => {
+  const COMPOSE = { model: 'claude-opus-5-5', promptModel: 'claude-opus-5-5', surfaces: ['desktop'] as const, tools: [], outputStyle: null, traits: [] }
+  const files: Files = new Map()
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_open', files)
+  on('prompt.compose', () => ({ sections: [] }))
+  // No PM for this project yet: nothing is added.
+  expect((await $.prompt.compose(COMPOSE)).sections).toEqual([])
+
+  // Once the project has a PM, its other sessions are asked for one fixed line at their end.
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  await $.command.run({ command: 'board', args: '' } as never)
+  await clock.advance(31_000)
+  const sections = (await $.prompt.compose(COMPOSE)).sections
+  expect(sections.map(one => one.id)).toEqual(['project-pm:delivery'])
+  expect(sections[0]!.text).toMatch(/交付：不需要部署\n交付：已部署（版本或位置）\n交付：待部署（等什麼）/)
 })

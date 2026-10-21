@@ -361,16 +361,19 @@ export function openSteps(track: Track | undefined): Step[] {
 /** What delivering takes, as the words name it. */
 export type DeliveryKind = 'commit' | 'push' | 'release'
 
-const VERB = String.raw`commit(?:ted)?|push(?:ed)?|deploy(?:ed)?|release[sd]?|merge[sd]?|ship(?:ped)?|提交|推送|推上|發布|發佈|部署|上線|合併|交付|升版`
+const VERB = String.raw`commit(?:ted)?|push(?:ed)?|deploy(?:ed)?|release[sd]?|merge[sd]?|ship(?:ped)?|tagged|提交|推送|推上|發布|發佈|部署|上線|合併|交付|升版|打標籤|打\s?tag`
 /** A delivery verb, and those joined to it: 沒有 commit 或 push, not committed or pushed. */
 const VERBS = String.raw`(?:${VERB})(?![^\s，。,；;]{0,2}(?:設定|腳本|流程|文件|檔案|權限|環境|相關|說明|紀錄|動詞))(?:\s*(?:或|和|、|及|跟|與|並|再|也沒有?|/|／|,|and|or|nor)\s*(?:${VERB}))*`
 /** 尚未 commit, 還沒上線, 仍未 commit 或 push, 也沒有 push: the negation a few characters before the verb (a verb after 的 is a noun: 還沒公開的 commit). */
 const NOT_DONE = new RegExp(String.raw`(尚未|還沒有?|仍未|仍然沒有|並未|并未|沒有?|未)[^。，,；;：:\n]{0,4}?(?<!的\s*)(${VERBS})|\b(not(?: yet)?|haven't(?: yet)?|hasn't(?: yet)?|have not(?: yet)?|has not(?: yet)?|didn't|did not)\s+(?:been\s+)?(${VERBS})`, 'gi')
 /**
- * A negation that says the work is still to come (還沒, 尚未, 未, not yet): it always counts. A bare one (沒有 push,
- * didn't push) only says it was not done, which a report with no code to deliver may say of what was never needed.
+ * A negation that says the work is still to come (還沒, 尚未, 未, not yet, not pushed, haven't pushed): it counts. A
+ * bare one (沒有 push, 並未部署, didn't deploy) only says it was not done this time, as often because it was not
+ * needed (only tests changed, the project's rules ask no tag) as because it is left: it counts only in a sentence
+ * that waits on something. What is really left of commit and push git shows (PushCheck); of a release, the
+ * session's declaration (declaredOf).
  */
-const YET = /還|尚|仍|^未$|yet/i
+const YET = /還|尚|仍|^未$|yet|^not$|haven't|hasn't|have not|has not/i
 /**
  * Not needed: 不需要 push, 無需發布, 不用升版號, no need to push, nothing to commit. The kinds it names are settled,
  * like done ones (版號, 標籤 and tag are a release's).
@@ -380,18 +383,10 @@ const NO_NEED = new RegExp(
   'gi',
 )
 /**
- * The work has no code to deliver: 沒有改程式, 沒有程式變更, 無程式變更, 純資料修正, no code changes. Anywhere in the
- * report, it lets a bare negation of commit, push or release with nothing else as its subject (也沒有 push) go.
+ * The work still sits here: 只在本機, 還在本機, 留在本機, 放在本機, only locally. Said of it, 沒有 push and 沒有 commit
+ * say it is left, as a wait does.
  */
-const NO_CODE =
-  /沒有?(?:修?改|動|變更|修改)(?:任何)?(?:程式|code)|(?:沒有|無|未有)(?:任何)?程式(?:碼)?(?:變更|修改|異動|改動)|純資料(?:修正|修改|變更|操作|更新)|只(?:改|動|修正)了?(?:正式)?資料(?![夾表庫檔結])|\bno code (?:changes?|change was made)|\b(?:didn't|did not) (?:change|touch) (?:any )?code|\bdata[- ]only (?:fix|change|update)/gi
-/** What follows a no-code phrase when it names a kind of work rather than this one: 只改資料的工作, 沒有程式變更的任務. */
-const OF_A_KIND = /^[^，,。；;\n]*的(?:工作|任務|情況|案例|Session|事)/
-
-/** The report says this work changed no code: a no-code phrase that is a statement, not a kind of work named. */
-function hasNoCode(text: string): boolean {
-  return [...text.matchAll(NO_CODE)].some(m => !OF_A_KIND.test(text.slice((m.index ?? 0) + m[0].length)))
-}
+const STILL_LOCAL = /(?:還|仍|只|都只|僅)(?:存|留|放)?在[^，。,；;\n]{0,10}?(?:本機|本地)|(?:留|放)在本機|\bonly (?:on this machine|locally)\b|\bstill local\b|\blocal only\b/i
 /** The work waits on something before it is done: 等 PM 確認, 確認後再推, pending, until. A bare negation then counts. */
 const WAITING_TONE = /等(?!於)|待(?!發布|處理事項)|之後(?:再|才)|稍後|晚點|once\b|\buntil\b|\bpending\b|\bwaiting\b|\bafter (?:the )?(?:PM|review|approval|go-ahead)/i
 /**
@@ -461,8 +456,6 @@ const MANNER =
 const COMMITTED =
   /\bcommit\s*(?:是|為|:|：)\s*`?[0-9a-f]{7,40}\b|\bamend(?:ed)?\s*(?:成|為|到|into|to|as)?\s*`?[0-9a-f]{7,40}\b|(?:併進|併入|合進|合入)\s*`?[0-9a-f]{7,40}\b|\bcommitted\s+(?:it\s+)?(?:as\s+|to\s+|in\s+)?`?[0-9a-f]{7,40}\b/gi
 
-/** What may stand before a bare negation for it to be the report's own, with no other subject: 也沒有 push, 我也沒有 push. */
-const BARE_PREFIX = /^[\s,，、]*(?:(?:我們|我|也|都|並|而且|且|另外|同時|所以|因此|則|就|then|and|also|so|I|we)[\s,，、]*)*$/i
 /** 已推上 main, 已部署, 部署完成, 上線了, pushed to main: the same kinds done, which a later word may say. */
 const DONE = new RegExp(String.raw`(?:已經?|都已|也已|皆已|完成(?!後))[^。，,；;：:\n]{0,4}?(${VERBS})|(${VERB})(?:完成|好了|成功|了)|\b(?:I|we|it|was|were|is|has been|have been)\s+(committed|pushed|deployed|released|merged|shipped)\b`, 'gi')
 /**
@@ -511,10 +504,23 @@ function isJudging(sentence: string): boolean {
 /** What a possessive (X 的未提交修改) may name and still be this session's own: 我, this turn, now, here. */
 const OWN = /我|自己|本次|這次|這個 ?Session|這邊|目前|現在|本機|本地|手上|剩下|剩餘|\bmy\b|\bour\b|this session/i
 
+/**
+ * The commit the words name as theirs: commit 是 3fa1c2e, 本機 commit **3fa1c2e**, 提交為 3fa1c2e, 本機提交（3fa1c2e）,
+ * amend 成 3fa1c2e, 併進 3fa1c2e, committed as 3fa1c2e. Not a hash named otherwise (以 3fa1c2e 為基準, 取代原本的 9b8c7d6).
+ */
+const OWN_COMMIT =
+  /(?:\bcommit(?:ted)?|提交)\s*(?:是|為|成|:|：|hash|as|to|in)?\s*[（(]?\s*[`*]*([0-9a-f]{7,40})\b|\bamend(?:ed)?\s*(?:成|為|到|into|to|as)?\s*[`*]*([0-9a-f]{7,40})\b|(?:併進|併入|合進|合入)\s*[`*]*([0-9a-f]{7,40})\b/i
+
+export function ownCommitOf(text: string): string | null {
+  const m = OWN_COMMIT.exec(text)
+
+  return (m?.[1] ?? m?.[2] ?? m?.[3])?.toLowerCase() ?? null
+}
+
 /** The commit the words name: the hash after "commit", else the first one that is not part of an id (local_…-9e0f1a2b3c4d). */
 function commitOf(text: string): string | null {
-  const named = /\bcommit\s*(?:是|為|:|：|hash)?\s*`?([0-9a-f]{7,40})\b/i.exec(text)?.[1]
-  if (named) return named.toLowerCase()
+  const named = ownCommitOf(text)
+  if (named) return named
   const any = [...text.matchAll(/(?<![0-9a-z_-])[0-9a-f]{7,40}(?![0-9a-z_-])/gi)].map(m => m[0]).find(w => /\d/.test(w) && /[a-f]/i.test(w))
 
   return any?.toLowerCase() ?? null
@@ -543,14 +549,14 @@ export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: strin
   // Rules, examples, quotes, someone else's work and what a clause disowns are gone (reportedText) before
   // anything is read: of what is left, a kind's last word stands.
   const plain = reportedText(text.replace(NOTHING_LEFT, ''))
-  const isNoCode = hasNoCode(plain)
   // Sentences with what ends them: a question mark makes the sentence a question to the person.
   const pieces = plain.split(/([。！？!?；;\n]+|\.\s+)/)
   for (let p = 0; p < pieces.length; p += 2) {
     const whole = pieces[p]!
     const isQuestion = /[?？]/.test(pieces[p + 1] ?? '')
-    // A wait anywhere in the sentence (沒有 push，等 PM 確認) keeps its bare negations: the work is still to come.
-    const isWaiting = WAITING_TONE.test(whole)
+    // A wait anywhere in the sentence (沒有 push，等 PM 確認), or work still sitting here (只在本機，沒有 push), keeps
+    // its bare negations: the work is still to come.
+    const isWaiting = WAITING_TONE.test(whole) || STILL_LOCAL.test(whole)
     for (const sentence of whole.split(/[，,]+/)) {
       if (!sentence.trim()) continue
       const said: { at: number; kind: DeliveryKind; isLeft: boolean }[] = []
@@ -559,15 +565,13 @@ export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: strin
         const before = sentence.slice(0, m.index ?? 0)
         const owner = /([^\s，,。]+(?:\s+[^\s，,。]+)?)\s*的\s*$/.exec(before)?.[1]
         if (owner && !OWN.test(owner)) continue
-        // 沒有改程式，也沒有 push: nothing was there to push. Not 還沒 push (or "not pushed yet"), not 設定檔沒有 commit,
-        // not while it waits.
         // 沒有另開 commit, 沒有新增 commit, 沒有用 force push: how it was done, not that it was not.
         const negation = m[1] ?? m[3] ?? ''
         const verbs = m[2] ?? m[4] ?? ''
         if (MANNER.test(m[0].slice(negation.length, m[0].length - verbs.length))) continue
+        // 沒有打標籤也沒有部署: not done this time, not said to be left (YET). Unless the sentence waits on something.
         const isYet = YET.test(negation) || /^\s*yet\b/i.test(sentence.slice((m.index ?? 0) + m[0].length))
-        // The no-code statement itself may stand just before it (沒有改程式、沒有 push): it is no other subject.
-        if (isNoCode && !isYet && !isWaiting && BARE_PREFIX.test(before.replace(new RegExp(NO_CODE.source, 'gi'), ''))) continue
+        if (!isYet && !isWaiting) continue
         for (const kind of verbsIn(m[2] ?? m[4] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: true })
       }
       for (const m of sentence.matchAll(DONE)) for (const kind of verbsIn(m[1] ?? m[2] ?? m[3] ?? '')) said.push({ at: m.index ?? 0, kind, isLeft: false })
@@ -603,13 +607,48 @@ export function undeliveredOf(text: string): { kinds: DeliveryKind[]; sha: strin
   return kinds.length ? { kinds, sha: commitOf(text) } : null
 }
 
-/** The words leave work undelivered, and git has not shown the one push they left to be done since. */
-function isUndelivered(text: string, push: PushCheck | undefined): boolean {
-  const left = undeliveredOf(text)
-  if (!left) return false
-  const isOnlyPush = left.kinds.length === 1 && left.kinds[0] === 'push'
+/**
+ * The delivery a session declares, one line in the form the mod asks of the sessions of a project with a PM
+ * (role.delivery): 交付：不需要部署, 交付：已部署 2.4.1, 交付：待部署（等 PM 放行）; Delivery: not needed, deployed,
+ * pending (waiting on …). `pending` when the line says anything is still to deploy, else `none` or `done` by how it
+ * starts; null with no such line, or one that says none of these. The last line stands.
+ */
+const DECLARED = /^[\s>*_•-]*(?:\*\*)?(?:交付|Delivery)(?:\*\*)?\s*[:：]\s*(?:\*\*)?(.+)$/gim
 
-  return !(isOnlyPush && push?.words === text && push.isPushed)
+export function declaredOf(text: string): 'none' | 'done' | 'pending' | null {
+  let value: string | null = null
+  for (const m of text.matchAll(DECLARED)) value = m[1]!
+  if (value === null) return null
+  if (/待(?:部署|發布|發佈|上線)|還要(?:部署|發布|上線)|尚未(?:部署|發布|上線)|^\s*(?:待|等)|\bpending\b|\bwaiting\b|\bnot yet\b/i.test(value)) return 'pending'
+  if (/^\s*(?:不需要?|不必|不用|無需|無須|毋需|免)|^\s*(?:none|not needed|no (?:deploy|release)|n\/a)\b/i.test(value)) return 'none'
+  if (/^\s*(?:已|完成)|^\s*(?:done|deployed|released|shipped|live)\b/i.test(value)) return 'done'
+
+  return null
+}
+
+/**
+ * What a session has left to deliver, facts first. Commit and push: git's answer for these words (PushCheck), when
+ * there is one: a clean folder has nothing left to commit; the commit the words name, or a clean folder's HEAD, on a
+ * remote branch has nothing left to push; the words' own commit (ownCommitOf) on none has its push left. A release (tag, deploy): the session's declaration, when it made one.
+ * Otherwise the words (undeliveredOf), which count only work said to be left.
+ */
+export function leftOf(text: string, push: PushCheck | undefined): DeliveryKind[] {
+  const kinds = new Set(undeliveredOf(text)?.kinds ?? [])
+  const declared = declaredOf(text)
+  if (declared === 'pending') kinds.add('release')
+  else if (declared) kinds.delete('release')
+  if (push?.words === text) {
+    // The words' own commit, in this repository and on no remote branch: not pushed, whatever the words say.
+    if (push.isOwn && !push.isPushed) kinds.add('push')
+    if (push.isPushed) kinds.delete('push')
+    if (push.isClean) kinds.delete('commit')
+  }
+
+  return (['commit', 'push', 'release'] as const).filter(kind => kinds.has(kind))
+}
+
+function isUndelivered(text: string, push: PushCheck | undefined): boolean {
+  return leftOf(text, push).length > 0
 }
 
 /** Runs git with these arguments in the session's folder: its standard output, or null when it failed. */
@@ -711,7 +750,7 @@ export function caveatOf(track: Track | undefined, push?: PushCheck): string | n
   if (!recap) return null
   if (CAVEAT.test(reportedText(recap.replace(NOTHING_LEFT, '')))) return recap
 
-  return undeliveredOf(recap) && isUndelivered(latestWords(track), push) ? recap : null
+  return leftOf(recap, push).length > 0 && isUndelivered(latestWords(track), push) ? recap : null
 }
 
 /**
@@ -918,7 +957,7 @@ export function boardText(input: BoardInput): string {
     if (r.status === 'ci') attention.push(t('board.attention.ci', { name, said: clip(ciWords(r.track, r.word), 200) }))
     if (r.status === 'unreleased') {
       const words = ciWords(r.track, r.word)
-      attention.push(t('board.attention.unreleased', { name, kinds: deliveryText(undeliveredOf(words)?.kinds ?? []), said: clip(words, 200) }))
+      attention.push(t('board.attention.unreleased', { name, kinds: deliveryText(leftOf(words, push[r.one.id])), said: clip(words, 200) }))
     }
     if (r.status === 'failed') {
       const target = ci[r.one.id]?.target || t('board.attention.failedTarget')

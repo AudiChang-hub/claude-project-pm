@@ -51,12 +51,18 @@ export type Track = {
   isBoardOpen?: boolean
 }
 
-/** Whether the commit a session's words left unpushed has reached a remote branch since (`git branch -r --contains`). */
+/** What git says of the commit and push a session's words leave: facts stand over words (leftOf). */
 export type PushCheck = {
   /** The words it was checked for: other words check again. */
   words: string
+  /** The commit the words name, or empty when the folder's HEAD was asked about. */
   sha: string
+  /** The named commit, or a clean folder's HEAD, is on a remote branch: nothing left to push. */
   isPushed: boolean
+  /** The folder has no uncommitted changes (`git status --porcelain` empty): nothing left to commit. */
+  isClean?: boolean
+  /** `sha` is the words' own commit (commit 是 …) and is in this repository: on no remote branch, its push is left. */
+  isOwn?: boolean
   checkedAt: number
 }
 
