@@ -7,6 +7,11 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-06
+
+### Fixed
+- A session logged that it could not tell the PM although the PM had taken the update in. The desktop app answers a delivery the receiver consumed (`session.receive`) with "did not accept it", which the sender read as a failure; that answer now counts as the update arriving. Checked in the desktop app: the PM's board ran a round 113 ms after the update arrived, with no turn and nothing in its transcript.
+
 ## [0.6.0] - 2026-11-06
 
 ### Added

@@ -216,7 +216,9 @@ export async function notifyPm($: EngineInterface) {
   if (!inbox.isOpen) return
   try {
     const sent = await $.session.send({ to: pmId, text: `${UPDATE_MARK} ${JSON.stringify({ id: self.id })}` })
-    if (!sent.isDelivered) throw new Error(sent.reason)
+    // A PM whose mod took the update in (session.receive `consumed`) reads to the sender as "did not accept it":
+    // that is the update arriving, not a failure.
+    if (!sent.isDelivered && !/did not accept/i.test(sent.reason)) throw new Error(sent.reason)
     notifyFailedFor.delete(pmId)
   } catch (err) {
     if (!notifyFailedFor.has(pmId)) $.ui.log(t('log.notifyFailed', { reason: reason(err) }))
