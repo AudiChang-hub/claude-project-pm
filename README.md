@@ -120,7 +120,7 @@ A project is the folder a session works in; a git worktree under `.claude/worktr
 ## Requirements
 
 - **Claude Code desktop app, Code tab.** The PM uses the app's built-in session tools (`ccd_session_mgmt` to list, read and archive sessions; `ccd_session` to start the PM session), and sessions report their task lists through the app's `update_plan` and `wrap_up`. Sessions that keep their tasks with `TodoWrite` instead are tracked as well.
-- **A Claude Code version that supports function-hook mods.** Tested with 2.1.299.
+- **A Claude Code version that supports function-hook mods.** Tested with 2.1.317.
 - **Optional: the [GitHub CLI](https://cli.github.com/) (`gh`), signed in,** to check CI on GitHub. Without it, CI status is judged from what the sessions said.
 - In an organization that manages Claude Code, the PM's role instructions (a `prompt.compose` hook) only apply when the organization lists this plugin in its managed settings. The board and the ledger work either way.
 

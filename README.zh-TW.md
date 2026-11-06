@@ -120,7 +120,7 @@ PM 有兩個專屬工具（不需要你自己呼叫）：
 ## 需求
 
 - **Claude Code 桌面版的 Code 分頁。** PM 會用到桌面版內建的 Session 工具（`ccd_session_mgmt` 列出、讀取與封存 Session；`ccd_session` 建立 PM Session），各 Session 也是透過桌面版的 `update_plan` 與 `wrap_up` 回報任務清單。改用 `TodoWrite` 管理任務的 Session 也會追蹤。
-- **支援 function hooks Mod 的 Claude Code。** 已在 2.1.299 測試。
+- **支援 function hooks Mod 的 Claude Code。** 已在 2.1.317 測試。
 - **選用：已登入的 [GitHub CLI](https://cli.github.com/)（`gh`）**，用來向 GitHub 確認 CI。沒有的話，CI 狀態依 Session 的回報文字判斷。
 - 由組織統一管理 Claude Code 的環境中，PM 的角色指示（`prompt.compose` hook）只有在組織把此 Plugin 列入 managed settings 時才會生效；看板與工作項目不受影響。
 
