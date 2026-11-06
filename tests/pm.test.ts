@@ -5,6 +5,7 @@ import { applyPlan, betterCi, caveatOf, ciTarget, ciTargets, ciVerdict, declared
 import { closesBoard } from '../hooks/actions'
 import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hooks/messages'
 import type { Lang, MessageKey } from '../hooks/messages'
+import { installOf, isReplaced } from '../hooks/update'
 
 const NOW = Date.parse('2026-10-17T12:00:00.000Z')
 /** The tests that read the mod's words read them in Traditional Chinese, whatever the machine's language. */
@@ -1687,4 +1688,30 @@ test('sessions of a project with a PM are asked to declare their delivery; other
   const sections = (await $.prompt.compose(COMPOSE)).sections
   expect(sections.map(one => one.id)).toEqual(['project-pm:delivery'])
   expect(sections[0]!.text).toMatch(/交付：不需要部署\n交付：已部署（版本或位置）\n交付：待部署（等什麼）/)
+})
+
+test('a session running an older copy than the installed one reloads, and only then', () => {
+  const root = String.raw`C:\Users\dev\.claude\plugins\cache\acme-mods\project-pm\0.5.1`
+  const listing = (path: string) => ({
+    version: 2,
+    plugins: {
+      'project-pm@acme-mods': [{ scope: 'user', installPath: path, version: path.split(/[\\/]/).at(-1) }],
+      'project-pm@other-market': [{ scope: 'user', installPath: String.raw`C:\elsewhere\project-pm\9.9.9`, version: '9.9.9' }],
+    },
+  })
+
+  // The same copy: nothing to do.
+  expect(isReplaced(installOf(listing(root), 'project-pm', root), root)).toBe(false)
+  // A newer copy of the same marketplace's plugin: reload.
+  const newer = installOf(listing(String.raw`C:\Users\dev\.claude\plugins\cache\acme-mods\project-pm\0.6.0`), 'project-pm', root)
+  expect(isReplaced(newer, root)).toBe(true)
+  expect(newer?.version).toBe('0.6.0')
+  // A copy run from a mods folder or --plugin-dir is never replaced by an install.
+  expect(installOf(listing(root), 'project-pm', String.raw`C:\Users\dev\.claude\local-mods\project-pm`)).toBe(null)
+  // The same version installed again into the same folder: reload once it was updated since this copy saw it.
+  const again = { plugins: { 'project-pm@acme-mods': [{ scope: 'user', installPath: root, lastUpdated: '2026-11-06T09:00:00.000Z' }] } }
+  expect(isReplaced(installOf(again, 'project-pm', root), root, '2026-11-06T09:00:00.000Z')).toBe(false)
+  expect(isReplaced(installOf(again, 'project-pm', root), root, '2026-10-20T02:27:00.000Z')).toBe(true)
+  // Uninstalled: nothing to reload into.
+  expect(isReplaced(installOf({ plugins: {} }, 'project-pm', root), root)).toBe(false)
 })

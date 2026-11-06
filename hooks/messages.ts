@@ -120,6 +120,7 @@ const zhTW = {
   'lang.set': '看板語言已設為 {lang}。',
   'lang.setAuto': '看板語言改為跟隨系統（目前：{lang}）。',
   'lang.notSaved': '看板語言已在這個 Session 改為 {lang}，但無法存進設定（{reason}）；下次啟動會恢復原設定。',
+  'update.reloading': 'project-pm 已更新到 {version}，Session 閒置時自動重新載入。',
   'lang.usage': '用法：/pm lang en、/pm lang zh-TW 或 /pm lang auto（跟隨系統）。目前：{lang}。',
 
   // The board as the PM model reads it.
@@ -369,6 +370,7 @@ Write pending only when the change needs releasing and has not gone out yet. Com
   'lang.set': 'The board now speaks {lang}.',
   'lang.setAuto': 'The board now follows the system language (currently {lang}).',
   'lang.notSaved': 'The board speaks {lang} in this session, but the setting could not be saved ({reason}); the next start goes back to the saved one.',
+  'update.reloading': 'project-pm was updated to {version}; reloading once this session is idle.',
   'lang.usage': 'Usage: /pm lang en, /pm lang zh-TW or /pm lang auto (follow the system). Now: {lang}.',
 
   'board.cannotRead': 'Could not read the session list: {error}',

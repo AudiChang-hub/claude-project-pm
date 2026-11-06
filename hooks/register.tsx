@@ -34,6 +34,7 @@ import {
   textOf,
 } from './actions'
 import { getLang, resolveLang, setLang, systemLocale, t } from './messages'
+import { reloadIfUpdated } from './update'
 import { renderBand, renderPane } from './view'
 
 // The engine reads each module's state refs from its own source: these name the same values as the other modules'.
@@ -105,8 +106,10 @@ async function start($: EngineInterface) {
   // A round still running when its copy of the module goes (a reload) has nowhere left to report.
   $.clock.every(POLL_MS, () => void keepBoard($, 'poll')
     .then(() => refresh($))
+    .then(() => reloadIfUpdated($))
     .catch(() => undefined))
   refreshSoon($, 300)
+  $.clock.after(1_000, () => void reloadIfUpdated($).catch(() => undefined))
 }
 
 // ── Hooks ──
