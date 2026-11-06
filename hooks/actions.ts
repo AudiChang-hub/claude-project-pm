@@ -32,6 +32,7 @@ import {
   projectKey,
   projectName,
   projectPath,
+  reportOf,
   statusOf,
   undeliveredOf,
 } from './sessions'
@@ -161,8 +162,108 @@ async function loadMine($: EngineInterface, id: string, title: string, cwd: stri
   if (mine?.id === id) return
   const kept = await readJson<Track>($, `${await dataDir($)}/sessions/${id}.json`)
   const base = kept ?? { id, title, cwd, plan: [], recap: null, ask: null, lastPrompt: '', lastAnswer: '', turnAt: 0, planAt: 0 }
-  mine = { ...base, title: title || base.title, cwd: cwd || base.cwd }
+  // `inbox`: this copy takes in update messages (session.receive), so other sessions may send it them.
+  mine = { ...base, title: title || base.title, cwd: cwd || base.cwd, inbox: INBOX_VERSION }
   await saveMine($)
+}
+
+// ── Sessions tell the PM at once (session.send), the PM takes it in without a turn (session.receive) ──
+
+/** The version of the update message: a PM whose track says less than this does not take it in, and is not sent it. */
+export const INBOX_VERSION = 1
+/** Opens an update message: `[project-pm:update] {"id":"local_…"}`. */
+export const UPDATE_MARK = '[project-pm:update]'
+
+/** The session an update message is about, or null when the text is no update message. */
+export function updateOf(text: string): string | null {
+  const at = text.indexOf(UPDATE_MARK)
+  if (at < 0) return null
+  const json = /\{[^{}]*\}/.exec(text.slice(at + UPDATE_MARK.length))?.[0]
+  try {
+    const id = json ? (JSON.parse(json) as { id?: unknown }).id : undefined
+
+    return typeof id === 'string' && /^local_[\w-]+$/.test(id) ? id : null
+  } catch {
+    return null
+  }
+}
+
+/** Whether a PM takes in update messages, as its own track says; asked again after INBOX_RECHECK_MS. */
+const inboxOf = new Map<string, { isOpen: boolean; at: number }>()
+const INBOX_RECHECK_MS = 5 * 60_000
+/** A failed send is logged once per PM. */
+const notifyFailedFor = new Set<string>()
+
+/**
+ * Tells this project's PM that this session's track changed, so its board is redrawn now rather than at its next
+ * poll. Only to a PM whose mod takes the message in without a turn (its track's `inbox`); never from the PM itself, a
+ * scratch folder or a project without a PM. The track itself is already on disk: the message only names the session.
+ */
+export async function notifyPm($: EngineInterface) {
+  const self = await read($, me)
+  const own = getMine()
+  if (!self?.id || !own || self.isPm || self.isScratch) return
+  const project = (await read($, projects))[self.projectKey] ?? (await loadProject($, self.projectKey, self.projectName, self.projectPath))
+  const pmId = project.pmId
+  if (!pmId || pmId === self.id || project.isDismissed) return
+  const now = await $.clock.now()
+  let inbox = inboxOf.get(pmId)
+  if (!inbox || now - inbox.at >= INBOX_RECHECK_MS) {
+    const pm = await readJson<Track>($, `${await dataDir($)}/sessions/${pmId}.json`)
+    inbox = { isOpen: (pm?.inbox ?? 0) >= INBOX_VERSION, at: now }
+    inboxOf.set(pmId, inbox)
+  }
+  if (!inbox.isOpen) return
+  try {
+    const sent = await $.session.send({ to: pmId, text: `${UPDATE_MARK} ${JSON.stringify({ id: self.id })}` })
+    if (!sent.isDelivered) throw new Error(sent.reason)
+    notifyFailedFor.delete(pmId)
+  } catch (err) {
+    if (!notifyFailedFor.has(pmId)) $.ui.log(t('log.notifyFailed', { reason: reason(err) }))
+    notifyFailedFor.add(pmId)
+  }
+}
+
+// ── The report tool, for the sessions of a project with a PM ──
+
+export const REPORT_TOOL = 'mcp__project-pm__report'
+
+/** Whether this session is asked to report: a session of a project with a PM, not the PM itself. */
+export async function isReporter($: EngineInterface): Promise<boolean> {
+  return (await deliveryAsk($)) !== null
+}
+
+export async function registerReportTool($: EngineInterface) {
+  await $.tool.register({
+    name: 'report',
+    description: t('tool.report.description'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['done', 'in_progress', 'blocked', 'waiting_user', 'waiting_ci', 'waiting_release'], description: t('tool.report.status') },
+        summary: { type: 'string', description: t('tool.report.summary') },
+        delivery: { type: 'string', enum: ['not_needed', 'released', 'pending'], description: t('tool.report.delivery') },
+        commit: { type: 'string', description: t('tool.report.commit') },
+        ci: { type: 'string', description: t('tool.report.ci') },
+        next: { type: 'string', description: t('tool.report.next') },
+      },
+      required: ['status', 'summary'],
+    },
+    isDeferred: false,
+  })
+}
+
+/** Serves the report tool: keeps the report in this session's track and tells the PM. */
+export async function report($: EngineInterface, input: Record<string, unknown>): Promise<string> {
+  await identify($)
+  if (!(await isReporter($))) return t('report.noProject')
+  const made = reportOf(input)
+  if (!made) return t('report.badStatus')
+  const now = await $.clock.now()
+  await changeMine($, track => ({ ...track, report: made, reportAt: now }))
+  await notifyPm($)
+
+  return t('report.saved', { status: made.status })
 }
 
 export async function identify($: EngineInterface): Promise<Me | null> {
@@ -688,7 +789,7 @@ export async function deliveryAsk($: EngineInterface): Promise<string | null> {
   const project = (await read($, projects))[self.projectKey]
   if (!project?.pmId || project.isDismissed) return null
 
-  return t('role.delivery', { project: self.projectName })
+  return t('role.delivery', { project: self.projectName, tool: REPORT_TOOL })
 }
 
 /**
@@ -698,9 +799,16 @@ export async function deliveryAsk($: EngineInterface): Promise<string | null> {
  */
 export async function ensureTools($: EngineInterface) {
   const self = await read($, me)
-  if (!self?.isPm) return
+  const isPm = !!self?.isPm
+  // The other sessions of a project with a PM get the report tool; the PM gets its board and ledger.
+  if (!isPm && !(await isReporter($))) return
   try {
     const names = new Set((await $.tool.list()).map(tool => tool.name))
+    if (!isPm) {
+      if (!names.has(REPORT_TOOL)) await registerReportTool($)
+
+      return
+    }
     if (names.has(BOARD_TOOL) && names.has(LEDGER_TOOL)) return
     await registerTools($)
   } catch (err) {

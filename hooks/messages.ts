@@ -70,11 +70,11 @@ const zhTW = {
 7. 子 Session 在等使用者回覆時，把它的問題原文轉述給使用者，使用者回答後用 SendMessage 轉達回去。
 8. 封存 Session 前先確認它沒有未完成步驟、沒有開著的 PR，並問過使用者。
 9. 提到 Session 時用 [標題](#local_…) 連結它。`,
-  'role.delivery': `「{project}」有 PM Session 在追蹤各 Session 的交付狀態。完成一項改動程式或資料的工作、收尾時，請在 wrap_up 摘要（沒有 wrap_up 時就是最後的回答）最後加一行交付宣告，三選一：
+  'role.delivery': `「{project}」有 PM Session 在追蹤各 Session 的狀態。完成、暫停或卡住一項工作時（收尾、wrap_up 之前），請呼叫 {tool} 回報一次：status 寫現在的狀態，summary 用一句話說做了什麼、還差什麼；有 commit 就填 commit，CI 還在跑就填 ci（run 網址或 id），需要發布的就填 delivery。回報是給 PM 看板用的，不需要向使用者解釋。
+無法呼叫 {tool} 時，改在 wrap_up 摘要（沒有 wrap_up 時就是最後的回答）最後加一行交付宣告，三選一：
 交付：不需要部署
 交付：已部署（版本或位置）
-交付：待部署（等什麼）
-只有改動需要發布、但還沒發布時才寫「待部署」。commit 和 push 由 git 判斷，不用寫在這行；這行是給 PM 看板用的，不需要向使用者解釋。`,
+交付：待部署（等什麼）`,
   'role.justClaimed': '使用者剛用 /pm 把這個 Session 設成 PM。先呼叫 {board}，用幾句話報告專案現況：哪些 Session 在等使用者回覆、哪些停下但還有步驟、工作項目有沒有沒完成的。',
 
   // The PM's tools.
@@ -89,6 +89,17 @@ const zhTW = {
   'tool.ledger.owner': '負責的 Session id（local_…）；空字串表示取消指派',
   'tool.ledger.note': '備註：進度、驗收結果、為什麼放棄',
   'tool.ledger.force': '負責 Session 仍在等 CI 或未完成時，強制結案。只有使用者明確確認時才能用，且 note 必填。',
+  'tool.report.description': '向這個專案的 PM 回報你目前的工作狀態。完成、暫停、卡住或交給背景作業時都要呼叫一次；PM 看板以這份回報為準，不再從你的文字猜。',
+  'tool.report.status': 'done：做完了（需要發布的已發布或不需要發布）；in_progress：還在做但這回合先停；blocked：卡住，需要別人處理；waiting_user：在等使用者回覆或決定；waiting_ci：等 CI 跑完；waiting_release：做完了但還沒發布或部署。',
+  'tool.report.summary': '一句話：做了什麼、還差什麼。',
+  'tool.report.delivery': 'not_needed：不需要發布；released：已發布或部署；pending：還要發布或部署。',
+  'tool.report.commit': '這次工作的 commit SHA（有 commit 時填）。',
+  'tool.report.ci': '還在跑的 CI：GitHub Actions run 的網址或 id。',
+  'tool.report.next': '下一步或在等什麼（選填）。',
+  'report.saved': '已回報給 PM：{status}。',
+  'report.badStatus': 'status 要是 done、in_progress、blocked、waiting_user、waiting_ci 或 waiting_release。',
+  'report.noProject': '這個 Session 所在的專案沒有 PM，不需要回報。',
+  'log.notifyFailed': 'project-pm：無法直接通知 PM（{reason}），PM 會在下次輪詢時讀到。',
 
   // Becoming the PM, stepping down, starting a PM session, archiving.
   'claim.noId': '無法取得此 Session 的 id（可能不在桌面版中），無法擔任 PM。',
@@ -158,6 +169,8 @@ const zhTW = {
   'board.tasks': '任務 {done}/{total}：{steps}',
   'board.prompt': '最新指令：{text}',
   'board.recap': '收尾摘要：{text}',
+  'board.report': '回報：[{status}] {summary}{next}',
+  'board.reportNext': '；下一步：{next}',
   'board.answer': '最後回報：{text}',
   'board.ask': '待決策問題：{text}',
   'board.background': '背景工作 {n} 項執行中：{tasks}',
@@ -323,11 +336,11 @@ Rules:
 7. When a sub-session is waiting on the user, pass its question on word for word, then relay the user's answer back with SendMessage.
 8. Before archiving a session, make sure it has no steps left and no open PR, and ask the user.
 9. When you mention a session, link it as [title](#local_…).`,
-  'role.delivery': `"{project}" has a PM session tracking each session's delivery. When you finish a piece of work that changed code or data, end your wrap_up recap (or, without wrap_up, your final answer) with one delivery line, one of:
+  'role.delivery': `"{project}" has a PM session tracking each session's state. When you finish, pause or get stuck on a piece of work (at the end, before wrap_up), call {tool} once: status is where it stands now, summary one sentence on what was done and what is left; fill commit when you committed, ci (the run URL or id) while CI is still running, and delivery when the work needs releasing. The report is for the PM's board; there is no need to explain it to the user.
+When you cannot call {tool}, end your wrap_up recap (or, without wrap_up, your final answer) with one delivery line instead, one of:
 Delivery: not needed
 Delivery: deployed (version or where)
-Delivery: pending (what it waits on)
-Write pending only when the change needs releasing and has not gone out yet. Commit and push are read from git, not from this line. The line is for the PM's board: no need to explain it to the user.`,
+Delivery: pending (what it waits on)`,
   'role.justClaimed': 'The user just made this session the PM with /pm. Call {board} first, then report the state of the project in a few sentences: which sessions are waiting on the user, which stopped with steps left, and whether any work item is still open.',
 
   'tool.board.description':
@@ -341,6 +354,17 @@ Write pending only when the change needs releasing and has not gone out yet. Com
   'tool.ledger.owner': 'The owning session id (local_…); an empty string unassigns it',
   'tool.ledger.note': 'A note: progress, how it was checked, why it was dropped',
   'tool.ledger.force': 'Close the item although its owner is still waiting on CI or unfinished. Only when the user has explicitly confirmed it; note is then required.',
+  'tool.report.description': 'Report where your work stands to this project\'s PM. Call it once whenever you finish, pause, get stuck or hand work to the background; the PM\'s board goes by this report rather than guessing from your words.',
+  'tool.report.status': 'done: finished (released, or nothing to release); in_progress: still working but stopping this turn; blocked: stuck, someone else must act; waiting_user: waiting on the user\'s answer or decision; waiting_ci: waiting for CI to finish; waiting_release: finished but not yet released or deployed.',
+  'tool.report.summary': 'One sentence: what was done and what is left.',
+  'tool.report.delivery': 'not_needed: nothing to release; released: released or deployed; pending: still to release or deploy.',
+  'tool.report.commit': 'The commit SHA of this work, when you committed.',
+  'tool.report.ci': 'The CI still running: a GitHub Actions run URL or id.',
+  'tool.report.next': 'The next step or what it waits on (optional).',
+  'report.saved': 'Reported to the PM: {status}.',
+  'report.badStatus': 'status must be done, in_progress, blocked, waiting_user, waiting_ci or waiting_release.',
+  'report.noProject': 'This session\'s project has no PM: nothing to report.',
+  'log.notifyFailed': 'project-pm: could not tell the PM directly ({reason}); it will read the update on its next poll.',
 
   'claim.noId': "This session's id is not available (perhaps it is not in the desktop app), so it cannot be the PM.",
   'claim.scratch': 'This session is in a scratch folder and belongs to no project, so it cannot be the PM.',
@@ -407,6 +431,8 @@ Write pending only when the change needs releasing and has not gone out yet. Com
   'board.tasks': 'Tasks {done}/{total}: {steps}',
   'board.prompt': 'Latest instruction: {text}',
   'board.recap': 'Recap: {text}',
+  'board.report': 'Report: [{status}] {summary}{next}',
+  'board.reportNext': '; next: {next}',
   'board.answer': 'Last report: {text}',
   'board.ask': 'Question to decide: {text}',
   'board.background': '{n} background {n|command|commands} running: {tasks}',

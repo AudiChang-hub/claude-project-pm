@@ -1,7 +1,7 @@
 // Reading sessions into a project's board: who is working, who waits on you,
 // who stopped with steps left, and what the PM was asked to keep track of.
 
-import type { BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, PushCheck, Session, Step, Track } from '../types'
+import type { BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, PushCheck, Report, ReportStatus, Session, Step, Track } from '../types'
 import { t } from './messages'
 
 export type Status = 'running' | 'asking' | 'failed' | 'open' | 'unreleased' | 'ci' | 'waiting' | 'done' | 'stale'
@@ -168,8 +168,52 @@ export function isCiPending(text: string): boolean {
   return pending >= 0 && pending > lastIndex(CI_PASSED, plain)
 }
 
-/** What the session said in its latest turn: its recap and final answer, the later one last. */
+const REPORT_STATUSES: readonly ReportStatus[] = ['done', 'in_progress', 'blocked', 'waiting_user', 'waiting_ci', 'waiting_release']
+const DELIVERIES: readonly NonNullable<Report['delivery']>[] = ['not_needed', 'released', 'pending']
+
+/** The report tool's input as a Report, or null when its status is not one it knows. Text fields are trimmed and clipped. */
+export function reportOf(input: Record<string, unknown>): Report | null {
+  const status = input.status
+  if (typeof status !== 'string' || !REPORT_STATUSES.includes(status as ReportStatus)) return null
+  const text = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? clip(v, max) : undefined)
+  const delivery = DELIVERIES.find(d => d === input.delivery)
+  const commit = typeof input.commit === 'string' ? /\b[0-9a-f]{7,40}\b/i.exec(input.commit)?.[0]?.toLowerCase() : undefined
+  const report: Report = { status: status as ReportStatus, summary: text(input.summary, 300) ?? '' }
+  if (delivery) report.delivery = delivery
+  if (commit) report.commit = commit
+  const ci = text(input.ci, 200)
+  if (ci) report.ci = ci
+  const next = text(input.next, 200)
+  if (next) report.next = next
+
+  return report
+}
+
+/**
+ * A report as the words the board's fact checks read: CI still running (with the run or commit for GitHub), the own
+ * commit (for git), and the delivery line (declaredOf). Only these, in fixed English, never the free text of the
+ * summary or the next step, so nothing the session wrote can read as something it did not report.
+ */
+export function reportWords(report: Report): string {
+  const lines: string[] = []
+  if (report.status === 'waiting_ci') {
+    const ci = report.ci ? ` (${report.ci})` : ''
+    const commit = report.commit ? ` for commit ${report.commit}` : ''
+    lines.push(`CI is still running${ci}${commit}.`)
+  }
+  if (report.commit) lines.push(`Committed as ${report.commit}.`)
+  const delivery = report.delivery ?? (report.status === 'waiting_release' ? 'pending' : undefined)
+  if (delivery) lines.push(`Delivery: ${delivery === 'not_needed' ? 'not needed' : delivery === 'released' ? 'deployed' : 'pending'}`)
+
+  return lines.join('\n')
+}
+
+/**
+ * What the session said in its latest turn: its own report when it made one (reportWords), else its recap and final
+ * answer, the later one last.
+ */
 export function latestWords(track: Track): string {
+  if (track.report) return reportWords(track.report)
   const words = [track.recap ?? '', track.lastAnswer]
   // A recap written after the last turn ended belongs to the turn still going: it is the newer word.
   if ((track.recapAt ?? 0) > track.turnAt) words.reverse()
@@ -331,7 +375,7 @@ export function groupProjects(list: Session[]): Project[] {
  * (re)loads, before its next turn ends, holds nothing: its transcript's last word says more.
  */
 export function hasReport(track: Track | null | undefined): track is Track {
-  return !!track && (track.plan.length > 0 || !!track.lastAnswer || !!track.recap || !!track.ask)
+  return !!track && (track.plan.length > 0 || !!track.lastAnswer || !!track.recap || !!track.ask || !!track.report)
 }
 
 /** The background tasks a notification in `text` reports as over: completed, failed, killed or stopped. */
@@ -769,7 +813,11 @@ export function statusOf(one: Session, track: Track | undefined, word: LastWord 
   if (one.isRunning) return 'running'
   const minutes = (now - (Date.parse(one.lastActivityAt) || 0)) / 60000
   if (track) {
-    if (track.ask || /[?？]\s*$/.test(track.lastAnswer)) return 'asking'
+    // The session's own report says where it stands; facts (git, GitHub) still check what it reported below.
+    const reported = track.report?.status
+    if (reported === 'waiting_user') return 'asking'
+    if (reported === 'in_progress' || reported === 'blocked') return backgroundOf(track, now).length > 0 ? 'waiting' : 'open'
+    if (track.ask || (!track.report && /[?？]\s*$/.test(track.lastAnswer))) return 'asking'
     // CI that has not finished is never done, however long ago the session stopped.
     const pending = ciStatus(latestWords(track), ci)
     if (pending) return pending
@@ -777,7 +825,7 @@ export function statusOf(one: Session, track: Track | undefined, word: LastWord 
     // whatever its task list still holds: while the work runs (its notification not yet in), however long that takes.
     if (backgroundOf(track, now).length > 0) return 'waiting'
     // Words alone say the same for a while: a session that never came back has stopped after all.
-    if (WAITING.test(reportedText(track.lastAnswer)) && minutes < WAITING_MINUTES) return 'waiting'
+    if (!track.report && WAITING.test(reportedText(track.lastAnswer)) && minutes < WAITING_MINUTES) return 'waiting'
     if (openSteps(track).length > 0) return 'open'
     // Not committed, pushed or released, however ticked its task list (wrap_up ticks every step).
     if (isUndelivered(latestWords(track), push)) return 'unreleased'
@@ -949,7 +997,10 @@ export function boardText(input: BoardInput): string {
   const attention: string[] = []
   for (const r of rows) {
     const name = t('board.name', { title: r.one.title, id: r.one.id })
-    if (r.status === 'asking') attention.push(t('board.attention.asking', { name, said: clip(r.track?.ask ?? r.track?.lastAnswer ?? r.word?.said ?? '', 200) }))
+    if (r.status === 'asking') {
+      const reported = r.track?.report?.status === 'waiting_user' ? r.track.report.summary || undefined : undefined
+      attention.push(t('board.attention.asking', { name, said: clip(r.track?.ask ?? reported ?? r.track?.lastAnswer ?? r.word?.said ?? '', 200) }))
+    }
     if (r.status === 'open') {
       const left = openSteps(r.track)
       attention.push(t('board.attention.open', { name, n: left.length, steps: left.map(s => s.content).join(t('list.steps')) }))
@@ -1008,6 +1059,11 @@ export function boardText(input: BoardInput): string {
         lines.push(t('board.tasks', { done: r.track.plan.filter(s => s.status === 'completed').length, total: r.track.plan.length, steps }))
       }
       if (r.track.lastPrompt) lines.push(t('board.prompt', { text: clip(r.track.lastPrompt, 160) }))
+      const report = r.track.report
+      if (report) {
+        const next = report.next ? t('board.reportNext', { next: report.next }) : ''
+        lines.push(t('board.report', { status: [report.status, report.delivery, report.commit, report.ci].filter(Boolean).join(', '), summary: report.summary, next }))
+      }
       if (r.track.recap) lines.push(t('board.recap', { text: clip(r.track.recap, 300) }))
       else if (r.track.lastAnswer) lines.push(t('board.answer', { text: clip(r.track.lastAnswer, 300) }))
       if (r.track.ask) lines.push(t('board.ask', { text: r.track.ask }))

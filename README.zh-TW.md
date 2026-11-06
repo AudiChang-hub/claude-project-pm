@@ -83,6 +83,8 @@ Project PM 會讀取每個 Session 的任務清單、收尾摘要與待決策問
 
 **像 PM 一樣做事。** PM 回報前一定先看看板；實作交給子 Session，自己不改程式碼；把子 Session 的問題原文轉述給你；封存前先問你；「需要處理」還沒清空之前，不會說「都完成了」。子 Session 開始等你回覆、CI 失敗、或中途停下時，PM 會跳出通知。
 
+**PM 立刻知道。** Session 回報或結束一輪時，它的 Mod 會傳一行更新給 PM（`$.session.send`），PM 的 Mod 在訊息進到 PM 對話之前就把它攔下（`session.receive`）：看板馬上重畫，不會讓 PM 多跑一輪，也不花 token。只有 Mod 能攔下更新的 PM 才會收到；每 30 秒的輪詢保留作為備援。
+
 **整理 Session。** 卡片上的封存按鈕要滑過才會出現，按下後還需再確認一次（會提醒未完成步驟、開啟中的 PR 或已釘選）。還沒有 PM 的專案，輸入框上方會出現「建立 PM Session」或「由此 Session 擔任」的選項。
 
 <p align="center">
@@ -94,7 +96,7 @@ Project PM 會讀取每個 Session 的任務清單、收尾摘要與待決策問
 事實優先，文字最後：
 
 1. **commit 和 push 看 git。** PM 會讀自己專案每個 Session 的資料夾，只讀、不 fetch。資料夾沒有未提交的修改，就沒有要 commit 的。回報說是自己的 commit（commit 是 3fa1c2e、提交為 3fa1c2e、amend 成 3fa1c2e），或乾淨資料夾的 HEAD 已經在遠端分支上，就沒有要 push 的；回報說是自己的 commit 卻不在任何遠端分支上，不管文字怎麼寫，都算還沒 push。git 只用來確認或解除：共用資料夾可能有別的 Session 的修改，所以資料夾有修改本身不會多算一項。
-2. **發布看 Session 的宣告。** 有 PM 的專案，其他 Session 會被要求在收尾摘要（或最後的回答）最後加一行：`交付：不需要部署`、`交付：已部署（…）` 或 `交付：待部署（等…）`（英文是 `Delivery: not needed`、`deployed (…)`、`pending (…)`）。發布與否以這行為準。沒有 PM 的專案，Session 不會收到任何指示。
+2. **工作狀態看 Session 自己的回報。** 有 PM 的專案，其他 Session 會多一個 `report` 工具（`mcp__project-pm__report`），並被要求在完成、暫停或卡住時呼叫：填 `status`（`done`、`in_progress`、`blocked`、`waiting_user`、`waiting_ci`、`waiting_release`）、一句話的 `summary`，有的話再填 `commit`、還在跑的 `ci` 和 `delivery`（`not_needed`、`released`、`pending`）。看板只看這些欄位，不讀摘要的文字；回報裡的 commit 和 CI run 仍會用 git（第 1 點）和 GitHub 查證。回報只代表做出回報的那一輪。無法呼叫工具的 Session，改在收尾摘要最後加一行：`交付：不需要部署`、`交付：已部署（…）` 或 `交付：待部署（等…）`（英文是 `Delivery: not needed`、`deployed (…)`、`pending (…)`）。沒有 PM 的專案，Session 不會收到任何指示。
 3. **兩者都沒有時，才看文字。** 只有明確說工作還沒做、還要做，才算沒交付：還沒、尚未、未、not yet；接下來要做的（之後再部署、I'll push after review）；在等的（等 PM 放行後部署）；或還留在這裡的（只在本機，沒有 push）。單純的否定（沒有打標籤也沒有部署、didn't push）不算，因為它常常是「這次不需要」的意思。描述規則或舉例的句子、引號裡的字、別人的工作、描述看板的句子，都會先排除。
 
 這樣會放過的情況：Session 沒有宣告、也沒寫出自己的 commit，只寫「沒有 commit」但其實真的沒提交，或只寫「沒有部署」但其實該部署。宣告、回報寫出自己的 commit，或任務清單還沒完成的步驟，都能把這些情況補回來。
@@ -138,7 +140,7 @@ PM 有兩個專屬工具（不需要你自己呼叫）：
 - 每個專案一份檔案，記錄 PM 與工作項目：`~/.claude/project-pm/projects/<專案>-<hash>.json`。
 - 看板會把上一輪的結果（列出的 Session、它們的最後訊息、git 與 GitHub 的回答）存在 `~/.claude/project-pm/rounds/<session id>.json`，並用 `~/.claude/project-pm/transcripts.json` 記錄每份對話紀錄屬於哪個 Session，讓恢復的 Session 能立刻畫出看板。
 - Mod 本身不會把資料傳到任何地方。Session 清單、紀錄讀取與封存，都是透過桌面版內建的工具完成。查 CI 與交付狀態時，會在該 Session 的資料夾以唯讀方式執行 `git` 與 `gh`（`git status` 不更新索引、`branch -r --contains`、`rev-parse`，不會 fetch），`gh` 會用你自己的登入向 GitHub 查詢，和你手動執行一樣。
-- 有 PM 的專案，其他 Session 每一輪會收到一段簡短指示：收尾時加一行交付宣告（見〈交付怎麼判斷〉）。其他專案的 Session 不會收到任何指示。
+- 有 PM 的專案，其他 Session 每一輪會收到一段簡短指示和 `report` 工具：回報工作狀態，或在收尾加一行交付宣告（見〈交付怎麼判斷〉）。它們回報或結束一輪時，會傳一行只寫自己 id 的更新給 PM。其他專案的 Session 不會收到任何指示。
 - Mod 安裝前就開著的 Session 沒有追蹤紀錄，看板只會顯示它們最後一則訊息。
 - PM 的 `board`／`ledger` 工具被引擎移除時（執行 `/reload-plugins` 後，或 Mod 資料夾有變動、執行 `/board` 這類指令時被重新載入），會在 PM 的下一輪（下一則訊息或通知叫醒）重新註冊，PM 閒置時也會在 30 秒內補回，不必重開 Session。
 - 看板會維持你留下的狀態：`/board` 或 `/pm` 會開啟，`/board` 或面板的關閉鈕會收合。桌面版為了釋放記憶體暫停閒置的 Session、之後再恢復，或引擎收掉面板時，原本開著的看板會在 Session 恢復時，以上一輪的結果立刻畫出來。

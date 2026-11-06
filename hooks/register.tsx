@@ -9,6 +9,7 @@ import {
   CLAIM,
   LEDGER_TOOL,
   MGMT,
+  REPORT_TOOL,
   PANE,
   POLL_MS,
   ROLE,
@@ -21,17 +22,22 @@ import {
   ensureTools,
   getMine,
   identify,
+  isReporter,
   ledger,
   loadRound,
+  notifyPm,
   openBoard,
   reason,
   refresh,
   refreshSoon,
+  registerReportTool,
   registerTools,
   release,
   rememberBoard,
+  report,
   str,
   textOf,
+  updateOf,
 } from './actions'
 import { getLang, resolveLang, setLang, systemLocale, t } from './messages'
 import { reloadIfUpdated } from './update'
@@ -63,6 +69,7 @@ async function changeLanguage($: EngineInterface, wanted: string): Promise<strin
   setLang(resolveLang(value, systemLocale()))
   await registerCommands($)
   if ((await read($, me))?.isPm) await registerTools($)
+  else if (await isReporter($)) await registerReportTool($)
   let failure: string | null = null
   try {
     const result = await $.config.set({ key: LANGUAGE_ROW, value })
@@ -95,8 +102,9 @@ async function start($: EngineInterface) {
   isStarted = true
   await registerCommands($)
   try {
-    const self = await identify($)
-    if (self?.isPm) await registerTools($)
+    await identify($)
+    // The PM's board and ledger, or a reporting session's report tool.
+    await ensureTools($)
     // A new process draws the board from the last round at once; its own first round follows.
     await loadRound($)
   } catch (err) {
@@ -221,6 +229,8 @@ export const register: Register = (on, options) => {
         lastAnswer: clip(e.answer, 800),
         turnAt: now,
         ...((t.recapAt ?? 0) > t.turnAt ? {} : { recap: null, ask: null }),
+        // Likewise a report: one made in an earlier turn no longer says where this turn left the work.
+        ...((t.reportAt ?? 0) > t.turnAt ? {} : { report: undefined, reportAt: undefined }),
       }))
       // The title is often given after the first turn.
       if (getMine() && !getMine()?.title) {
@@ -233,9 +243,29 @@ export const register: Register = (on, options) => {
         }
       }
       refreshSoon($, 500)
+      // The PM hears of it now, not at its next poll.
+      try {
+        await notifyPm($)
+      } catch (err) {
+        $.ui.log(`project-pm: ${reason(err)}`)
+      }
     }
 
     return next(e)
+  })
+
+  on('tool.call', { tool: REPORT_TOOL }, async ($, e) => ({ result: await report($, e as unknown as Record<string, unknown>) })).catch(() => ({
+    deny: t('report.badStatus'),
+  }))
+
+  // An update from another session of the project: its track is on disk, so the board reads it now. Taken in here,
+  // so it is never queued, written to the transcript or read by the model: no turn, no tokens.
+  on('session.receive', async ($, e, next) => {
+    const id = updateOf(e.text)
+    if (!id) return next(e)
+    refreshSoon($, 100)
+
+    return { consumed: `project-pm: update from ${id}` }
   })
 
   on('tool.call', { tool: BOARD_TOOL }, async ($, e) => ({ result: await board($, e as unknown as Record<string, unknown>) })).catch(() => ({

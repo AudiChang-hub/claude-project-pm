@@ -269,6 +269,8 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const summaryOf = (track: Track | undefined, one: Session) => {
     if (track) {
       if (track.ask) return t('pane.question', { text: track.ask })
+      // The session's own report, when it made one this turn: what it says it did and what is next.
+      if (track.report?.summary) return track.report.next ? `${track.report.summary} → ${track.report.next}` : track.report.summary
 
       return track.recap || track.lastAnswer || (track.lastPrompt ? t('pane.instruction', { text: track.lastPrompt }) : t('pane.noReport'))
     }

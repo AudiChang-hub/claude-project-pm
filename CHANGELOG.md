@@ -7,6 +7,12 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-06
+
+### Added
+- Sessions report where their work stands, in fields. The other sessions of a project with a PM get a `report` tool (`mcp__project-pm__report`): `status` (`done`, `in_progress`, `blocked`, `waiting_user`, `waiting_ci`, `waiting_release`), `summary`, and optionally `commit`, `ci`, `delivery` (`not_needed`, `released`, `pending`) and `next`. Their instruction asks them to call it whenever they finish, pause or get stuck; the delivery line stays as the fallback. The board goes by the fields: `waiting_user` is *Waiting on you*, `in_progress` and `blocked` are *Unfinished*, `waiting_ci` is *Waiting on CI* (GitHub still checks the run or commit it names), `waiting_release` or a pending delivery is *Not released*, and a named commit is checked against the remote by git. The summary's own words are never read for status. A report holds for the turn that made it, and it shows on the card and on the PM's board.
+- The PM hears at once. A session that reports or ends a turn sends its PM a one-line update naming itself (`$.session.send`); the PM's mod takes it in at `session.receive`, so it never reaches the PM's conversation, and redraws the board within a moment instead of at the next 30-second poll. Every session's track now says its mod takes such updates in (`inbox`), and only a PM that does is sent one, so an older PM never gets a message that would start a turn. A failed send is logged once; the poll stays as the fallback.
+
 ## [0.5.2] - 2026-11-06
 
 ### Added

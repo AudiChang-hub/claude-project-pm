@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { applyPlan, betterCi, caveatOf, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, statusOf, undeliveredOf } from '../hooks/sessions'
+import { applyPlan, betterCi, caveatOf, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, statusOf, undeliveredOf } from '../hooks/sessions'
 import { closesBoard } from '../hooks/actions'
 import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hooks/messages'
 import type { Lang, MessageKey } from '../hooks/messages'
@@ -1714,4 +1714,105 @@ test('a session running an older copy than the installed one reloads, and only t
   expect(isReplaced(installOf(again, 'project-pm', root), root, '2026-10-20T02:27:00.000Z')).toBe(true)
   // Uninstalled: nothing to reload into.
   expect(isReplaced(installOf({ plugins: {} }, 'project-pm', root), root)).toBe(false)
+})
+
+test('a report sets the status by its fields; its free text never reads as something it did not report', () => {
+  const session = { id: 'local_open', title: '商品列表頁', cwd: PROJECT, isRunning: false, lastActivityAt: new Date(NOW - 5 * 60000).toISOString(), isPinned: false, hasOpenPr: false }
+  const reported = (input: Record<string, unknown>, extra: object = {}) =>
+    statusOf(session, track('local_open', { report: reportOf(input), reportAt: NOW, ...extra }) as never, undefined, NOW)
+
+  expect(reported({ status: 'waiting_ci', summary: '匯出 CSV 已推上 main', ci: 'https://github.com/acme/shop/actions/runs/12345678901' })).toBe('ci')
+  expect(reported({ status: 'waiting_user', summary: '要一起發 2.3.1 嗎' })).toBe('asking')
+  expect(reported({ status: 'blocked', summary: '等設計稿' })).toBe('open')
+  expect(reported({ status: 'in_progress', summary: '做了一半' })).toBe('open')
+  expect(reported({ status: 'waiting_release', summary: '改好了，還沒部署' })).toBe('unreleased')
+  expect(reported({ status: 'done', summary: '完成', delivery: 'pending' })).toBe('unreleased')
+  expect(reported({ status: 'done', summary: '完成', delivery: 'released' })).toBe('done')
+  // What the summary says is not read: "CI 還在跑" in a done report is no CI running.
+  expect(reported({ status: 'done', summary: '修好「CI 還在跑」被誤判的問題', delivery: 'not_needed' })).toBe('done')
+  // The report outranks the words of the same turn.
+  expect(reported({ status: 'done', summary: '完成', delivery: 'not_needed' }, { lastAnswer: '已推上 main，CI 還在跑，通過後才會部署。' })).toBe('done')
+
+  expect(reportOf({ status: 'finished', summary: 'x' })).toBe(null)
+  expect(reportOf({ status: 'done', summary: '  完成  ', commit: 'commit 3FA1C2E', delivery: 'maybe' })).toEqual({ status: 'done', summary: '完成', commit: '3fa1c2e' })
+  expect(reportWords({ status: 'waiting_ci', summary: '', ci: 'run 12345678901', commit: '3fa1c2e' })).toBe('CI is still running (run 12345678901) for commit 3fa1c2e.\nCommitted as 3fa1c2e.')
+})
+
+test('a session of a project with a PM gets the report tool, keeps its report and tells the PM at once', ZH, async ($, on) => {
+  const files: Files = new Map()
+  const tools: string[] = []
+  const sent: { to: string; text: string }[] = []
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  // The PM's mod takes update messages in.
+  files.set(`${DIR}/sessions/local_pm.json`, JSON.stringify(track('local_pm', { inbox: 1 })))
+  mock.clock(on, { now: NOW })
+  on('session.send', ($, e) => {
+    sent.push({ to: e.to, text: e.text })
+
+    return { isDelivered: true }
+  })
+  world(on, 'local_open', files, [], () => null, tools)
+  await $.session.start(START)
+  expect(tools).toContain('report')
+
+  const answer = await $.tool.call({ tool: 'mcp__project-pm__report', status: 'waiting_ci', summary: '匯出 CSV 已推上 main', commit: '3fa1c2e' } as never)
+  expect(String((answer as { result?: unknown }).result)).toBe('已回報給 PM：waiting_ci。')
+  const kept = JSON.parse(files.get(`${DIR}/sessions/local_open.json`)!)
+  expect(kept.report).toEqual({ status: 'waiting_ci', summary: '匯出 CSV 已推上 main', commit: '3fa1c2e' })
+  expect(kept.inbox).toBe(1)
+  // The PM is told now, by id only: its board reads the track from disk.
+  expect(sent).toEqual([{ to: 'local_pm', text: '[project-pm:update] {"id":"local_open"}' }])
+
+  const refused = await $.tool.call({ tool: 'mcp__project-pm__report', status: 'finished', summary: 'x' } as never)
+  expect(String((refused as { result?: unknown }).result)).toMatch(/status 要是 done/)
+})
+
+test('a PM whose mod cannot take updates in is not sent them, and the PM itself never reports', ZH, async ($, on) => {
+  const files: Files = new Map()
+  const tools: string[] = []
+  const sent: string[] = []
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_oldpm', isDismissed: false, ledger: [], nextId: 1 }))
+  // An older PM: its track has no inbox, so a message would start a turn there.
+  files.set(`${DIR}/sessions/local_oldpm.json`, JSON.stringify(track('local_oldpm', {})))
+  mock.clock(on, { now: NOW })
+  on('session.send', ($, e) => {
+    sent.push(e.to)
+
+    return { isDelivered: true }
+  })
+  world(on, 'local_open', files, [], () => null, tools)
+  await $.session.start(START)
+  await $.tool.call({ tool: 'mcp__project-pm__report', status: 'done', summary: '完成', delivery: 'not_needed' } as never)
+  expect(JSON.parse(files.get(`${DIR}/sessions/local_open.json`)!).report.status).toBe('done')
+  expect(sent).toEqual([])
+})
+
+test('the PM takes an update in without a turn and its board reads the session at once', ZH, async ($, on) => {
+  const files: Files = new Map()
+  const counts: Counts = { reads: 0, calls: [] }
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  const clock = mock.clock(on, { now: NOW })
+  on('session.receive', ($, e) => ({ text: e.text }))
+  world(on, 'local_pm', files, [], () => null, [], [], counts)
+  await $.session.start(START)
+  await clock.advance(1_000)
+
+  // The session wrote its report, then told the PM.
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { report: { status: 'waiting_user', summary: '要一起發 2.3.1 嗎？' }, reportAt: NOW })))
+  const calls = counts.calls.length
+  const taken = await $.session.receive({
+    origin: { kind: 'peer', plugin: 'project-pm' },
+    text: '<cross-session-message from="local_open" name="商品列表頁">\n[project-pm:update] {"id":"local_open"}\n</cross-session-message>',
+  } as never)
+  expect(taken).toEqual({ consumed: 'project-pm: update from local_open' })
+  await clock.advance(200)
+  // A round ran at once, not at the next 30-second poll.
+  expect(counts.calls.slice(calls)).toContain('list_sessions')
+  const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(board).toMatch(/\[待回覆\] 「商品列表頁」\(local_open\) 等待使用者決策：要一起發 2\.3\.1 嗎？/)
+  expect(board).toMatch(/回報：\[waiting_user\] 要一起發 2\.3\.1 嗎？/)
+
+  // Anything else a peer sends goes on to the model as before.
+  const other = await $.session.receive({ origin: { kind: 'peer' }, text: '幫我看一下 PR' } as never)
+  expect(other).toEqual({ text: '幫我看一下 PR' })
 })

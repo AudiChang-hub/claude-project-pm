@@ -49,6 +49,25 @@ export type Track = {
   background?: BackgroundTask[]
   /** Whether the person left this session's board open (/board, the pane's close): absent while they have not said. */
   isBoardOpen?: boolean
+  /** What the session last reported through the report tool: the board goes by it over the session's words. */
+  report?: Report
+  /** When the report was made, ms: a turn that ends after it without its own report drops it. */
+  reportAt?: number
+  /** The version of the update messages this session's mod takes in (session.receive); absent before it could. */
+  inbox?: number
+}
+
+/** Where a session's work stands, as it says itself. */
+export type ReportStatus = 'done' | 'in_progress' | 'blocked' | 'waiting_user' | 'waiting_ci' | 'waiting_release'
+
+/** A session's own report of its work (the report tool): fields, not words to read. */
+export type Report = {
+  status: ReportStatus
+  summary: string
+  delivery?: 'not_needed' | 'released' | 'pending'
+  commit?: string
+  ci?: string
+  next?: string
 }
 
 /** What git says of the commit and push a session's words leave: facts stand over words (leftOf). */
