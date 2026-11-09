@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
     env:
       # The Claude Code version the plugin is tested with; neither command needs a login or an API key.
-      CLAUDE_CODE_VERSION: 2.1.299
+      CLAUDE_CODE_VERSION: 2.1.317
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
