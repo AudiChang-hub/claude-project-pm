@@ -41,7 +41,8 @@ type Pane = { id: string; title: string; isShown: boolean; isFocused: boolean; i
 type Counts = { reads: number; calls: string[]; writes?: string[]; isAppAway?: boolean }
 
 /** The test host spells paths its own way: compare them by what follows the data folder. */
-const norm = (path: string) => path.replace(/\\/g, '/').replace(/^.*\/\.claude\/project-pm/, DIR)
+// On Linux a Windows path is not absolute, so the host puts the working folder before it: the drive starts the path.
+const norm = (path: string) => path.replace(/\\/g, '/').replace(/^.*\/\.claude\/project-pm/, DIR).replace(/^.+\/(?=[a-z]:\/)/i, '')
 
 /** What a host command answers: null for a command that is not there (no gh, no repository). */
 type Host = (argv: readonly string[], cwd: string | undefined) => { exitCode: number; stdout: string } | null
