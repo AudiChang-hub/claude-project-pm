@@ -1,0 +1,79 @@
+<!doctype html>
+<!--
+  Source of .claude-plugin/icon.png: the PM's completion ring with the ledger's step bars inside, and the
+  project's sessions as status dots on an orbit, in the board's own colours (hooks/sessions.ts, hooks/view.tsx).
+  Render at 1024 x 1024:
+  chrome --headless=new --hide-scrollbars --force-device-scale-factor=1 --window-size=1024,1024
+         --virtual-time-budget=2000 --screenshot=icon.png docs/brand/icon.html
+-->
+<html><head><meta charset="utf-8"><style>
+html,body{margin:0;padding:0;background:#120f0d;width:1024px;height:1024px;overflow:hidden}
+svg{display:block}
+</style></head><body>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="44%" r="72%">
+      <stop offset="0" stop-color="#2b211c"/>
+      <stop offset="0.55" stop-color="#18130f"/>
+      <stop offset="1" stop-color="#0e0b09"/>
+    </radialGradient>
+    <linearGradient id="arc" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e88a68"/>
+      <stop offset="1" stop-color="#cc6644"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#d97757" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#d97757" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <circle cx="512" cy="512" r="330" fill="url(#halo)"/>
+
+  <!-- the orbit the sessions sit on -->
+  <circle cx="512" cy="512" r="372" fill="none" stroke="#9ca3af" stroke-opacity="0.22" stroke-width="5" stroke-linecap="round" stroke-dasharray="0.1 23"/>
+
+  <g id="links" stroke="#c9b8ad" stroke-opacity="0.16" stroke-width="4" stroke-linecap="round"></g>
+  <g id="dots"></g>
+
+  <!-- the PM: completion ring -->
+  <circle cx="512" cy="512" r="176" fill="none" stroke="#9ca3af" stroke-opacity="0.16" stroke-width="46"/>
+  <circle cx="512" cy="512" r="176" fill="none" stroke="url(#arc)" stroke-width="46" stroke-linecap="round"
+          stroke-dasharray="829 1106" transform="rotate(-90 512 512)"/>
+
+  <!-- the ledger: step bars, done, under way, left -->
+  <rect x="432" y="452" width="160" height="26" rx="13" fill="#d97757"/>
+  <rect x="432" y="499" width="160" height="26" rx="13" fill="#d97757" fill-opacity="0.5"/>
+  <rect x="432" y="546" width="160" height="26" rx="13" fill="#9ca3af" fill-opacity="0.24"/>
+</svg>
+<script>
+  const ns = 'http://www.w3.org/2000/svg'
+  const sessions = [
+    { a: -90, hex: '#f59e0b' },  // waiting on you
+    { a: -30, hex: '#8b5cf6' },  // CI
+    { a: 30, hex: '#22c55e' },   // running
+    { a: 90, hex: '#3b82f6' },   // background
+    { a: 150, hex: '#0d9488' },  // not released
+    { a: 210, hex: '#9ca3af' },  // done
+  ]
+  const links = document.getElementById('links')
+  const dots = document.getElementById('dots')
+  for (const s of sessions) {
+    const r = (s.a * Math.PI) / 180
+    const x = 512 + 372 * Math.cos(r), y = 512 + 372 * Math.sin(r)
+    const x0 = 512 + 222 * Math.cos(r), y0 = 512 + 222 * Math.sin(r)
+    const x1 = 512 + 326 * Math.cos(r), y1 = 512 + 326 * Math.sin(r)
+    const line = document.createElementNS(ns, 'line')
+    Object.entries({ x1: x0, y1: y0, x2: x1, y2: y1 }).forEach(([k, v]) => line.setAttribute(k, v))
+    links.appendChild(line)
+    const glow = document.createElementNS(ns, 'circle')
+    Object.entries({ cx: x, cy: y, r: 40, fill: s.hex, 'fill-opacity': 0.55, filter: 'url(#glow)' }).forEach(([k, v]) => glow.setAttribute(k, v))
+    const dot = document.createElementNS(ns, 'circle')
+    Object.entries({ cx: x, cy: y, r: 34, fill: s.hex }).forEach(([k, v]) => dot.setAttribute(k, v))
+    dots.append(glow, dot)
+  }
+</script>
+</body></html>
