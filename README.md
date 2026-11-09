@@ -54,6 +54,14 @@ Requires the **Claude Code desktop app (Code tab)**; see [Requirements](#require
 
 3. From then on, talk to the PM: *"Is anything slipping?"*, *"Hand the CSV export to the product-list session."*, *"Which sessions are waiting on me?"*
 
+4. Turn on updates. Claude Code does not update a plugin from a third-party marketplace by itself, and restarting the app does not either: until you turn auto-update on, you stay on the version you installed. Run `claude` in a terminal, open `/plugin` → **Marketplaces** → `claude-project-pm`, and select **Enable auto-update**. From then on Claude Code checks for a new version in the background after a session starts. Or update by hand whenever you like:
+
+   ```bash
+   claude plugin update project-pm@claude-project-pm
+   ```
+
+   Once a new version is installed, sessions already open reload it by themselves as soon as they are idle.
+
 ## Features
 
 **One board per project.** A pane that lists the project's sessions, most urgent first, each with a status mark, a step-by-step progress bar, the step it is on, and its latest recap or question.

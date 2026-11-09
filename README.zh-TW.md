@@ -54,6 +54,14 @@ Project PM 會讀取每個 Session 的任務清單、收尾摘要與待決策問
 
 3. 接著直接跟 PM 對話，例如：「目前有沒有漏掉的工作？」「幫我把匯出 CSV 交給商品列表那個 Session 做。」「哪些 Session 在等我回覆？」
 
+4. 開啟自動更新。第三方 marketplace 的 Plugin，Claude Code 不會自己更新，重開 App 也不會；沒開自動更新，就會一直停在安裝時的版本。在終端機執行 `claude`，打開 `/plugin` → **Marketplaces** → `claude-project-pm`，選 **Enable auto-update**。之後 Session 啟動時，Claude Code 會在背景檢查新版。也可以隨時手動更新：
+
+   ```bash
+   claude plugin update project-pm@claude-project-pm
+   ```
+
+   新版裝好後，已經開著的 Session 會在閒置時自動重新載入。
+
 ## 功能
 
 **每個專案一個看板。** 面板列出專案裡的 Session，最需要處理的排最前面；每張卡片有狀態燈號、逐步進度條、目前進行的步驟，以及最新的收尾摘要或問題。
