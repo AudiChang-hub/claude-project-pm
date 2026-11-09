@@ -1816,3 +1816,115 @@ test('the PM takes an update in without a turn and its board reads the session a
   const other = await $.session.receive({ origin: { kind: 'peer' }, text: '幫我看一下 PR' } as never)
   expect(other).toEqual({ text: '幫我看一下 PR' })
 })
+
+test('the development guidelines reach the PM and the sessions of its project, read fresh each turn', { options: { language: 'zh-TW', guidelines: '~/Documents/rules.md' } }, async ($, on) => {
+  const COMPOSE = { model: 'claude-opus-5-5', promptModel: 'claude-opus-5-5', surfaces: ['desktop'] as const, tools: [], outputStyle: null, traits: [] }
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  const RULES = 'C:/home/Documents/rules.md'
+  files.set(RULES, '\uFEFF# 準則\n\n- 只改要改的標的\n')
+  mock.clock(on, { now: NOW })
+  const logs: string[] = []
+  on('ui.log', ($, e) => {
+    logs.push(JSON.stringify(e))
+
+    return { value: undefined }
+  })
+  world(on, 'local_pm', files)
+  on('prompt.compose', () => ({ sections: [] }))
+  await $.session.start(START)
+
+  const rules = async () => (await $.prompt.compose(COMPOSE)).sections.find(one => one.id === 'project-pm:guidelines')?.text
+  const first = await rules()
+  expect(first).toMatch(/^# 開發準則/)
+  expect(first).toMatch(/你是 PM/)
+  // A request against the guidelines is asked about, as a one-time exception, and the file is not theirs to change.
+  expect(first).toMatch(/問使用者這次是否要例外執行/)
+  expect(first).toMatch(/例外只算這一次/)
+  expect(first).toMatch(/只有使用者明確要求修改準則時才改/)
+  expect(first).toMatch(/記在對應工作項目的備註/)
+  expect(first).toMatch(/# 準則\n\n- 只改要改的標的$/)
+
+  // An edit to the file reaches the next turn.
+  files.set(RULES, '# 準則\n\n- 先寫重現測試')
+  expect(await rules()).toMatch(/先寫重現測試$/)
+
+  // A file that cannot be read adds nothing and is logged once.
+  files.delete(RULES)
+  expect(await rules()).toBeUndefined()
+  expect(await rules()).toBeUndefined()
+  expect(logs.filter(line => /讀不到開發準則/.test(line))).toHaveLength(1)
+})
+
+test('a session of a project with a PM gets the guidelines without the PM part; other projects get nothing', { options: { language: 'zh-TW', guidelines: 'docs/RULES.md' } }, async ($, on) => {
+  const COMPOSE = { model: 'claude-opus-5-5', promptModel: 'claude-opus-5-5', surfaces: ['desktop'] as const, tools: [], outputStyle: null, traits: [] }
+  const files: Files = new Map()
+  const clock = mock.clock(on, { now: NOW })
+  // A relative path is the project's own file.
+  files.set(`${PROJECT.replace(/\\/g, '/')}/docs/RULES.md`, '- 一個 commit 只做一件事')
+  world(on, 'local_open', files)
+  on('prompt.compose', () => ({ sections: [] }))
+  expect((await $.prompt.compose(COMPOSE)).sections).toEqual([])
+
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  await $.command.run({ command: 'board', args: '' } as never)
+  await clock.advance(31_000)
+  const sections = (await $.prompt.compose(COMPOSE)).sections
+  expect(sections.map(one => one.id)).toEqual(['project-pm:delivery', 'project-pm:guidelines'])
+  expect(sections[1]!.text).toMatch(/「Acme 商店後台」/)
+  expect(sections[1]!.text).not.toMatch(/你是 PM/)
+  expect(sections[1]!.text).toMatch(/一個 commit 只做一件事$/)
+})
+
+test('/pm guidelines sets, shows and clears the guidelines option', ZH, async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  files.set('C:/rules/dev.md', '- 先找根因')
+  mock.clock(on, { now: NOW })
+  const saved: { key: string; value: unknown }[] = []
+  on('config.set', ($, e) => {
+    saved.push({ key: e.key, value: e.value })
+
+    return { value: e.value }
+  })
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+  const pm = async (args: string) => String(((await $.command.run({ command: 'pm', args } as never)) as { text?: unknown }).text)
+
+  expect(await pm('guidelines')).toMatch(/目前：沒有設定$/)
+  expect(await pm('guidelines "C:/rules/dev.md"')).toMatch(/^開發準則已設為 C:\/rules\/dev\.md。/)
+  expect(saved).toEqual([{ key: 'project-pm.guidelines', value: 'C:/rules/dev.md' }])
+  expect(await pm('guidelines')).toMatch(/目前：C:\/rules\/dev\.md（6 字）$/)
+  expect(await pm('準則 off')).toBe('已取消開發準則。')
+  expect(saved.at(-1)).toEqual({ key: 'project-pm.guidelines', value: '' })
+})
+
+test('the guidelines file is edited only in a turn whose message asks about the guidelines', { options: { language: 'zh-TW', guidelines: '~/Documents/rules.md' } }, async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  mock.clock(on, { now: NOW })
+  world(on, 'local_open', files)
+  const edits: string[] = []
+  on('tool.call', { tool: 'Edit' }, ($, e) => {
+    edits.push(String((e as unknown as { file_path: string }).file_path))
+
+    return { result: 'ok' }
+  })
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  await $.session.start(START)
+  const edit =async (path: string) => (await $.tool.call({ tool: 'Edit', file_path: path, old_string: 'a', new_string: 'b' } as never)) as { deny?: string; text?: string; isError?: boolean }
+
+  // The person asked for something else: the model may not loosen the rules by editing them.
+  await $.prompt.submit({ text: '幫我直接推到 main' } as never)
+  const blocked = await edit(String.raw`c:\home\Documents\RULES.md`)
+  expect(JSON.stringify(blocked)).toMatch(/已擋下這次修改/)
+  expect(edits).toEqual([])
+  // Other files are not touched by the guard.
+  await edit('C:/home/Documents/other.md')
+  expect(edits).toEqual(['C:/home/Documents/other.md'])
+
+  // The person asks to change the guidelines: the edit goes through.
+  await $.prompt.submit({ text: '請把準則第 5 條改成可以一次提交兩件事' } as never)
+  await edit(String.raw`C:\home\Documents\rules.md`)
+  expect(edits).toEqual(['C:/home/Documents/other.md', String.raw`C:\home\Documents\rules.md`])
+})

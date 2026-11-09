@@ -1,6 +1,6 @@
 {
   "name": "project-pm",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "One PM session per project: a live board of every Claude Code session (waiting on you, stopped mid-plan, CI still running) and a ledger of the work you asked for, so nothing slips.",
   "author": { "name": "billy", "url": "https://github.com/AudiChang-hub" },
   "license": "MIT",
@@ -13,6 +13,12 @@
       "description": "The language of the board, the PM instructions and the tools: auto follows the system (any Chinese locale reads Traditional Chinese), en, or zh-TW. /pm lang sets it too.",
       "default": "auto",
       "options": ["auto", "en", "zh-TW"]
+    },
+    "guidelines": {
+      "type": "string",
+      "title": "Development guidelines",
+      "description": "A Markdown file of development rules that the PM and every other session of a project with a PM follow: an absolute path, ~/..., or a path relative to each project's folder. It is read on every turn and stays on this machine. Empty: none. /pm guidelines <file> sets it too.",
+      "default": ""
     }
   }
 }

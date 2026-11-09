@@ -109,6 +109,7 @@ What this lets through: a plain "沒有 commit" of changes that really are uncom
 | `/pm off` | Steps down as PM. The ledger stays with the project for the next PM. |
 | `/board` | Opens or closes the board in any session. |
 | `/pm lang en` · `/pm lang zh-TW` · `/pm lang auto` | Switches the language of the board, the PM and its tools at once, and saves it as the `language` option. `auto` follows the system. |
+| `/pm guidelines <file>` · `/pm guidelines off` | Sets or clears your development guidelines (see below). `/pm guidelines` alone shows the file in use and whether it reads. |
 
 The PM has two tools of its own, which you do not call directly:
 
@@ -116,6 +117,18 @@ The PM has two tools of its own, which you do not call directly:
 - `mcp__project-pm__ledger`: `add`, `update` (owner, status `open` / `done` / `dropped`, note) and `list` the work items.
 
 A project is the folder a session works in; a git worktree under `.claude/worktrees/` or `.worktrees/` counts as its repository.
+
+### Development guidelines
+
+Point the `guidelines` option at a Markdown file of your own rules (how to commit, when to ask before a schema change, what counts as done), and the PM and every other session of a project with a PM get it in their system prompt each turn. The PM is also told to carry out what the rules leave to a coordinator (version numbers, the order of pushes and deployments, the definition of done) and to point out a session that breaks one.
+
+- **A request against the rules is asked about first.** The session says which rule the request breaks and asks whether to make an exception this time, and goes ahead only on a clear yes.
+- **An exception is one-off.** Once that request is done the rules apply again, and a similar request later is asked about again. The PM notes each approved exception on its work item.
+- **The rules change only when you ask.** An edit to the guidelines file is refused unless your latest message in that session asks about the guidelines (it mentions 準則, 守則 or "guideline"). The refusal tells the session to ask you first.
+
+- The path may be absolute, `~/…`, or relative to each project's folder (`docs/GUIDELINES.md`), so every project can keep its own.
+- The file is read on every turn: an edit reaches each session's next turn with no reload. Its text stays on your machine; a file over 24,000 characters is cut, with a note to read the rest.
+- Set it with `/pm guidelines <file>` or the `project-pm.guidelines` row in `/config`. Sessions of projects without a PM are not given it.
 
 ## Requirements
 

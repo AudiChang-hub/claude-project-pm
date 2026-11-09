@@ -7,6 +7,13 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-09
+
+### Added
+- Development guidelines. A new `guidelines` option names a Markdown file of the person's own rules: absolute, `~/…`, or relative to each project's folder. The PM and every other session of a project with a PM get it as a system prompt section (`project-pm:guidelines`) each turn, read fresh, so an edit applies from the next turn. The PM is also asked to carry out what the rules leave to a coordinator and to point out a session that breaks one.
+- Exceptions to the guidelines are asked for, one at a time. A session given the guidelines is told not to act on a request that breaks them, to name the rule and to ask the user whether to make an exception this time. An exception covers that one request; a similar request later is asked about again, and the PM notes approved exceptions on their work items.
+- The guidelines file is locked. An `Edit`, `MultiEdit`, `Write` or `NotebookEdit` of it is refused unless the user's latest message in that session asks about the guidelines (準則, 守則, guideline), and the refusal tells the session to ask first. `/pm guidelines <file>` sets the option, `/pm guidelines off` clears it, `/pm guidelines` shows it. A file that cannot be read adds nothing and is logged once; one over 24,000 characters is cut with a note.
+
 ## [0.6.1] - 2026-11-06
 
 ### Fixed

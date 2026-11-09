@@ -39,6 +39,7 @@ import {
   textOf,
   updateOf,
 } from './actions'
+import { MAX_CHARS, WRITING_TOOLS, asksForGuidelines, guidelinesPath, isSameFile, readGuidelines } from './guidelines'
 import { getLang, resolveLang, setLang, systemLocale, t } from './messages'
 import { reloadIfUpdated } from './update'
 import { renderBand, renderPane } from './view'
@@ -51,6 +52,79 @@ let isStarted = false
 
 /** The `/config` row of the `language` option (plugin.json `userConfig`): auto, en or zh-TW. */
 const LANGUAGE_ROW = 'project-pm.language'
+
+/** The `/config` row of the `guidelines` option: the path of the development guidelines, empty for none. */
+const GUIDELINES_ROW = 'project-pm.guidelines'
+
+/** The `guidelines` option as this copy of the module was loaded with it, or as /pm guidelines just set it. */
+let guidelinesOption = ''
+
+/**
+ * The person's latest own message in this session (not a command, not a background wake-up): the guidelines file
+ * may be edited only in a turn it asks about the guidelines in. A reload forgets it, which keeps the file locked.
+ */
+let lastOwnPrompt = ''
+
+/** Guidelines files already reported unreadable, so a broken path is logged once, not every turn. */
+const unreadable = new Set<string>()
+
+/**
+ * The development guidelines as a system prompt section, for the PM and for the other sessions of a project with a
+ * PM (prompt.compose): the file is read each turn, so an edit reaches the next turn of every session.
+ */
+async function guidelinesSection($: EngineInterface, self: Me): Promise<string | null> {
+  const found = await readGuidelines($, guidelinesOption, self.projectPath)
+  if (!found) return null
+  if ('error' in found) {
+    if (!unreadable.has(found.file)) {
+      unreadable.add(found.file)
+      $.ui.log(t('guidelines.unreadable', { file: found.file, error: found.error }))
+    }
+
+    return null
+  }
+  unreadable.delete(found.file)
+  const parts = [t('guidelines.section', { file: found.file, project: self.projectName })]
+  if (self.isPm) parts.push(t('guidelines.pm'))
+  parts.push(found.text)
+  if (found.isClipped) parts.push(t('guidelines.clipped', { max: MAX_CHARS, file: found.file }))
+
+  return parts.join('\n\n')
+}
+
+/**
+ * `/pm guidelines <file>` saves the path as the `guidelines` option (the same `/config` row a person sets by hand),
+ * `/pm guidelines off` clears it, and `/pm guidelines` alone says what is set and whether it reads.
+ */
+async function changeGuidelines($: EngineInterface, wanted: string): Promise<string> {
+  const self = await read($, me)
+  const projectPath = self?.projectPath ?? ''
+  const value = /^(off|none|clear|取消|關閉)$/i.test(wanted.trim()) ? '' : wanted.trim().replace(/^["']|["']$/g, '')
+  if (!wanted.trim()) {
+    const found = await readGuidelines($, guidelinesOption, projectPath)
+    const now = !found
+      ? t('guidelines.none')
+      : 'error' in found
+        ? t('guidelines.broken', { file: found.file, error: found.error })
+        : t('guidelines.ok', { file: found.file, chars: found.text.length })
+
+    return t('guidelines.usage', { now })
+  }
+  guidelinesOption = value
+  let failure: string | null = null
+  try {
+    const result = await $.config.set({ key: GUIDELINES_ROW, value })
+    if ('deny' in result && result.deny) failure = result.deny
+  } catch (err) {
+    failure = reason(err)
+  }
+  if (failure !== null) return t('guidelines.notSaved', { reason: failure })
+  if (!value) return t('guidelines.off')
+  const found = await readGuidelines($, value, projectPath)
+  const text = t('guidelines.set', { file: found?.file ?? value })
+
+  return found && 'error' in found ? `${text}\n${t('guidelines.broken', { file: found.file, error: found.error })}` : text
+}
 
 async function registerCommands($: EngineInterface) {
   await $.command.register({ name: 'pm', description: t('command.pm') })
@@ -126,6 +200,7 @@ export const register: Register = (on, options) => {
   // The `language` option when it names one, else the system's (messages.ts): read once per load,
   // and a change to the option reloads the module.
   setLang(resolveLang(options.language, systemLocale()))
+  guidelinesOption = typeof options.guidelines === 'string' ? options.guidelines : ''
 
   on('session.start', async ($, e, next) => {
     await start($)
@@ -148,6 +223,7 @@ export const register: Register = (on, options) => {
         $.ui.log(`project-pm: ${reason(err)}`)
       }
     }
+    if (!e.command && !e.isMeta) lastOwnPrompt = e.text
     // A new turn starts: last turn's recap and question no longer stand (a background wake-up included).
     if (!e.command) await changeMine($, t => ({ ...t, ask: null, recap: null, ...(e.isMeta ? {} : { lastPrompt: clip(e.text, 400) }) }))
     // A background command's notification: it has finished, one way or another.
@@ -278,6 +354,20 @@ export const register: Register = (on, options) => {
     return { result: text }
   }).catch(() => ({ deny: t('command.denyLedger') }))
 
+  // The guidelines change only when the person asks for it: an edit to the file in a turn whose message does not
+  // mention the guidelines is refused, with the reason, so the model asks first. A failure here lets the edit through.
+  on('tool.call', async ($, e, next) => {
+    const field = WRITING_TOOLS[e.tool]
+    const target = field ? (e as unknown as Record<string, unknown>)[field] : undefined
+    if (typeof target !== 'string' || !guidelinesOption.trim() || asksForGuidelines(lastOwnPrompt)) return next(e)
+    const self = await read($, me)
+    const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME')) ?? null
+    const file = guidelinesPath(guidelinesOption, home, self?.projectPath ?? '')
+    if (!isSameFile(target, file)) return next(e)
+
+    return { deny: t('guidelines.locked', { file }) }
+  }).catch(($, e, next) => next(e))
+
   on('prompt.compose', async ($, e, next) => {
     await start($)
     await ensureTools($)
@@ -286,11 +376,26 @@ export const register: Register = (on, options) => {
     if (!self?.isPm) {
       // A session of a project with a PM declares its delivery at its end; other projects' sessions hear nothing.
       const ask = await deliveryAsk($)
+      if (!self || !ask) return composed
+      const rules = await guidelinesSection($, self)
 
-      return ask ? { sections: [...composed.sections, { id: 'project-pm:delivery', text: ask, scope: 'session' as const }] } : composed
+      return {
+        sections: [
+          ...composed.sections,
+          { id: 'project-pm:delivery', text: ask, scope: 'session' as const },
+          ...(rules ? [{ id: 'project-pm:guidelines', text: rules, scope: 'session' as const }] : []),
+        ],
+      }
     }
+    const rules = await guidelinesSection($, self)
 
-    return { sections: [...composed.sections, { id: 'project-pm:role', text: ROLE(self), scope: 'session' as const }] }
+    return {
+      sections: [
+        ...composed.sections,
+        { id: 'project-pm:role', text: ROLE(self), scope: 'session' as const },
+        ...(rules ? [{ id: 'project-pm:guidelines', text: rules, scope: 'session' as const }] : []),
+      ],
+    }
   })
 
   on('command.run', { command: 'pm' }, async ($, e) => {
@@ -298,6 +403,8 @@ export const register: Register = (on, options) => {
     if (/^\s*(off|卸任|取消)\s*$/i.test(e.args)) return { text: await release($) }
     const lang = /^\s*(?:lang|language|語言)(?:\s+(\S+))?\s*$/i.exec(e.args)
     if (lang) return { text: await changeLanguage($, lang[1] ?? '') }
+    const rules = /^\s*(?:guidelines?|rules|準則)(?:\s+([\s\S]+))?$/i.exec(e.args)
+    if (rules) return { text: await changeGuidelines($, rules[1] ?? '') }
     const text = await claim($)
     const self = await read($, me)
     if (!self?.isPm) return { text }

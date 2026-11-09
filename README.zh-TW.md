@@ -109,6 +109,7 @@ Project PM 會讀取每個 Session 的任務清單、收尾摘要與待決策問
 | `/pm off` | 卸任 PM（工作項目會保留，由下一任 PM 接手） |
 | `/board` | 在任何 Session 開啟或收合專案看板 |
 | `/pm lang en`・`/pm lang zh-TW`・`/pm lang auto` | 立即切換看板、PM 與工具的語言，並存成 `language` 選項；`auto` 跟隨系統 |
+| `/pm guidelines <檔案>`・`/pm guidelines off` | 設定或取消開發準則（見下方）；只打 `/pm guidelines` 會顯示目前用的檔案和讀不讀得到 |
 
 PM 有兩個專屬工具（不需要你自己呼叫）：
 
@@ -116,6 +117,18 @@ PM 有兩個專屬工具（不需要你自己呼叫）：
 - `mcp__project-pm__ledger`：工作項目的 `add`、`update`（負責人、狀態 `open`／`done`／`dropped`、備註）與 `list`。
 
 專案以 Session 的工作資料夾區分；`.claude/worktrees/` 或 `.worktrees/` 底下的 git worktree 算在它所屬的 repository。
+
+### 開發準則
+
+把 `guidelines` 選項指向一份你自己寫的 Markdown 準則（怎麼提交、改 schema 前要不要先問、做到哪裡才算完成），PM 和有 PM 的專案裡的其他 Session，每一輪都會在系統提示裡讀到它。PM 另外會被要求執行準則中交給協調者的事（版號、推版和部署的順序、完成定義），子 Session 違反準則時也要指出來。
+
+- **不符合準則的要求先問。** Session 會說明這個要求違反哪一條、問這次是否要例外執行，得到明確同意才做。
+- **例外只算一次。** 做完就回到準則，之後類似的要求會再問一次。PM 會把核准的例外記在對應工作項目的備註。
+- **準則只有你要求時才改。** 除非你在那個 Session 的最新一則訊息提到準則（含「準則」、「守則」或 guideline），否則修改準則檔會被擋下，並提示 Session 先問你。
+
+- 路徑可以是絕對路徑、`~/…`，或相對於各專案資料夾的路徑（例如 `docs/GUIDELINES.md`），讓每個專案各用自己的準則。
+- 每一輪都重新讀檔：改了檔案，各 Session 的下一輪就生效，不用重新載入。內容只留在你的電腦上；超過 24,000 字的部分會截掉，並提示去讀原檔。
+- 用 `/pm guidelines <檔案>` 或 `/config` 裡的 `project-pm.guidelines` 設定。沒有 PM 的專案，Session 不會收到準則。
 
 ## 需求
 
