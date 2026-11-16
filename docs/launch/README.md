@@ -1,13 +1,16 @@
 # Launch kit
 
 Drafts and steps for making the repository public-facing. Each step is a public action, run only
-after the owner has approved it. Steps 1–3 are done (v0.5.0 is the latest release); v0.5.1 (step 4)
+after the owner has approved it. Steps 1–3 are done (v0.7.0 is the latest release); v0.7.1 (step 4)
 is prepared, not released; the posts have not been made.
 
 | File | What it is | Status |
 | --- | --- | --- |
 | [repo-metadata.md](repo-metadata.md) | Repository description, topics and the `gh` command that sets them | Applied 2026-10-19 |
-| [release-v0.5.1.md](release-v0.5.1.md) | Release notes for `v0.5.1`: fixes to how reports are read | Ready, not released |
+| [release-v0.7.1.md](release-v0.7.1.md) | Release notes for `v0.7.1`: released sessions, cherry-picked commits and closed work items | Ready, not released |
+| [release-v0.7.0.md](release-v0.7.0.md) | Release notes for `v0.7.0`: development guidelines | Published 2026-11-09 |
+| [release-v0.6.1.md](release-v0.6.1.md) | Release notes for `v0.6.1`: sessions report in fields, and the PM hears at once | Published 2026-11-06 |
+| [release-v0.5.1.md](release-v0.5.1.md) | Release notes for `v0.5.1`: fixes to how reports are read | Published 2026-10-20 |
 | [release-v0.5.0.md](release-v0.5.0.md) | Release notes for `v0.5.0`: the English and Traditional Chinese interface | Published 2026-10-19 |
 | [release-v0.4.0.md](release-v0.4.0.md) | Release notes for `v0.4.0`, as published (before the English UI) | Published 2026-10-19 |
 | [reddit-claudeai.md](reddit-claudeai.md) | r/ClaudeAI post: a first-person share (mentions the English and Traditional Chinese UI), with a Traditional Chinese reading copy | Two spots for the owner's own words |
@@ -20,10 +23,10 @@ is prepared, not released; the posts have not been made.
 
 2. ~~**Description and topics**~~ (see [repo-metadata.md](repo-metadata.md)). Done 2026-10-19.
 
-3. ~~**Tag and release**~~ `v0.3.2`, `v0.4.0` and `v0.5.0` are published; `v0.5.0` is the latest
-   (https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.5.0).
+3. ~~**Tag and release**~~ `v0.3.2` through `v0.7.0` are published; `v0.7.0` is the latest
+   (https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.7.0).
 
-4. **Push and release `v0.5.1`** (fixes; `.claude-plugin/plugin.json` is already 0.5.1). Push first
+4. **Push and release `v0.7.1`** (fixes; `.claude-plugin/plugin.json` is already 0.7.1). Push first
    and wait for CI to pass, then:
 
    ```bash
@@ -31,7 +34,7 @@ is prepared, not released; the posts have not been made.
    ```
 
    ```bash
-   gh release create v0.5.1 --repo AudiChang-hub/claude-project-pm --target main --title "v0.5.1" --notes-file docs/launch/release-v0.5.1.md
+   gh release create v0.7.1 --repo AudiChang-hub/claude-project-pm --target main --title "v0.7.1" --notes-file docs/launch/release-v0.7.1.md
    ```
 
    For later releases: bump `.claude-plugin/plugin.json`, write `docs/launch/release-v<version>.md`,

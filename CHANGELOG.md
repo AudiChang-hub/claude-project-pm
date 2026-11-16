@@ -7,6 +7,14 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-16
+
+### Added
+- A plugin icon (`.claude-plugin/icon.png`): the PM's completion ring with the ledger's step bars inside, and the sessions as status dots around it, in the board's colours. Its source is `docs/brand/icon.html`.
+
+### Changed
+- The READMEs' Quick start says how to keep the plugin up to date: Claude Code does not update a plugin from a third-party marketplace by itself, so turn on auto-update for it in `/plugin` or update it by hand; open sessions reload a new version when they are idle.
+
 ### Fixed
 - A session that reported `[done, released, <commit>]` showed as *Not released* (push), and the ledger would not close its item without force, when its commit had reached main as a cherry-pick: the commit itself was on its worktree branch only, and main had edited the same files before and after the pick, so neither its SHA nor its file contents were on the remote, and a conflict resolved during the pick changed its patch. A report or declaration of `released` now leaves nothing to deliver, commit and push included. Git also recognises a commit picked or rebased onto a remote branch: on the remote's default branch and the four branches updated last (instead of every remote branch, dozens in some repositories), cheapest first: the same patch (`git cherry`), then a commit of the same title adding at least 95% of its lines, then the same file contents as before (a squash). On the case reported, 9 git commands instead of 79.
 - The board quoted the fixed words its checks read (`Committed as … Delivery: deployed`) beside a verdict they contradicted. Beside a verdict it now quotes the report itself, its status, delivery and commit, then its summary (`[done, released, 3fa1c2e] …`), on the board, in *Needs attention* and in the ledger's refusals.
@@ -130,6 +138,11 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 - A band above the prompt in projects without a PM, offering to start a PM session or make the current one the PM.
 - Notifications to the PM when a session starts waiting on the person or stops with steps left.
 
+[0.7.1]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.7.1
+[0.7.0]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.7.0
+[0.6.1]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.6.1
+[0.6.0]: https://github.com/AudiChang-hub/claude-project-pm/tree/v0.6.0
+[0.5.2]: https://github.com/AudiChang-hub/claude-project-pm/tree/v0.5.2
 [0.5.1]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.5.1
 [0.5.0]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.5.0
 [0.4.0]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.4.0
