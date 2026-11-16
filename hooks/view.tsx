@@ -5,7 +5,7 @@ import { atom, read, update } from 'claude-code'
 import type { ElementConstructor, EngineInterface, RenderInputOf, RenderSurface, SvgProps } from 'claude-code'
 
 import type { CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Step, Track } from '../types'
-import { STATUS, ago, caveatOf, clip, groupProjects, isActive, itemCode, liveTracks, openSteps, projectKey, statusOf } from './sessions'
+import { STATUS, ago, caveatOf, clip, groupProjects, isActive, itemCode, liveTracks, openSteps, projectKey, settledAt, statusOf } from './sessions'
 import type { Project, Status } from './sessions'
 import { archive, claim, dismissBand, refresh, startPmSession } from './actions'
 import { t } from './messages'
@@ -127,7 +127,11 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const svg = (key: string, source: string, alt: string, size?: { width?: number; height?: number }, isInteractive = false) =>
     Svg ? <Svg key={key} source={source} alt={alt} width={size?.width} height={size?.height} isInteractive={isInteractive || undefined} /> : null
 
-  const statusOfOne = (one: Session) => statusOf(one, all[one.id], words[one.id], now, ci[one.id], push[one.id])
+  // Every project's ledger: an owner may work from another project's folder.
+  const allItems = Object.values(files).flatMap(file => file.ledger)
+  const settled = (id: string) => settledAt(id, allItems)
+  const statusOfOne = (one: Session) => statusOf(one, all[one.id], words[one.id], now, ci[one.id], push[one.id], settled(one.id))
+  const caveatOfOne = (one: Session) => (settled(one.id) === undefined ? caveatOf(all[one.id], push[one.id]) : null)
   const groups = groupProjects(state.list)
   const isAll = view === 'all' || !self || self.isScratch
   const shown: Project[] = isAll
@@ -286,7 +290,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
     const track = all[one.id]
     const plan = track?.plan ?? []
     const left = openSteps(track)
-    const caveat = status === 'running' ? null : caveatOf(track, push[one.id])
+    const caveat = status === 'running' ? null : caveatOfOne(one)
     const summary = summaryOf(track, one)
     const isPm = files[projectKey(one.cwd)]?.pmId === one.id
     const meta = [
@@ -403,7 +407,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   // A session that owns open work stays in sight, whatever it is doing.
   const owners = new Set(ledgers.map(({ item }) => item.owner).filter(Boolean))
   const active = (list: Session[]) =>
-    list.filter(one => isActive(statusOfOne(one)) || !!caveatOf(all[one.id], push[one.id]) || one.hasOpenPr || owners.has(one.id)).sort(byRank)
+    list.filter(one => isActive(statusOfOne(one)) || !!caveatOfOne(one) || one.hasOpenPr || owners.has(one.id)).sort(byRank)
   const ended = (list: Session[]) => list.filter(one => !active(list).includes(one))
 
   const sessionsBlock = (project: Project) => {

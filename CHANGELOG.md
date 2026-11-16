@@ -7,6 +7,11 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+### Fixed
+- A session that reported `[done, released, <commit>]` showed as *Not released* (push), and the ledger would not close its item without force, when its commit had reached main as a cherry-pick: the commit itself was on its worktree branch only, and main had edited the same files before and after the pick, so neither its SHA nor its file contents were on the remote, and a conflict resolved during the pick changed its patch. A report or declaration of `released` now leaves nothing to deliver, commit and push included. Git also recognises a commit picked or rebased onto a remote branch: on the remote's default branch and the four branches updated last (instead of every remote branch, dozens in some repositories), cheapest first: the same patch (`git cherry`), then a commit of the same title adding at least 95% of its lines, then the same file contents as before (a squash). On the case reported, 9 git commands instead of 79.
+- The board quoted the fixed words its checks read (`Committed as … Delivery: deployed`) beside a verdict they contradicted. Beside a verdict it now quotes the report itself, its status, delivery and commit, then its summary (`[done, released, 3fa1c2e] …`), on the board, in *Needs attention* and in the ledger's refusals.
+- A session whose work items were all closed, by force or not, stayed under *Needs attention* and in the counters as long as its report still read as not released or its task list had steps left. Once every item it owns is done, and closed after its last report or turn, those verdicts give way to the person's; it shows again when it reports or ends a turn after that. Running, waiting on the person, CI and background work still show.
+
 ## [0.7.0] - 2026-11-09
 
 ### Added

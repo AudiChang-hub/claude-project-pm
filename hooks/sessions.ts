@@ -221,6 +221,30 @@ export function latestWords(track: Track): string {
   return words.filter(Boolean).join('\n')
 }
 
+/**
+ * The session's latest word as people read it, for the board to quote beside its verdict: its report (status, delivery
+ * and commit, then its summary) when it made one, never the fixed words the checks read (reportWords); else its recap
+ * and final answer, or the transcript's last word.
+ */
+export function quoteOf(track: Track | undefined, word: LastWord | undefined): string {
+  const report = track?.report
+  if (report) return `[${[report.status, report.delivery, report.commit].filter(Boolean).join(', ')}] ${report.summary}`.trim()
+
+  return ciWords(track, word)
+}
+
+/**
+ * When the person closed this session's work in the ledger: the latest update of the items it owns, all done (none
+ * open), or undefined while any is open or it owns none. A verdict read from its words (not delivered, steps left)
+ * gives way to it until the session reports again (statusOf).
+ */
+export function settledAt(id: string, ledger: LedgerItem[]): number | undefined {
+  const owned = ledger.filter(item => item.owner === id && item.status !== 'dropped')
+  if (owned.length === 0 || owned.some(item => item.status !== 'done')) return undefined
+
+  return Math.max(...owned.map(item => item.updatedAt))
+}
+
 /** The words statusOf reads for CI: the track's latest turn, else the transcript's last word. */
 export function ciWords(track: Track | undefined, word: LastWord | undefined): string {
   return track ? latestWords(track) : (word?.said ?? '')
@@ -677,8 +701,11 @@ export function declaredOf(text: string): 'none' | 'done' | 'pending' | null {
  * Otherwise the words (undeliveredOf), which count only work said to be left.
  */
 export function leftOf(text: string, push: PushCheck | undefined): DeliveryKind[] {
-  const kinds = new Set(undeliveredOf(text)?.kinds ?? [])
   const declared = declaredOf(text)
+  // Released (a report's `released`, 交付：已部署): live, so pushed and committed too, however its commit was carried
+  // there (a cherry-pick or rebase git may not tie back to it). Nothing is left.
+  if (declared === 'done') return []
+  const kinds = new Set(undeliveredOf(text)?.kinds ?? [])
   if (declared === 'pending') kinds.add('release')
   else if (declared) kinds.delete('release')
   if (push?.words === text) {
@@ -705,6 +732,12 @@ const CONTENT_COMMITS = 20
 /** How many local branches holding a commit, and of its descendants on each, are tried, newest first. */
 const DESCENDANT_TIPS = 3
 const DESCENDANTS = 5
+/** How many remote branches the content checks try: the remote's default branch first, then the latest updated. */
+const REMOTES_TRIED = 5
+/** How many commits of the same title on a remote branch are compared. */
+const SAME_TITLED = 3
+/** The share of a commit's added lines a commit of the same title must add too, to be that change picked over. */
+const SAME_LINES = 0.95
 
 /** Each file's blob in `commit`, from `git ls-tree -r -z`; a file absent there is absent here. */
 async function blobsOf(git: Git, commit: string, files: string[]): Promise<Map<string, string> | null> {
@@ -725,44 +758,90 @@ function isSameContent(a: Map<string, string>, b: Map<string, string>, files: st
 }
 
 /**
- * Whether the files `sha` changed (since its merge-base with a remote branch) hold, at that branch's tip or at
- * one of its commits since the base that touched them, exactly what they hold in `sha`: its content reached
- * the remote, as itself, rebased, cherry-picked or as the last of several commits squashed into one.
+ * The remote branches worth comparing a commit with: the remote's default branch (origin/HEAD) first, then those
+ * updated last. A repository may keep dozens of old ones; the commit itself is found on any (`branch -r --contains`).
  */
+async function remotesToTry(git: Git): Promise<string[]> {
+  const main = (await git(['symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD'])) ?? ''
+  const refs = ((await git(['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/remotes'])) ?? '').split('\n')
+  const all = [main, ...refs].map(r => r.trim()).filter(r => r && !r.endsWith('/HEAD') && r.includes('/'))
+
+  return [...new Set(all)].slice(0, REMOTES_TRIED)
+}
+
+/** The lines a commit adds, by file, trimmed, blank ones left out (`git diff-tree -p`). */
+async function addedLines(git: Git, commit: string): Promise<Map<string, string[]>> {
+  const lines = new Map<string, string[]>()
+  let file: string | null = null
+  for (const line of ((await git(['-c', 'core.quotepath=off', 'diff-tree', '-p', '-r', '--no-color', '--no-commit-id', commit])) ?? '').split('\n')) {
+    if (line.startsWith('+++ ')) file = line.startsWith('+++ b/') ? line.slice(6) : null
+    else if (file && line.startsWith('+') && line.slice(1).trim()) lines.set(file, [...(lines.get(file) ?? []), line.slice(1).trim()])
+  }
+
+  return lines
+}
+
+/**
+ * Whether `remote` holds the change `sha` made, though not `sha` itself, after `base` (their merge-base). Cheapest first:
+ * - `git cherry`: a commit there with the same patch (patch-id), as a clean cherry-pick or rebase leaves it.
+ * - A commit there with the same title that adds nearly all the lines `sha` adds (SAME_LINES): a cherry-pick whose
+ *   conflicts were resolved on the way, the files having changed on the remote in between.
+ * - The files `sha` changed hold exactly its content at the tip or at one of the commits since the base that touched
+ *   them: the last of several commits squashed into one.
+ */
+async function isChangeOnRemote(git: Git, sha: string, remote: string, base: string): Promise<boolean> {
+  if (((await git(['cherry', remote, sha, `${sha}^`])) ?? '').startsWith('-')) return true
+  const title = await git(['log', '-1', '--format=%s', sha])
+  if (title) {
+    const titled = ((await git(['log', '--format=%H%x09%s', '--fixed-strings', `--grep=${title}`, `${base}..${remote}`])) ?? '')
+      .split('\n')
+      .filter(line => line.slice(line.indexOf('\t') + 1) === title)
+      .map(line => line.slice(0, line.indexOf('\t')))
+    if (titled.length) {
+      const mine = [...(await addedLines(git, sha))].flatMap(([file, lines]) => lines.map(line => `${file}\0${line}`))
+      for (const other of titled.slice(0, SAME_TITLED)) {
+        const theirs = new Set([...(await addedLines(git, other))].flatMap(([file, lines]) => lines.map(line => `${file}\0${line}`)))
+        if (mine.length && mine.filter(line => theirs.has(line)).length >= mine.length * SAME_LINES) return true
+      }
+    }
+  }
+  const files = ((await git(['-c', 'core.quotepath=off', 'diff', '--name-only', '-z', base, sha])) ?? '').split('\0').filter(Boolean)
+  // Nothing of its own beyond the base the remote already holds.
+  if (files.length === 0) return true
+  if (files.length > CONTENT_FILES) return false
+  const mine = await blobsOf(git, sha, files)
+  if (!mine) return false
+  const touched = ((await git(['log', '--format=%H', `-${CONTENT_COMMITS}`, `${base}..${remote}`, '--', ...files])) ?? '').split('\n').filter(Boolean)
+  for (const commit of [remote, ...touched]) {
+    const theirs = await blobsOf(git, commit, files)
+    if (theirs && isSameContent(mine, theirs, files)) return true
+  }
+
+  return false
+}
+
 async function isContentOnRemote(git: Git, sha: string, remotes: string[]): Promise<boolean> {
   for (const remote of remotes) {
     const base = await git(['merge-base', sha, remote])
-    if (!base) continue
-    const files = ((await git(['-c', 'core.quotepath=off', 'diff', '--name-only', '-z', base, sha])) ?? '').split('\0').filter(Boolean)
-    // Nothing of its own beyond the base the remote already holds.
-    if (files.length === 0) return true
-    if (files.length > CONTENT_FILES) continue
-    const mine = await blobsOf(git, sha, files)
-    if (!mine) continue
-    const touched = ((await git(['log', '--format=%H', `-${CONTENT_COMMITS}`, `${base}..${remote}`, '--', ...files])) ?? '').split('\n').filter(Boolean)
-    for (const commit of [remote, ...touched]) {
-      const theirs = await blobsOf(git, commit, files)
-      if (theirs && isSameContent(mine, theirs, files)) return true
-    }
+    if (base && (await isChangeOnRemote(git, sha, remote, base))) return true
   }
 
   return false
 }
 
 /**
- * Whether what `sha` changed has reached a remote branch: the commit itself is on one; or its content is
- * (isContentOnRemote); or the content of one of its descendants on a local branch is, newest first. The last
- * covers an earlier commit of several squashed into one: its lines may have been edited again by the later
- * ones, so only the squash's last commit matches the pushed content, and that commit holds this one's work.
+ * Whether what `sha` changed has reached a remote branch: the commit itself is on one; or its change is, picked over or
+ * squashed (isChangeOnRemote, on the branches remotesToTry names); or the content of one of its descendants on a local
+ * branch is, newest first. The last covers an earlier commit of several squashed into one: its lines may have been
+ * edited again by the later ones, so only the squash's last commit matches the pushed content.
  *
- * Anything else reads as not pushed, even when the remote holds the work in another form (only part of it,
- * or edited on top before any match): the safe way, since a work item wrongly kept undelivered shows and can
- * be closed by hand, while one wrongly delivered disappears from the board.
+ * Anything else reads as not pushed, even when the remote holds the work in another form (only part of it, or edited
+ * on top before any match): the safe way, since a work item wrongly kept undelivered shows and can be closed by hand,
+ * while one wrongly delivered disappears from the board.
  */
 export async function isPushedContent(git: Git, sha: string): Promise<boolean> {
   if (await git(['branch', '-r', '--contains', sha])) return true
-  const refs = (await git(['for-each-ref', '--format=%(refname:short)', 'refs/remotes'])) ?? ''
-  const remotes = refs.split('\n').map(r => r.trim()).filter(r => r && !r.endsWith('/HEAD') && r.includes('/'))
+  const remotes = await remotesToTry(git)
   if (remotes.length === 0) return false
   if (await isContentOnRemote(git, sha, remotes)) return true
   const tips = ((await git(['for-each-ref', '--contains', sha, '--format=%(objectname)', 'refs/heads'])) ?? '').split('\n').filter(Boolean)
@@ -809,9 +888,20 @@ function ciStatus(text: string, ci: CiCheck | undefined): Status | null {
   return known === 'failure' ? 'failed' : 'ci'
 }
 
-export function statusOf(one: Session, track: Track | undefined, word: LastWord | undefined, now: number, ci?: CiCheck, push?: PushCheck): Status {
+export function statusOf(
+  one: Session,
+  track: Track | undefined,
+  word: LastWord | undefined,
+  now: number,
+  ci?: CiCheck,
+  push?: PushCheck,
+  settled?: number,
+): Status {
   if (one.isRunning) return 'running'
   const minutes = (now - (Date.parse(one.lastActivityAt) || 0)) / 60000
+  // The person closed its work (settledAt) after its last report or turn: what its words leave is theirs to judge, and
+  // they judged it. Running, asking, CI and background work still show: they are what is happening, not a reading.
+  const isSettled = settled !== undefined && settled >= Math.max(track?.reportAt ?? 0, track?.turnAt ?? 0, Date.parse(word?.activity ?? '') || 0)
   if (track) {
     // The session's own report says where it stands; facts (git, GitHub) still check what it reported below.
     const reported = track.report?.status
@@ -826,15 +916,15 @@ export function statusOf(one: Session, track: Track | undefined, word: LastWord 
     if (backgroundOf(track, now).length > 0) return 'waiting'
     // Words alone say the same for a while: a session that never came back has stopped after all.
     if (!track.report && WAITING.test(reportedText(track.lastAnswer)) && minutes < WAITING_MINUTES) return 'waiting'
-    if (openSteps(track).length > 0) return 'open'
+    if (openSteps(track).length > 0 && !isSettled) return 'open'
     // Not committed, pushed or released, however ticked its task list (wrap_up ticks every step).
-    if (isUndelivered(latestWords(track), push)) return 'unreleased'
+    if (isUndelivered(latestWords(track), push) && !isSettled) return 'unreleased'
   } else {
     if (word?.isAsking) return 'asking'
     const pending = word ? ciStatus(word.said, ci) : null
     if (pending) return pending
     if (word?.isWaiting && minutes < WAITING_MINUTES) return 'waiting'
-    if (word && isUndelivered(word.said, push)) return 'unreleased'
+    if (word && isUndelivered(word.said, push) && !isSettled) return 'unreleased'
   }
 
   return minutes > STALE_DAYS * 24 * 60 ? 'stale' : 'done'
@@ -970,8 +1060,9 @@ export function boardText(input: BoardInput): string {
   const tracks = liveTracks(everyone, input.tracks, words)
   const ci = input.ci ?? {}
   const push = input.push ?? {}
+  const settled = (id: string) => settledAt(id, ledger)
   const rows = sessions
-    .map(one => ({ one, track: tracks[one.id], word: words[one.id], status: statusOf(one, tracks[one.id], words[one.id], now, ci[one.id], push[one.id]) }))
+    .map(one => ({ one, track: tracks[one.id], word: words[one.id], status: statusOf(one, tracks[one.id], words[one.id], now, ci[one.id], push[one.id], settled(one.id)) }))
     .sort((a, b) => STATUS[a.status].rank - STATUS[b.status].rank)
   const lines: string[] = []
   lines.push(t('board.title', { project: project.name }), t('board.path', { path: project.path }))
@@ -1005,17 +1096,17 @@ export function boardText(input: BoardInput): string {
       const left = openSteps(r.track)
       attention.push(t('board.attention.open', { name, n: left.length, steps: left.map(s => s.content).join(t('list.steps')) }))
     }
-    if (r.status === 'ci') attention.push(t('board.attention.ci', { name, said: clip(ciWords(r.track, r.word), 200) }))
+    if (r.status === 'ci') attention.push(t('board.attention.ci', { name, said: clip(quoteOf(r.track, r.word), 200) }))
     if (r.status === 'unreleased') {
-      const words = ciWords(r.track, r.word)
-      attention.push(t('board.attention.unreleased', { name, kinds: deliveryText(leftOf(words, push[r.one.id])), said: clip(words, 200) }))
+      const kinds = deliveryText(leftOf(ciWords(r.track, r.word), push[r.one.id]))
+      attention.push(t('board.attention.unreleased', { name, kinds, said: clip(quoteOf(r.track, r.word), 200) }))
     }
     if (r.status === 'failed') {
       const target = ci[r.one.id]?.target || t('board.attention.failedTarget')
-      attention.push(t('board.attention.failed', { name, target, said: clip(ciWords(r.track, r.word), 200) }))
+      attention.push(t('board.attention.failed', { name, target, said: clip(quoteOf(r.track, r.word), 200) }))
     }
     const caveat = caveatOf(r.track, push[r.one.id])
-    if (caveat && !['running', 'ci', 'failed', 'unreleased'].includes(r.status)) attention.push(t('board.attention.caveat', { name, said: clip(caveat, 200) }))
+    if (caveat && settled(r.one.id) === undefined && !['running', 'ci', 'failed', 'unreleased'].includes(r.status)) attention.push(t('board.attention.caveat', { name, said: clip(caveat, 200) }))
     if (r.one.hasOpenPr && r.status !== 'running') attention.push(t('board.attention.pr', { name }))
   }
   const openLedger = ledger.filter(item => item.status === 'open')
@@ -1030,7 +1121,7 @@ export function boardText(input: BoardInput): string {
     if (!id) return t('board.owner.unassigned')
     const one = everyone.find(s => s.id === id)
     if (!one) return t('board.owner.gone', { id })
-    const status = statusOf(one, tracks[id], words[id], now, ci[id], push[id])
+    const status = statusOf(one, tracks[id], words[id], now, ci[id], push[id], settled(id))
 
     return t('board.owner.status', { title: one.title, tag: STATUS[status].tag, elsewhere: inProject.has(id) ? '' : t('board.owner.elsewhere') })
   }
@@ -1048,7 +1139,8 @@ export function boardText(input: BoardInput): string {
   let listed = 0
   for (const r of rows) {
     const isOwner = openLedger.some(item => item.owner === r.one.id)
-    if (!input.isIncludingDone && !isActive(r.status) && !caveatOf(r.track, push[r.one.id]) && !r.one.hasOpenPr && !isOwner) continue
+    const isCaveat = !!caveatOf(r.track, push[r.one.id]) && settled(r.one.id) === undefined
+    if (!input.isIncludingDone && !isActive(r.status) && !isCaveat && !r.one.hasOpenPr && !isOwner) continue
     listed += 1
     const flags = [r.one.hasOpenPr ? t('board.flag.pr') : '', r.one.isPinned ? t('board.flag.pinned') : ''].filter(Boolean).join(t('list.joiner'))
     lines.push(`### [${STATUS[r.status].tag}] ${r.one.title} (${r.one.id})`)

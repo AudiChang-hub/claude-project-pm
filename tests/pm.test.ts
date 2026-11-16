@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { applyPlan, betterCi, caveatOf, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, statusOf, undeliveredOf } from '../hooks/sessions'
+import { applyPlan, betterCi, boardText, caveatOf, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, statusOf, undeliveredOf } from '../hooks/sessions'
 import { closesBoard } from '../hooks/actions'
 import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hooks/messages'
 import type { Lang, MessageKey } from '../hooks/messages'
@@ -1209,8 +1209,12 @@ test('GitHub is asked about a commit of this repository, else about its HEAD', Z
   expect(await board()).toMatch(/\[等待 CI・未完成\] 「商品列表頁」/)
 })
 
-/** A repository from memory: each commit's parent and files (path to blob), its local and remote branch tips. */
-function fakeGit(commits: Record<string, { parent: string | null; files: Record<string, string> }>, heads: Record<string, string>, remotes: Record<string, string>) {
+/**
+ * A repository from memory: each commit's parent and files (path to blob), its local and remote branch tips. A commit
+ * may also have a title, the lines it adds by file (`git diff-tree -p`) and a patch id (`git cherry`).
+ */
+type FakeCommit = { parent: string | null; files: Record<string, string>; title?: string; added?: Record<string, string[]>; patch?: string }
+function fakeGit(commits: Record<string, FakeCommit>, heads: Record<string, string>, remotes: Record<string, string>) {
   const chain = (id: string) => {
     const ids: string[] = []
     for (let at: string | null = id; at; at = commits[at]!.parent) ids.push(at)
@@ -1227,6 +1231,22 @@ function fakeGit(commits: Record<string, { parent: string | null; files: Record<
 
   return async (args: string[]): Promise<string | null> => {
     const [cmd] = args
+    if (cmd === '-c' && args[2] === 'diff-tree') {
+      const added = commits[args.at(-1)!]!.added ?? {}
+      return Object.entries(added).map(([file, lines]) => [`--- a/${file}`, `+++ b/${file}`, '@@ -1 +1 @@', ...lines.map(line => `+${line}`)].join('\n')).join('\n')
+    }
+    if (cmd === 'cherry') {
+      // Equivalent when a commit on the remote since the base has the same patch.
+      const base = chain(args[2]!).find(id => holds(remotes[args[1]!]!, id))!
+      const same = chain(remotes[args[1]!]!).filter(id => !holds(base, id)).some(id => commits[id]!.patch && commits[id]!.patch === commits[args[2]!]!.patch)
+      return `${same ? '-' : '+'} ${args[2]}`
+    }
+    if (cmd === 'log' && args[1] === '-1') return commits[args[3]!]!.title ?? ''
+    if (cmd === 'log' && args.some(a => a.startsWith('--grep='))) {
+      const title = args.find(a => a.startsWith('--grep='))!.slice('--grep='.length)
+      const [from, to] = args.at(-1)!.split('..') as [string, string]
+      return chain(remotes[to] ?? to).filter(id => !holds(from, id) && commits[id]!.title === title).map(id => `${id}\t${title}`).join('\n')
+    }
     if (cmd === 'branch') return Object.keys(remotes).filter(r => holds(remotes[r]!, args[3]!)).join('\n')
     if (cmd === 'for-each-ref' && args.includes('refs/remotes')) return Object.keys(remotes).join('\n')
     if (cmd === 'for-each-ref') return Object.values(heads).filter(h => holds(h, args[2]!)).join('\n')
@@ -1423,10 +1443,11 @@ test('the language: the option when it names one, else the system, any Chinese r
 
 test('in English: the board, the ledger and the pane', { options: { language: 'en' } }, async ($, on) => {
   const files: Files = new Map()
-  const item = (id: number, status: string, owner: string | null) => ({ id, text: `Item ${id}`, owner, status, note: '', createdAt: NOW, updatedAt: NOW })
+  // Item 1 was closed before its owner worked on: the steps it left since still show.
+  const item = (id: number, status: string, owner: string | null, at = NOW) => ({ id, text: `Item ${id}`, owner, status, note: '', createdAt: at, updatedAt: at })
   files.set(
     PROJECT_FILE,
-    JSON.stringify({ key: projectKey(PROJECT), name: 'Acme shop admin', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item(1, 'done', 'local_open'), item(2, 'open', 'local_ask'), item(3, 'open', null)], nextId: 4 }),
+    JSON.stringify({ key: projectKey(PROJECT), name: 'Acme shop admin', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item(1, 'done', 'local_open', NOW - 3_600_000), item(2, 'open', 'local_ask'), item(3, 'open', null)], nextId: 4 }),
   )
   files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { plan: [{ content: 'Draw the table', status: 'completed' }, { content: 'Add filters', status: 'pending' }] })))
   files.set(`${DIR}/sessions/local_ask.json`, JSON.stringify(track('local_ask', { lastAnswer: 'Pushed to main; CI is still running.' })))
@@ -1928,4 +1949,86 @@ test('the guidelines file is edited only in a turn whose message asks about the 
   await $.prompt.submit({ text: '請把準則第 5 條改成可以一次提交兩件事' } as never)
   await edit(String.raw`C:\home\Documents\rules.md`)
   expect(edits).toEqual(['C:/home/Documents/other.md', String.raw`C:\home\Documents\rules.md`])
+})
+
+test('a commit cherry-picked to main is pushed, though its SHA, its patch and the files around it differ', async () => {
+  const lines = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => `${prefix} line ${i}`)
+  const commits: Record<string, FakeCommit> = {
+    base: { parent: null, files: { 'list.ts': 'l0', 'form.ts': 'f0' } },
+    // The session's commit, on its worktree branch only.
+    X: { parent: 'base', files: { 'list.ts': 'l1', 'form.ts': 'f1' }, title: 'T-01 Bulk edit on the list', added: { 'list.ts': lines('list', 20), 'form.ts': ['field a', 'field b'] }, patch: 'pX' },
+    // Main edited form.ts first, so the pick resolved a conflict there: one line differs, and so does the patch.
+    m1: { parent: 'base', files: { 'list.ts': 'l0', 'form.ts': 'f0m' }, title: 'Rename a label' },
+    Y: { parent: 'm1', files: { 'list.ts': 'l1', 'form.ts': 'f1m' }, title: 'T-01 Bulk edit on the list', added: { 'list.ts': lines('list', 20), 'form.ts': ['field a', 'field b (merged)'] }, patch: 'pY' },
+    // Tagged and released at Y; then main edited the same file again.
+    m2: { parent: 'Y', files: { 'list.ts': 'l2', 'form.ts': 'f1m' }, title: 'Tidy the list' },
+    // A clean pick of another commit: the same patch.
+    Z: { parent: 'base', files: { 'list.ts': 'l0', 'form.ts': 'f0z' }, title: 'T-02 Fix a typo', added: { 'form.ts': ['typo fixed'] }, patch: 'pZ' },
+    m3: { parent: 'm2', files: { 'list.ts': 'l2', 'form.ts': 'f1mz' }, title: 'T-02 Fix a typo (picked)', added: { 'form.ts': ['typo fixed'] }, patch: 'pZ' },
+    // The same title as X, but another change: not the same work.
+    W: { parent: 'base', files: { 'list.ts': 'lw', 'form.ts': 'f0' }, title: 'T-01 Bulk edit on the list', added: { 'list.ts': lines('other', 20) }, patch: 'pW' },
+  }
+  const git = fakeGit(commits, { worktree: 'X', fix: 'Z', other: 'W' }, { 'origin/main': 'm3' })
+
+  // Neither its SHA nor its blobs are on main, and its patch differs: its title and its lines are.
+  expect(await isPushedContent(git, 'X')).toBe(true)
+  // A clean pick: git cherry finds it by its patch.
+  expect(await isPushedContent(git, 'Z')).toBe(true)
+  expect(await isPushedContent(git, 'W')).toBe(false)
+})
+
+test('a released report is delivered, and the ledger closes it without force', ZH, async ($, on) => {
+  const files: Files = new Map()
+  const item = { id: 1, text: '清單批次修改', owner: 'local_open', status: 'open', note: '', createdAt: NOW - 7_200_000, updatedAt: NOW - 7_200_000 }
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item], nextId: 2 }))
+  // Its commit is on a worktree branch only; main holds a cherry-pick git cannot tie back to it here.
+  const report = { status: 'done', summary: 'T-01 已隨 2.4.1 上線', delivery: 'released', commit: '3fa1c2e' }
+  const plan = Array.from({ length: 6 }, (_, i) => ({ content: `步驟 ${i + 1}`, status: 'completed' }))
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { plan, report, reportAt: NOW - 600_000 - 1, lastAnswer: 'T-01 已隨 2.4.1 上線。' })))
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files, [], argv => (argv[0] === 'git' && argv[1] === 'rev-parse' ? { exitCode: 0, stdout: '3fa1c2e' } : null))
+  await $.session.start(START)
+  await clock.advance(61_000)
+  const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(board).not.toMatch(/待發布・未完成\] 「商品列表頁」/)
+  expect(board).not.toMatch(/Committed as|Delivery: deployed/)
+  const close = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done' } as never)) as { result?: unknown }).result)
+  expect(close).toMatch(/已更新工作項目 T-01/)
+})
+
+test('work the person closed in the ledger leaves the attention list until the session reports again', ZH, async ($, on) => {
+  const files: Files = new Map()
+  const closed = { id: 1, text: '清單批次修改', owner: 'local_open', status: 'done', note: '使用者確認結案', createdAt: NOW - 7_200_000, updatedAt: NOW - 60_000 }
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [closed], nextId: 2 }))
+  // Its words still leave a push: the person judged it and closed the item after them.
+  const said = (turnAt: number, lastAnswer = '2.4.1 還沒 push，等 PM 確認。') => track('local_open', { lastAnswer, turnAt, planAt: turnAt })
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(said(NOW - 600_000)))
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+  await clock.advance(400)
+  const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  const before = await board()
+  expect(before).not.toMatch(/待發布・未完成\] 「商品列表頁」/)
+  expect(before).toMatch(/待發布 0/)
+
+  // It speaks again after the close: its words count again.
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(said(NOW + 30_000, '2.4.1 還是沒 push，還在等 PM 確認。')))
+  await clock.advance(61_000)
+  expect(await board()).toMatch(/\[待發布・未完成\] 「商品列表頁」\(local_open\) 最後回報尚未交付（push）/)
+})
+
+test('the board quotes the report itself beside its verdict, never the words its checks read', ZH, () => {
+  const one = { id: 'local_open', title: '商品列表頁', cwd: PROJECT, isRunning: false, lastActivityAt: new Date(NOW - 5 * 60_000).toISOString(), isPinned: false, hasOpenPr: false }
+  const report = { status: 'done', summary: 'T-01 完成，等 PM 放行後部署', delivery: 'pending', commit: '3fa1c2e' }
+  const text = boardText({
+    project: { name: 'Acme 商店後台', path: PROJECT },
+    sessions: [one],
+    tracks: { local_open: track('local_open', { report, reportAt: NOW - 600_000 - 1 }) as never },
+    words: {},
+    ledger: [],
+    now: NOW,
+  } as never)
+  expect(text).toMatch(/\[待發布・未完成\] 「商品列表頁」\(local_open\) 最後回報尚未交付（發布／部署／上線），不能視為完成：\[done, pending, 3fa1c2e\] T-01 完成，等 PM 放行後部署/)
+  expect(text).not.toMatch(/Committed as|Delivery: pending/)
 })

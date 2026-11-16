@@ -25,6 +25,8 @@ import {
   latestWords,
   leftOf,
   liveTracks,
+  quoteOf,
+  settledAt,
   openSteps,
   ownCommitOf,
   parseLastWord,
@@ -660,11 +662,12 @@ export async function announce($: EngineInterface) {
   const all = liveTracks(state.list, await read($, tracks), words)
   const ci = await read($, ciChecks)
   const push = await read($, pushChecks)
+  const items = Object.values(await read($, projects)).flatMap(file => file.ledger)
   const now = await $.clock.now()
   const now_ = new Map<string, Status>()
   for (const one of state.list) {
     if (projectKey(one.cwd) !== self.projectKey) continue
-    now_.set(one.id, statusOf(one, all[one.id], words[one.id], now, ci[one.id], push[one.id]))
+    now_.set(one.id, statusOf(one, all[one.id], words[one.id], now, ci[one.id], push[one.id], settledAt(one.id, items)))
   }
   const before = statusesBefore
   statusesBefore = now_
@@ -1051,17 +1054,17 @@ async function ownerBlocker($: EngineInterface, ownerId: string): Promise<string
       if (check.state !== 'success') {
         const why = check.state === 'failure' ? t('blocker.ciFailedOn', { target: check.target }) : t('blocker.ciRunning')
 
-        return t('blocker.quoted', { title, why, said: clip(said, 120) })
+        return t('blocker.quoted', { title, why, said: clip(quoteOf(track, undefined), 120) })
       }
     }
     const left = leftOf(said, await checkPush($, ownerId, track.cwd, said))
     if (left.length === 0) return null
 
-    return t('blocker.quoted', { title, why: t('blocker.undelivered', { kinds: deliveryText(left) }), said: clip(said, 120) })
+    return t('blocker.quoted', { title, why: t('blocker.undelivered', { kinds: deliveryText(left) }), said: clip(quoteOf(track, undefined), 120) })
   }
   await checkPush($, ownerId, one.cwd, ciWords(track, words[ownerId]))
   const status = statusOf(one, track, words[ownerId], await $.clock.now(), (await read($, ciChecks))[ownerId], (await read($, pushChecks))[ownerId])
-  const said = ciWords(track, words[ownerId])
+  const said = quoteOf(track, words[ownerId])
   const blocking: Partial<Record<Status, true>> = { ci: true, failed: true, unreleased: true, running: true, waiting: true, asking: true, open: true }
   if (!blocking[status]) return null
   const why = t(`blocker.why.${status as 'ci' | 'failed' | 'unreleased' | 'running' | 'waiting' | 'asking' | 'open'}`)

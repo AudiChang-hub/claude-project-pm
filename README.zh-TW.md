@@ -103,9 +103,11 @@ Project PM 會讀取每個 Session 的任務清單、收尾摘要與待決策問
 
 事實優先，文字最後：
 
-1. **commit 和 push 看 git。** PM 會讀自己專案每個 Session 的資料夾，只讀、不 fetch。資料夾沒有未提交的修改，就沒有要 commit 的。回報說是自己的 commit（commit 是 3fa1c2e、提交為 3fa1c2e、amend 成 3fa1c2e），或乾淨資料夾的 HEAD 已經在遠端分支上，就沒有要 push 的；回報說是自己的 commit 卻不在任何遠端分支上，不管文字怎麼寫，都算還沒 push。git 只用來確認或解除：共用資料夾可能有別的 Session 的修改，所以資料夾有修改本身不會多算一項。
-2. **工作狀態看 Session 自己的回報。** 有 PM 的專案，其他 Session 會多一個 `report` 工具（`mcp__project-pm__report`），並被要求在完成、暫停或卡住時呼叫：填 `status`（`done`、`in_progress`、`blocked`、`waiting_user`、`waiting_ci`、`waiting_release`）、一句話的 `summary`，有的話再填 `commit`、還在跑的 `ci` 和 `delivery`（`not_needed`、`released`、`pending`）。看板只看這些欄位，不讀摘要的文字；回報裡的 commit 和 CI run 仍會用 git（第 1 點）和 GitHub 查證。回報只代表做出回報的那一輪。無法呼叫工具的 Session，改在收尾摘要最後加一行：`交付：不需要部署`、`交付：已部署（…）` 或 `交付：待部署（等…）`（英文是 `Delivery: not needed`、`deployed (…)`、`pending (…)`）。沒有 PM 的專案，Session 不會收到任何指示。
+1. **commit 和 push 看 git。** PM 會讀自己專案每個 Session 的資料夾，只讀、不 fetch。資料夾沒有未提交的修改，就沒有要 commit 的。回報說是自己的 commit（commit 是 3fa1c2e、提交為 3fa1c2e、amend 成 3fa1c2e），或乾淨資料夾的 HEAD 已經在遠端分支上，就沒有要 push 的；回報說是自己的 commit 卻不在任何遠端分支上，不管文字怎麼寫，都算還沒 push。cherry-pick 或 rebase 到遠端分支的 commit，SHA 雖然不同，也算已 push：PM 會在遠端的預設分支和最近更新的四條分支上找，由便宜到貴依序比對：同一個 patch（`git cherry`）、標題相同且至少包含它 95% 新增行的 commit（中途解過衝突也認得）、檔案內容相同（squash）。git 只用來確認或解除：共用資料夾可能有別的 Session 的修改，所以資料夾有修改本身不會多算一項。
+2. **工作狀態看 Session 自己的回報。** 有 PM 的專案，其他 Session 會多一個 `report` 工具（`mcp__project-pm__report`），並被要求在完成、暫停或卡住時呼叫：填 `status`（`done`、`in_progress`、`blocked`、`waiting_user`、`waiting_ci`、`waiting_release`）、一句話的 `summary`，有的話再填 `commit`、還在跑的 `ci` 和 `delivery`（`not_needed`、`released`、`pending`）。看板只看這些欄位，不讀摘要的文字；回報裡的 commit 和 CI run 仍會用 git（第 1 點）和 GitHub 查證。回報只代表做出回報的那一輪。`released`（或「交付：已部署」）代表什麼都不剩，commit 和 push 也算完成，不管 commit 是用什麼方式進到發布的版本；看板引用的是回報本身（`[done, released, 3fa1c2e] …`），和判斷理由放在一起。無法呼叫工具的 Session，改在收尾摘要最後加一行：`交付：不需要部署`、`交付：已部署（…）` 或 `交付：待部署（等…）`（英文是 `Delivery: not needed`、`deployed (…)`、`pending (…)`）。沒有 PM 的專案，Session 不會收到任何指示。
 3. **兩者都沒有時，才看文字。** 只有明確說工作還沒做、還要做，才算沒交付：還沒、尚未、未、not yet；接下來要做的（之後再部署、I'll push after review）；在等的（等 PM 放行後部署）；或還留在這裡的（只在本機，沒有 push）。單純的否定（沒有打標籤也沒有部署、didn't push）不算，因為它常常是「這次不需要」的意思。描述規則或舉例的句子、引號裡的字、別人的工作、描述看板的句子，都會先排除。
+
+工作項目結案就算定案：一個 Session 負責的工作項目全部完成後，從回報讀出的判斷（待發布、還有步驟）就不再列進「需要處理」，直到它再次回報。正在發生的狀態（執行中、待回覆、CI、背景執行）照常顯示。
 
 這樣會放過的情況：Session 沒有宣告、也沒寫出自己的 commit，只寫「沒有 commit」但其實真的沒提交，或只寫「沒有部署」但其實該部署。宣告、回報寫出自己的 commit，或任務清單還沒完成的步驟，都能把這些情況補回來。
 
