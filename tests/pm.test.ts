@@ -2018,17 +2018,29 @@ test('work the person closed in the ledger leaves the attention list until the s
   expect(await board()).toMatch(/\[待發布・未完成\] 「商品列表頁」\(local_open\) 最後回報尚未交付（push）/)
 })
 
-test('the board quotes the report itself beside its verdict, never the words its checks read', ZH, () => {
+test('the board quotes the report itself beside its verdict, never the words its checks read', () => {
   const one = { id: 'local_open', title: '商品列表頁', cwd: PROJECT, isRunning: false, lastActivityAt: new Date(NOW - 5 * 60_000).toISOString(), isPinned: false, hasOpenPr: false }
   const report = { status: 'done', summary: 'T-01 完成，等 PM 放行後部署', delivery: 'pending', commit: '3fa1c2e' }
-  const text = boardText({
-    project: { name: 'Acme 商店後台', path: PROJECT },
-    sessions: [one],
-    tracks: { local_open: track('local_open', { report, reportAt: NOW - 600_000 - 1 }) as never },
-    words: {},
-    ledger: [],
-    now: NOW,
-  } as never)
-  expect(text).toMatch(/\[待發布・未完成\] 「商品列表頁」\(local_open\) 最後回報尚未交付（發布／部署／上線），不能視為完成：\[done, pending, 3fa1c2e\] T-01 完成，等 PM 放行後部署/)
-  expect(text).not.toMatch(/Committed as|Delivery: pending/)
+  // Called directly, boardText speaks the language set here, not the plugin's option: each language in turn.
+  const board = (lang: Lang) => {
+    const was = getLang()
+    setLang(lang)
+    try {
+      return boardText({
+        project: { name: 'Acme 商店後台', path: PROJECT },
+        sessions: [one],
+        tracks: { local_open: track('local_open', { report, reportAt: NOW - 600_000 - 1 }) as never },
+        words: {},
+        ledger: [],
+        now: NOW,
+      } as never)
+    } finally {
+      setLang(was)
+    }
+  }
+  const zh = board('zh-TW')
+  expect(zh).toMatch(/\[待發布・未完成\] 「商品列表頁」\(local_open\) 最後回報尚未交付（發布／部署／上線），不能視為完成：\[done, pending, 3fa1c2e\] T-01 完成，等 PM 放行後部署/)
+  const en = board('en')
+  expect(en).toMatch(/\[Not released · unfinished\] "商品列表頁" \(local_open\) .*: \[done, pending, 3fa1c2e\] T-01 完成，等 PM 放行後部署/)
+  for (const text of [zh, en]) expect(text).not.toMatch(/Committed as|Delivery: pending/)
 })
