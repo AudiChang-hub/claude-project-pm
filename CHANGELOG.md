@@ -7,9 +7,7 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
-### Fixed
-- A session that ended its turn with `wrap_up` showed as *In the background* for 45 minutes when its last words described waiting without doing any ("an agent's work item closes only once it is done", 要等它完成才能結案). Words of waiting now count only for a turn that left neither a report nor a wrap_up recap; a turn that did is waiting only on what it started: its background commands, and now its background agents too, each until its notification comes in. The repository ignores `.claude/worktrees/`, where the agents the PM starts keep their worktrees.
-- An agent waiting to be verified stayed *To verify*, under *Needs attention*, for good when its commit was deliberately not merged: its worktree and branch deleted and its work item dropped. An agent now has a *Dropped* state. One whose commit no branch holds any more (`git branch --all --contains` finds none), or that git cannot find, is dropped. One whose work items the person closed after it ended takes their word: done when any is done, dropped when all were dropped (items closed before it ended leave it as it ended). A dropped agent is not listed under *Needs attention* and folds away after an hour, as a done one does.
+## [0.8.0] - 2026-11-18
 
 ### Added
 - The PM can hand work to agents as well as sessions (docs/design/agents.md). Its instructions say when to choose which, and what an agent costs: every agent loads the whole system prompt again, about 37,000 to 58,000 tokens, so a small thing goes to a session that is already open. The PM's own Agent calls run in the background; one whose type may write runs in a git worktree of its own (`Explore`, `Plan` and `claude-code-guide` only read and stay in the folder), and outside a git repository it is refused. Each agent's prompt gets a brief (a one-line reply, a detail file for the rest, no push or release) and the development guidelines. Its notification reaches the PM as its first line and the detail file's path, the rest kept on disk. The mod records each agent (running, done, to verify, needs decision, failed, interrupted when the PM's process ended under it), a work item's owner can be `agent:<agentId>`, and the ledger closes it only once the agent is done, a commit counting once merged into the project's branch. An agent may read the ledger but not change it. The board and the pane have an *Agents* section, agents drawn with a diamond where sessions have a dot, the running count says how many are agents, and agents that failed, need a decision, wait to be verified or were interrupted show under *Needs attention*.
@@ -18,6 +16,10 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 - The PM reads far less. The ledger's `add` and `update` answer with the one item they changed, and a refusal to close with its reason and that item, instead of the whole ledger each time; `list` shows the open items by default (`include_done: true` for all, an `id` for one item in full), each text and note cut to one line. On today's ledgers an update's answer went from 10,354 characters to 278 (24 items), from 55,683 to 139 (165 items) and from 80,139 to 205 (241 items).
 - The board quotes one short line beside each verdict (120 characters), shows a report without the recap or answer of the same turn beside it, gives a fully ticked task list as its count and only the steps left otherwise, and leaves out a "latest instruction" that was a notification or another session's message. On today's records the board is 37–49% shorter (2,508 characters to 1,402; 26,312 to 14,207).
 - A report's full account goes to a file. The `report` tool takes a `detail`, which the mod saves to `~/.claude/project-pm/reports/<session id>/<time>.md`; the report keeps its path, the board shows it, and the pane's card has a *Detail* button that opens it for the person. The sessions of a project with a PM are asked to keep their messages to the PM (SendMessage, the wrap_up recap, the final answer) to the same short form, about 300 characters: status, commit, a one-line summary and the detail file's path.
+
+### Fixed
+- A session that ended its turn with `wrap_up` showed as *In the background* for 45 minutes when its last words described waiting without doing any ("an agent's work item closes only once it is done", 要等它完成才能結案). Words of waiting now count only for a turn that left neither a report nor a wrap_up recap; a turn that did is waiting only on what it started: its background commands, and now its background agents too, each until its notification comes in. The repository ignores `.claude/worktrees/`, where the agents the PM starts keep their worktrees.
+- An agent waiting to be verified stayed *To verify*, under *Needs attention*, for good when its commit was deliberately not merged: its worktree and branch deleted and its work item dropped. An agent now has a *Dropped* state. One whose commit no branch holds any more (`git branch --all --contains` finds none), or that git cannot find, is dropped. One whose work items the person closed after it ended takes their word: done when any is done, dropped when all were dropped (items closed before it ended leave it as it ended). A dropped agent is not listed under *Needs attention* and folds away after an hour, as a done one does.
 
 ## [0.7.1] - 2026-11-16
 
@@ -150,6 +152,7 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 - A band above the prompt in projects without a PM, offering to start a PM session or make the current one the PM.
 - Notifications to the PM when a session starts waiting on the person or stops with steps left.
 
+[0.8.0]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.8.0
 [0.7.1]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.7.1
 [0.7.0]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.7.0
 [0.6.1]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.6.1
