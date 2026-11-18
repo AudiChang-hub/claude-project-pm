@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { applyPlan, betterCi, boardText, caveatOf, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, statusOf, undeliveredOf } from '../hooks/sessions'
+import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, statusOf, undeliveredOf } from '../hooks/sessions'
 import { closesBoard } from '../hooks/actions'
 import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hooks/messages'
 import type { Lang, MessageKey } from '../hooks/messages'
@@ -2043,4 +2043,118 @@ test('the board quotes the report itself beside its verdict, never the words its
   const en = board('en')
   expect(en).toMatch(/\[Not released · unfinished\] "商品列表頁" \(local_open\) .*: \[done, pending, 3fa1c2e\] T-01 完成，等 PM 放行後部署/)
   for (const text of [zh, en]) expect(text).not.toMatch(/Committed as|Delivery: pending/)
+})
+
+test('the ledger answers with what changed, lists open items by default, and shows one item whole by id', ZH, async ($, on) => {
+  const files: Files = new Map()
+  const long = '驗收：'.padEnd(400, '過')
+  // A ledger that has grown: 25 items done with long notes, 5 open.
+  const items = Array.from({ length: 30 }, (_, i) => ({
+    id: i + 1,
+    text: `工作項目 ${i + 1}`,
+    owner: i === 29 ? 'local_open' : null,
+    status: i < 25 ? 'done' : 'open',
+    note: i < 25 ? long : '',
+    createdAt: NOW - 86_400_000,
+    updatedAt: NOW - 86_400_000,
+  }))
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: items, nextId: 31 }))
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { lastAnswer: '2.4.1 還沒 push，等 PM 確認。' })))
+  mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+  const ledger = async (input: object) => String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', ...input } as never)) as { result?: unknown }).result)
+
+  // Add and update answer with the one item.
+  const added = await ledger({ action: 'add', text: '匯出 CSV' })
+  expect(added.split('\n')).toEqual(['已新增工作項目 T-31（id 31）。', 'T-31 (id 31) [open] 匯出 CSV｜負責：未指派'])
+  const updated = await ledger({ action: 'update', id: 26, note: '進行中' })
+  expect(updated.split('\n')).toEqual(['已更新工作項目 T-26。', 'T-26 (id 26) [open] 工作項目 26｜負責：未指派｜備註：進行中'])
+  expect(await ledger({ action: 'update', id: 99 })).toBe('找不到工作項目 id 99。')
+  // A refusal: the reason and the item, nothing else.
+  const refused = await ledger({ action: 'update', id: 30, status: 'done' })
+  expect(refused).toMatch(/^無法將 T-30 標記為完成：/)
+  expect(refused).toMatch(/\nT-30 \(id 30\) \[open\] 工作項目 30｜負責：local_open$/)
+  expect(refused).not.toMatch(/T-01|T-26/)
+
+  // A list: the open items, and a line for the rest.
+  const open = await ledger({ action: 'list' })
+  expect(open.split('\n').filter(line => line.startsWith('T-')).map(line => line.split(' ')[0])).toEqual(['T-26', 'T-27', 'T-28', 'T-29', 'T-30', 'T-31'])
+  expect(open).toMatch(/另有 25 項已結案或放棄/)
+  // Every item on request, each note cut to a line; one item by id, whole.
+  const all = await ledger({ action: 'list', include_done: true })
+  expect(all.split('\n').filter(line => line.startsWith('T-')).length).toBe(31)
+  expect(all).not.toMatch(/另有/)
+  expect(all.length).toBeLessThan(31 * 160)
+  expect(await ledger({ action: 'list', id: 1 })).toBe(`T-01 (id 1) [done] 工作項目 1｜負責：未指派｜備註：${long}`)
+})
+
+test('ledger rows read in both languages, clipped in a list and whole on their own', () => {
+  const item = { id: 3, text: '匯出 CSV'.padEnd(150, '。'), owner: null, status: 'open' as const, note: 'n'.repeat(200), createdAt: NOW, updatedAt: NOW }
+  const rows = (lang: Lang) => {
+    const was = getLang()
+    setLang(lang)
+    try {
+      return { list: ledgerText([item, { ...item, id: 4, status: 'done' as const }]), whole: ledgerRow(item, true) }
+    } finally {
+      setLang(was)
+    }
+  }
+  const zh = rows('zh-TW')
+  expect(zh.list).toMatch(/^T-03 \(id 3\) \[open\] 匯出 CSV。+…｜負責：未指派｜備註：n+…\n（另有 1 項已結案或放棄/)
+  expect(zh.whole).toContain('n'.repeat(200))
+  const en = rows('en')
+  expect(en.list).toMatch(/^T-03 \(id 3\) \[open\] .+… \| owner: unassigned \| note: n+…\n\(1 more done or dropped/)
+  expect(en.whole).toContain('n'.repeat(200))
+})
+
+test('a report keeps its long telling in a file the board points to; the PM reads one line', ZH, async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  mock.clock(on, { now: NOW })
+  world(on, 'local_open', files)
+  on('prompt.compose', () => ({ sections: [] }))
+  await $.session.start(START)
+  const detail = `## 做法\n${'說明。'.repeat(800)}`
+  const answer = String(((await $.tool.call({ tool: 'mcp__project-pm__report', status: 'done', summary: '匯出 CSV 完成', commit: '3fa1c2e', delivery: 'not_needed', detail } as never)) as { result?: unknown }).result)
+  const path = `${DIR}/reports/local_open/2026-10-17T12-00-00-000Z.md`
+  expect(answer).toBe(`已回報給 PM：done。詳細內容已存到 ${path}，給 PM 的訊息附上這個路徑即可。`)
+  expect(files.get(path)).toBe(`${detail}\n`)
+  const kept = JSON.parse(files.get(`${DIR}/sessions/local_open.json`)!)
+  expect(kept.report).toEqual({ status: 'done', summary: '匯出 CSV 完成', commit: '3fa1c2e', delivery: 'not_needed', detail: path })
+
+  // The instruction asks for the short form, in messages to the PM too.
+  const COMPOSE = { model: 'claude-opus-5-5', promptModel: 'claude-opus-5-5', surfaces: ['desktop'] as const, tools: [], outputStyle: null, traits: [] }
+  const asked = (await $.prompt.compose(COMPOSE)).sections.find(one => one.id === 'project-pm:delivery')?.text ?? ''
+  expect(asked).toMatch(/寫進 detail/)
+  expect(asked).toMatch(/SendMessage、wrap_up 摘要、最後的回答）也用同樣的短格式，總長約 300 字以內/)
+})
+
+test('the board points to the detail file and quotes one short line', ZH, () => {
+  const one = { id: 'local_open', title: '商品列表頁', cwd: PROJECT, isRunning: false, lastActivityAt: new Date(NOW - 5 * 60_000).toISOString(), isPinned: false, hasOpenPr: false }
+  const report = { status: 'waiting_release', summary: `匯出 CSV 完成，等 PM 放行。${'細節'.repeat(200)}`, delivery: 'pending', detail: `${DIR}/reports/local_open/x.md` }
+  const board = (lang: Lang) => {
+    const was = getLang()
+    setLang(lang)
+    try {
+      return boardText({ project: { name: 'Acme 商店後台', path: PROJECT }, sessions: [one], tracks: { local_open: track('local_open', { report, reportAt: NOW - 600_000 - 1, recap: '很長的收尾摘要。'.repeat(50), recapAt: NOW - 600_000 - 2, lastAnswer: '很長的最後回答。'.repeat(100), lastPrompt: '<task-notification> 背景作業完成 </task-notification>', plan: [{ content: '畫表格', status: 'completed' }, { content: '加匯出', status: 'completed' }] }) as never }, words: {}, ledger: [], now: NOW } as never)
+    } finally {
+      setLang(was)
+    }
+  }
+  for (const [lang, attention, detailLine] of [['zh-TW', '- [待發布・未完成]', `詳細：${DIR}/reports/local_open/x.md`], ['en', '- [Not released · unfinished]', `Detail: ${DIR}/reports/local_open/x.md`]] as const) {
+    const text = board(lang)
+    const line = text.split('\n').find(l => l.startsWith(attention))!
+    // The quote is one line, cut at 120 characters (QUOTE).
+    expect(QUOTE).toBe(120)
+    expect(line.slice(line.lastIndexOf('[waiting_release')).length).toBeLessThanOrEqual(120)
+    expect(text).toContain(detailLine)
+    // The report stands for the turn: the long answer beside it is not repeated.
+    expect(text).not.toContain('很長的最後回答')
+    expect(text).not.toContain('很長的收尾摘要')
+    // A list all ticked is its count; a notification is no instruction.
+    expect(text).toContain(lang === 'en' ? 'Tasks 2/2\n' : '任務 2/2\n')
+    expect(text).not.toContain('畫表格')
+    expect(text).not.toContain('task-notification')
+  }
 })

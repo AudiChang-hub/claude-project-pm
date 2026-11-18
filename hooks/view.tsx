@@ -24,6 +24,26 @@ const busy = atom({ plugin: 'project-pm', key: 'busy' } as const, null as string
 const notice = atom({ plugin: 'project-pm', key: 'notice' } as const, null as Notice | null)
 const isBandHidden = atom({ plugin: 'project-pm', key: 'isBandHidden' } as const, false)
 const isEndedShown = atom({ plugin: 'project-pm', key: 'isEndedShown' } as const, false)
+const detailShown = atom({ plugin: 'project-pm', key: 'detailShown' } as const, null as { id: string; text: string } | null)
+
+/** How much of a report's detail file a card shows: the file itself has the rest. */
+const DETAIL_SHOWN = 4000
+
+/** Opens a report's detail file on its card, read from disk for the person: the PM never reads it. Pressed again, it closes. */
+async function toggleDetail($: EngineInterface, id: string, path: string) {
+  if ((await read($, detailShown))?.id === id) {
+    await update($, detailShown, () => null)
+
+    return
+  }
+  let text: string
+  try {
+    text = await $.fs.read(path)
+  } catch {
+    text = t('pane.detailMissing', { path })
+  }
+  await update($, detailShown, () => ({ id, text: text.length > DETAIL_SHOWN ? `${text.slice(0, DETAIL_SHOWN)}\n…` : text }))
+}
 
 const TRACK_HEX = '#9ca3af'
 const ACCENT_HEX = '#d97757'
@@ -107,6 +127,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const working = await read($, busy)
   const note = await read($, notice)
   const isEndedOpen = await read($, isEndedShown)
+  const detail = await read($, detailShown)
   const now = await $.clock.now()
 
   if (state.fetchedAt === 0 && !state.error) {
@@ -348,6 +369,22 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
         ) : (
           <Text size="footnote" dimColor wrap="truncate-end">
             {clip(summary, 160)}
+          </Text>
+        )}
+        {track?.report?.detail && (
+          <Box flexDirection="row">
+            <Button
+              key={`detail:${one.id}`}
+              plain
+              dimColor={detail?.id !== one.id}
+              label={detail?.id === one.id ? t('pane.detailHide') : t('pane.detailShow')}
+              onPress={() => toggleDetail($, one.id, track.report!.detail!)}
+            />
+          </Box>
+        )}
+        {detail?.id === one.id && (
+          <Text key={`detailText:${one.id}`} size="footnote" wrap="wrap">
+            {detail.text}
           </Text>
         )}
         {archiveControls(one, status, warn)}

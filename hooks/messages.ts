@@ -70,7 +70,8 @@ const zhTW = {
 7. 子 Session 在等使用者回覆時，把它的問題原文轉述給使用者，使用者回答後用 SendMessage 轉達回去。
 8. 封存 Session 前先確認它沒有未完成步驟、沒有開著的 PR，並問過使用者。
 9. 提到 Session 時用 [標題](#local_…) 連結它。`,
-  'role.delivery': `「{project}」有 PM Session 在追蹤各 Session 的狀態。完成、暫停或卡住一項工作時（收尾、wrap_up 之前），請呼叫 {tool} 回報一次：status 寫現在的狀態，summary 用一句話說做了什麼、還差什麼；有 commit 就填 commit，CI 還在跑就填 ci（run 網址或 id），需要發布的就填 delivery。回報是給 PM 看板用的，不需要向使用者解釋。
+  'role.delivery': `「{project}」有 PM Session 在追蹤各 Session 的狀態。完成、暫停或卡住一項工作時（收尾、wrap_up 之前），請呼叫 {tool} 回報一次：status 寫現在的狀態，summary 用一句話說做了什麼、還差什麼；有 commit 就填 commit，CI 還在跑就填 ci（run 網址或 id），需要發布的就填 delivery。完整的說明（做法、驗證、數字、取捨）寫進 detail，mod 會存成檔案並回傳路徑；PM 只讀摘要，使用者可以從看板打開詳細檔。回報是給 PM 看板用的，不需要向使用者解釋。
+給 PM 的訊息（SendMessage、wrap_up 摘要、最後的回答）也用同樣的短格式，總長約 300 字以內：狀態、commit、一行摘要，以及詳細檔的路徑。不要把完整說明貼進訊息。
 無法呼叫 {tool} 時，改在 wrap_up 摘要（沒有 wrap_up 時就是最後的回答）最後加一行交付宣告，三選一：
 交付：不需要部署
 交付：已部署（版本或位置）
@@ -84,7 +85,8 @@ const zhTW = {
   'tool.board.includeDone': '一併列出已結束且無待辦的 Session 與已完成的工作項目。預設 false。',
   'tool.ledger.description':
     '專案 PM 的工作項目清單：使用者交代的每件工作都要登記在這裡，直到確認完成。顯示編號為 T-01 形式，操作時 id 填數字。add 新增（text 必填，owner 可填負責的 local_… Session id）；update 改 owner、status（open / done / dropped）或 note；list 列出全部。',
-  'tool.ledger.id': 'update 時要修改的工作項目 id（T-03 填 3）',
+  'tool.ledger.id': '工作項目 id（T-03 填 3）：update 要修改的那一項；list 時只列這一項，內容和備註不截短',
+  'tool.ledger.includeDone': 'list 時一併列出已結案和放棄的項目（預設只列未結案的）',
   'tool.ledger.text': '工作項目內容（add 必填；update 時可改寫）',
   'tool.ledger.owner': '負責的 Session id（local_…）；空字串表示取消指派',
   'tool.ledger.note': '備註：進度、驗收結果、為什麼放棄',
@@ -96,7 +98,9 @@ const zhTW = {
   'tool.report.commit': '這次工作的 commit SHA（有 commit 時填）。',
   'tool.report.ci': '還在跑的 CI：GitHub Actions run 的網址或 id。',
   'tool.report.next': '下一步或在等什麼（選填）。',
+  'tool.report.detail': '完整說明（選填，Markdown）：做法、驗證、數字、取捨。會存成檔案，PM 只會看到路徑。',
   'report.saved': '已回報給 PM：{status}。',
+  'report.savedDetail': '已回報給 PM：{status}。詳細內容已存到 {path}，給 PM 的訊息附上這個路徑即可。',
   'report.badStatus': 'status 要是 done、in_progress、blocked、waiting_user、waiting_ci 或 waiting_release。',
   'report.noProject': '這個 Session 所在的專案沒有 PM，不需要回報。',
   'log.notifyFailed': 'project-pm：無法直接通知 PM（{reason}），PM 會在下次輪詢時讀到。',
@@ -179,8 +183,10 @@ const zhTW = {
   'board.lastActive': '最後活動 {ago}{flags}',
   'board.flags': '｜{flags}',
   'board.tasks': '任務 {done}/{total}：{steps}',
+  'board.tasksDone': '任務 {done}/{total}',
   'board.prompt': '最新指令：{text}',
   'board.recap': '收尾摘要：{text}',
+  'board.reportDetail': '詳細：{path}',
   'board.report': '回報：[{status}] {summary}{next}',
   'board.reportNext': '；下一步：{next}',
   'board.answer': '最後回報：{text}',
@@ -209,6 +215,8 @@ const zhTW = {
 
   // The ledger's answers.
   'ledger.empty': '目前沒有工作項目。',
+  'ledger.noneOpen': '沒有未結案的工作項目。',
+  'ledger.hidden': '（另有 {n} 項已結案或放棄；include_done: true 列出全部，指定 id 看單項完整內容）',
   'ledger.row': '{code} (id {id}) [{status}] {text}｜負責：{owner}{note}',
   'ledger.unassigned': '未指派',
   'ledger.noProject': '此 Session 不屬於任何專案，沒有工作項目。',
@@ -268,6 +276,9 @@ const zhTW = {
   'pane.warnPinned': '已釘選',
   'pane.moreSteps': '　（另 {n} 項）',
   'pane.caveat': '需追蹤',
+  'pane.detailShow': '詳細',
+  'pane.detailHide': '收起詳細',
+  'pane.detailMissing': '找不到詳細檔：{path}',
   'pane.elsewhere': '・其他專案',
   'pane.ownerNone': '尚未指派',
   'pane.owner': '負責　{title}・{status}{elsewhere}',
@@ -348,7 +359,8 @@ Rules:
 7. When a sub-session is waiting on the user, pass its question on word for word, then relay the user's answer back with SendMessage.
 8. Before archiving a session, make sure it has no steps left and no open PR, and ask the user.
 9. When you mention a session, link it as [title](#local_…).`,
-  'role.delivery': `"{project}" has a PM session tracking each session's state. When you finish, pause or get stuck on a piece of work (at the end, before wrap_up), call {tool} once: status is where it stands now, summary one sentence on what was done and what is left; fill commit when you committed, ci (the run URL or id) while CI is still running, and delivery when the work needs releasing. The report is for the PM's board; there is no need to explain it to the user.
+  'role.delivery': `"{project}" has a PM session tracking each session's state. When you finish, pause or get stuck on a piece of work (at the end, before wrap_up), call {tool} once: status is where it stands now, summary one sentence on what was done and what is left; fill commit when you committed, ci (the run URL or id) while CI is still running, and delivery when the work needs releasing. Put the full account (how, how it was checked, numbers, trade-offs) in detail: the mod saves it to a file and answers with its path. The PM reads the summary alone; the user can open the detail file from the board. The report is for the PM's board; there is no need to explain it to the user.
+Messages to the PM (SendMessage, the wrap_up recap, your final answer) take the same short form, about 300 characters in all: the status, the commit, a one-line summary and the detail file's path. Do not paste the full account into a message.
 When you cannot call {tool}, end your wrap_up recap (or, without wrap_up, your final answer) with one delivery line instead, one of:
 Delivery: not needed
 Delivery: deployed (version or where)
@@ -361,7 +373,8 @@ Delivery: pending (what it waits on)`,
   'tool.board.includeDone': 'Also list ended sessions with nothing left and work items that are done. Default false.',
   'tool.ledger.description':
     "The project PM's work items: record every piece of work the user asks for here until it is confirmed done. Items read as T-01; pass the number as id. add creates one (text required, owner optional: the owning local_… session id); update changes owner, status (open / done / dropped) or note; list shows them all.",
-  'tool.ledger.id': 'The id of the work item to update (3 for T-03)',
+  'tool.ledger.id': 'A work item id (3 for T-03): the one to update; with list, only that item, its text and note in full',
+  'tool.ledger.includeDone': 'With list, also show items done or dropped (by default only open ones)',
   'tool.ledger.text': 'What the work item is (required for add; may be rewritten on update)',
   'tool.ledger.owner': 'The owning session id (local_…); an empty string unassigns it',
   'tool.ledger.note': 'A note: progress, how it was checked, why it was dropped',
@@ -371,9 +384,11 @@ Delivery: pending (what it waits on)`,
   'tool.report.summary': 'One sentence: what was done and what is left.',
   'tool.report.delivery': 'not_needed: nothing to release; released: released or deployed; pending: still to release or deploy.',
   'tool.report.commit': 'The commit SHA of this work, when you committed.',
+  'tool.report.detail': 'The full account (optional, Markdown): how, how it was checked, numbers, trade-offs. Saved to a file; the PM sees its path only.',
   'tool.report.ci': 'The CI still running: a GitHub Actions run URL or id.',
   'tool.report.next': 'The next step or what it waits on (optional).',
   'report.saved': 'Reported to the PM: {status}.',
+  'report.savedDetail': 'Reported to the PM: {status}. The detail is saved to {path}; a message to the PM needs only that path.',
   'report.badStatus': 'status must be done, in_progress, blocked, waiting_user, waiting_ci or waiting_release.',
   'report.noProject': 'This session\'s project has no PM: nothing to report.',
   'log.notifyFailed': 'project-pm: could not tell the PM directly ({reason}); it will read the update on its next poll.',
@@ -453,8 +468,10 @@ Delivery: pending (what it waits on)`,
   'board.lastActive': 'Last active {ago}{flags}',
   'board.flags': ' | {flags}',
   'board.tasks': 'Tasks {done}/{total}: {steps}',
+  'board.tasksDone': 'Tasks {done}/{total}',
   'board.prompt': 'Latest instruction: {text}',
   'board.recap': 'Recap: {text}',
+  'board.reportDetail': 'Detail: {path}',
   'board.report': 'Report: [{status}] {summary}{next}',
   'board.reportNext': '; next: {next}',
   'board.answer': 'Last report: {text}',
@@ -481,6 +498,8 @@ Delivery: pending (what it waits on)`,
   'blocker.why.open': 'has steps left on its task list',
 
   'ledger.empty': 'No work items yet.',
+  'ledger.noneOpen': 'No open work items.',
+  'ledger.hidden': '({n} more done or dropped; include_done: true lists all, an id shows one item in full)',
   'ledger.row': '{code} (id {id}) [{status}] {text} | owner: {owner}{note}',
   'ledger.unassigned': 'unassigned',
   'ledger.noProject': 'This session belongs to no project, so it has no work items.',
@@ -538,6 +557,9 @@ Delivery: pending (what it waits on)`,
   'pane.warnPinned': 'pinned',
   'pane.moreSteps': '　(+{n} more)',
   'pane.caveat': 'Follow up',
+  'pane.detailShow': 'Detail',
+  'pane.detailHide': 'Hide detail',
+  'pane.detailMissing': 'The detail file is missing: {path}',
   'pane.elsewhere': ' · other project',
   'pane.ownerNone': 'Unassigned',
   'pane.owner': 'Owner　{title} · {status}{elsewhere}',

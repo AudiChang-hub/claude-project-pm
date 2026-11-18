@@ -68,6 +68,8 @@ export type Report = {
   commit?: string
   ci?: string
   next?: string
+  /** The file the report's full telling was written to (report tool's `detail`), read by people, not by the PM. */
+  detail?: string
 }
 
 /** What git says of the commit and push a session's words leave: facts stand over words (leftOf). */
@@ -158,6 +160,8 @@ declare module 'claude-code' {
       notice: Notice | null
       isBandHidden: boolean
       isEndedShown: boolean
+      /** A report's detail file shown open on its card: the session and the file's text. */
+      detailShown: { id: string; text: string } | null
     }
   }
 }

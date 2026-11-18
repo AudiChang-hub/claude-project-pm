@@ -24,6 +24,8 @@ import {
   keyFile,
   latestWords,
   leftOf,
+  ledgerRow,
+  ledgerText,
   liveTracks,
   quoteOf,
   settledAt,
@@ -250,6 +252,7 @@ export async function registerReportTool($: EngineInterface) {
         commit: { type: 'string', description: t('tool.report.commit') },
         ci: { type: 'string', description: t('tool.report.ci') },
         next: { type: 'string', description: t('tool.report.next') },
+        detail: { type: 'string', description: t('tool.report.detail') },
       },
       required: ['status', 'summary'],
     },
@@ -257,17 +260,31 @@ export async function registerReportTool($: EngineInterface) {
   })
 }
 
-/** Serves the report tool: keeps the report in this session's track and tells the PM. */
+/**
+ * Serves the report tool: keeps the report in this session's track and tells the PM. Its `detail`, the full telling,
+ * goes to a file of its own (reports/<session id>/<time>.md) for people to read from the board; the report keeps
+ * only the path, so the PM reads one line, not the telling.
+ */
 export async function report($: EngineInterface, input: Record<string, unknown>): Promise<string> {
-  await identify($)
+  const self = await identify($)
   if (!(await isReporter($))) return t('report.noProject')
   const made = reportOf(input)
   if (!made) return t('report.badStatus')
   const now = await $.clock.now()
+  const detail = typeof input.detail === 'string' ? input.detail.trim() : ''
+  if (detail && self?.id) {
+    const path = `${await dataDir($)}/reports/${self.id}/${new Date(now).toISOString().replace(/[:.]/g, '-')}.md`
+    try {
+      await $.fs.write(path, `${detail}\n`)
+      made.detail = path
+    } catch (err) {
+      $.ui.log(t('log.cannotWrite', { reason: reason(err) }))
+    }
+  }
   await changeMine($, track => ({ ...track, report: made, reportAt: now }))
   await notifyPm($)
 
-  return t('report.saved', { status: made.status })
+  return made.detail ? t('report.savedDetail', { status: made.status, path: made.detail }) : t('report.saved', { status: made.status })
 }
 
 export async function identify($: EngineInterface): Promise<Me | null> {
@@ -899,6 +916,7 @@ export async function registerTools($: EngineInterface) {
       properties: {
         action: { type: 'string', enum: ['add', 'update', 'list'] },
         id: { type: 'number', description: t('tool.ledger.id') },
+        include_done: { type: 'boolean', description: t('tool.ledger.includeDone') },
         text: { type: 'string', description: t('tool.ledger.text') },
         owner: { type: 'string', description: t('tool.ledger.owner') },
         status: { type: 'string', enum: ['open', 'done', 'dropped'] },
@@ -1072,30 +1090,19 @@ async function ownerBlocker($: EngineInterface, ownerId: string): Promise<string
   return said ? t('blocker.lastReport', { title, why, said: clip(said, 120) }) : t('blocker.plain', { title, why })
 }
 
-export function ledgerText(items: LedgerItem[]): string {
-  if (items.length === 0) return t('ledger.empty')
-
-  return items
-    .map(i =>
-      t('ledger.row', {
-        code: itemCode(i.id),
-        id: i.id,
-        status: i.status,
-        text: i.text,
-        owner: i.owner ?? t('ledger.unassigned'),
-        note: i.note ? t('board.itemNote', { note: i.note }) : '',
-      }),
-    )
-    .join('\n')
-}
-
 export async function ledger($: EngineInterface, input: Record<string, unknown>): Promise<string> {
   const self = await identify($)
   if (!self || self.isScratch) return t('ledger.noProject')
   const project = await loadProject($, self.projectKey, self.projectName, self.projectPath)
   const now = await $.clock.now()
   const action = str(input.action)
-  if (action === 'list') return ledgerText(project.ledger)
+  // Each answer is what the call changed or asked for, not the whole ledger: every answer goes into the PM's conversation.
+  if (action === 'list') {
+    if (input.id === undefined) return ledgerText(project.ledger, input.include_done === true)
+    const one = project.ledger.find(i => i.id === Number(input.id))
+
+    return one ? ledgerRow(one, true) : t('ledger.notFound', { id: String(input.id) })
+  }
   if (action === 'add') {
     const text = str(input.text)?.trim()
     if (!text) return t('ledger.needText')
@@ -1110,18 +1117,18 @@ export async function ledger($: EngineInterface, input: Record<string, unknown>)
     }
     await saveProject($, { ...project, ledger: [...project.ledger, item], nextId: project.nextId + 1 })
 
-    return `${t('ledger.added', { code: itemCode(item.id), id: item.id })}\n\n${ledgerText([...project.ledger, item])}`
+    return `${t('ledger.added', { code: itemCode(item.id), id: item.id })}\n${ledgerRow(item, true)}`
   }
   if (action === 'update') {
     const id = typeof input.id === 'number' ? input.id : Number(input.id)
     const item = project.ledger.find(i => i.id === id)
-    if (!item) return `${t('ledger.notFound', { id: String(input.id) })}\n\n${ledgerText(project.ledger)}`
+    if (!item) return t('ledger.notFound', { id: String(input.id) })
     const status = str(input.status)
     if (status === 'done' && item.status !== 'done') {
       const owner = input.owner === undefined ? item.owner : str(input.owner) || null
       const blocker = owner ? await ownerBlocker($, owner) : null
       if (blocker && !(input.force === true && str(input.note)?.trim())) {
-        return `${t('ledger.refused', { code: itemCode(id), blocker })}\n\n${ledgerText(project.ledger)}`
+        return `${t('ledger.refused', { code: itemCode(id), blocker })}\n${ledgerRow(item)}`
       }
     }
     const changed: LedgerItem = {
@@ -1135,7 +1142,7 @@ export async function ledger($: EngineInterface, input: Record<string, unknown>)
     const list = project.ledger.map(i => (i.id === id ? changed : i))
     await saveProject($, { ...project, ledger: list })
 
-    return `${t('ledger.updated', { code: itemCode(id) })}\n\n${ledgerText(list)}`
+    return `${t('ledger.updated', { code: itemCode(id) })}\n${ledgerRow(changed, true)}`
   }
 
   return t('ledger.badAction')

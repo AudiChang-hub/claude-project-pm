@@ -942,6 +942,36 @@ export function ago(iso: string | number, now: number): string {
   return t('time.days', { n: Math.round(hours / 24) })
 }
 
+/**
+ * How much of each text the PM's tools return, in characters: every one goes into the PM's conversation, each call.
+ * A quote beside a verdict, the latest prompt, a report or recap, the next step; a work item's text and note in a list.
+ * One work item asked for by id shows its text and note whole.
+ */
+export const QUOTE = 120
+export const PROMPT = 100
+export const SAID = 160
+export const NEXT = 80
+export const ITEM_TEXT = 100
+export const ITEM_NOTE = 60
+
+/** A work item as one line of the ledger: its text and note clipped, or whole for the one item asked for. */
+export function ledgerRow(item: LedgerItem, isWhole = false): string {
+  const text = isWhole ? item.text : clip(item.text, ITEM_TEXT)
+  const note = item.note ? t('board.itemNote', { note: isWhole ? item.note : clip(item.note, ITEM_NOTE) }) : ''
+
+  return t('ledger.row', { code: itemCode(item.id), id: item.id, status: item.status, text, owner: item.owner ?? t('ledger.unassigned'), note })
+}
+
+/** The ledger's open items, or every item with `isIncludingDone`, a line each; and how many are left out. */
+export function ledgerText(items: LedgerItem[], isIncludingDone = false): string {
+  if (items.length === 0) return t('ledger.empty')
+  const shown = isIncludingDone ? items : items.filter(item => item.status === 'open')
+  const hidden = items.length - shown.length
+  const rows = shown.length ? shown.map(item => ledgerRow(item)).join('\n') : t('ledger.noneOpen')
+
+  return hidden > 0 ? `${rows}\n${t('ledger.hidden', { n: hidden })}` : rows
+}
+
 export function clip(text: string, max: number): string {
   const flat = text.replace(/\s+/g, ' ').trim()
 
@@ -1088,25 +1118,26 @@ export function boardText(input: BoardInput): string {
   const attention: string[] = []
   for (const r of rows) {
     const name = t('board.name', { title: r.one.title, id: r.one.id })
+    // One line each: the quote is a pointer to the session's own report, which the Sessions section and its detail file hold.
     if (r.status === 'asking') {
       const reported = r.track?.report?.status === 'waiting_user' ? r.track.report.summary || undefined : undefined
-      attention.push(t('board.attention.asking', { name, said: clip(r.track?.ask ?? reported ?? r.track?.lastAnswer ?? r.word?.said ?? '', 200) }))
+      attention.push(t('board.attention.asking', { name, said: clip(r.track?.ask ?? reported ?? r.track?.lastAnswer ?? r.word?.said ?? '', QUOTE) }))
     }
     if (r.status === 'open') {
       const left = openSteps(r.track)
-      attention.push(t('board.attention.open', { name, n: left.length, steps: left.map(s => s.content).join(t('list.steps')) }))
+      attention.push(t('board.attention.open', { name, n: left.length, steps: clip(left.map(s => s.content).join(t('list.steps')), QUOTE) }))
     }
-    if (r.status === 'ci') attention.push(t('board.attention.ci', { name, said: clip(quoteOf(r.track, r.word), 200) }))
+    if (r.status === 'ci') attention.push(t('board.attention.ci', { name, said: clip(quoteOf(r.track, r.word), QUOTE) }))
     if (r.status === 'unreleased') {
       const kinds = deliveryText(leftOf(ciWords(r.track, r.word), push[r.one.id]))
-      attention.push(t('board.attention.unreleased', { name, kinds, said: clip(quoteOf(r.track, r.word), 200) }))
+      attention.push(t('board.attention.unreleased', { name, kinds, said: clip(quoteOf(r.track, r.word), QUOTE) }))
     }
     if (r.status === 'failed') {
       const target = ci[r.one.id]?.target || t('board.attention.failedTarget')
-      attention.push(t('board.attention.failed', { name, target, said: clip(quoteOf(r.track, r.word), 200) }))
+      attention.push(t('board.attention.failed', { name, target, said: clip(quoteOf(r.track, r.word), QUOTE) }))
     }
     const caveat = caveatOf(r.track, push[r.one.id])
-    if (caveat && settled(r.one.id) === undefined && !['running', 'ci', 'failed', 'unreleased'].includes(r.status)) attention.push(t('board.attention.caveat', { name, said: clip(caveat, 200) }))
+    if (caveat && settled(r.one.id) === undefined && !['running', 'ci', 'failed', 'unreleased'].includes(r.status)) attention.push(t('board.attention.caveat', { name, said: clip(caveat, QUOTE) }))
     if (r.one.hasOpenPr && r.status !== 'running') attention.push(t('board.attention.pr', { name }))
   }
   const openLedger = ledger.filter(item => item.status === 'open')
@@ -1131,8 +1162,8 @@ export function boardText(input: BoardInput): string {
   const shown = input.isIncludingDone ? ledger : openLedger
   if (shown.length === 0) lines.push(openLedger.length === 0 && ledger.length > 0 ? t('board.allDone') : t('board.none'))
   for (const item of shown) {
-    const note = item.note ? t('board.itemNote', { note: item.note }) : ''
-    lines.push(t('board.item', { code: itemCode(item.id), id: item.id, status: item.status, text: item.text, owner: ownerText(item.owner), note }))
+    const note = item.note ? t('board.itemNote', { note: clip(item.note, ITEM_NOTE) }) : ''
+    lines.push(t('board.item', { code: itemCode(item.id), id: item.id, status: item.status, text: clip(item.text, ITEM_TEXT), owner: ownerText(item.owner), note }))
   }
 
   lines.push('', '## Sessions')
@@ -1147,17 +1178,23 @@ export function boardText(input: BoardInput): string {
     lines.push(t('board.lastActive', { ago: ago(r.one.lastActivityAt, now), flags: flags ? t('board.flags', { flags }) : '' }))
     if (r.track) {
       if (r.track.plan.length) {
-        const steps = r.track.plan.map(s => `${STEP_MARK[s.status]} ${s.content}`).join(' / ')
-        lines.push(t('board.tasks', { done: r.track.plan.filter(s => s.status === 'completed').length, total: r.track.plan.length, steps }))
+        // The steps left, on one line: the ticked ones are in the count.
+        const done = r.track.plan.filter(s => s.status === 'completed').length
+        const left = r.track.plan.filter(s => s.status !== 'completed')
+        if (left.length === 0) lines.push(t('board.tasksDone', { done, total: r.track.plan.length }))
+        else lines.push(t('board.tasks', { done, total: r.track.plan.length, steps: clip(left.map(s => `${STEP_MARK[s.status]} ${s.content}`).join(' / '), QUOTE) }))
       }
-      if (r.track.lastPrompt) lines.push(t('board.prompt', { text: clip(r.track.lastPrompt, 160) }))
+      // The person's instruction, not a notification or another session's message the turn was woken by (<task-notification>, <cross-session-message>).
+      if (r.track.lastPrompt && !r.track.lastPrompt.trimStart().startsWith('<')) lines.push(t('board.prompt', { text: clip(r.track.lastPrompt, PROMPT) }))
       const report = r.track.report
       if (report) {
-        const next = report.next ? t('board.reportNext', { next: report.next }) : ''
-        lines.push(t('board.report', { status: [report.status, report.delivery, report.commit, report.ci].filter(Boolean).join(', '), summary: report.summary, next }))
+        const next = report.next ? t('board.reportNext', { next: clip(report.next, NEXT) }) : ''
+        lines.push(t('board.report', { status: [report.status, report.delivery, report.commit, report.ci].filter(Boolean).join(', '), summary: clip(report.summary, SAID), next }))
+        if (report.detail) lines.push(t('board.reportDetail', { path: report.detail }))
       }
-      if (r.track.recap) lines.push(t('board.recap', { text: clip(r.track.recap, 300) }))
-      else if (r.track.lastAnswer) lines.push(t('board.answer', { text: clip(r.track.lastAnswer, 300) }))
+      // A report says where the work stands: the recap or answer beside it is the same turn's longer telling.
+      if (!report && r.track.recap) lines.push(t('board.recap', { text: clip(r.track.recap, SAID) }))
+      else if (!report && r.track.lastAnswer) lines.push(t('board.answer', { text: clip(r.track.lastAnswer, SAID) }))
       if (r.track.ask) lines.push(t('board.ask', { text: r.track.ask }))
       const background = backgroundOf(r.track, now)
       if (background.length) {

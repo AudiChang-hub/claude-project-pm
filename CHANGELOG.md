@@ -7,6 +7,11 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+### Changed
+- The PM reads far less. The ledger's `add` and `update` answer with the one item they changed, and a refusal to close with its reason and that item, instead of the whole ledger each time; `list` shows the open items by default (`include_done: true` for all, an `id` for one item in full), each text and note cut to one line. On today's ledgers an update's answer went from 10,354 characters to 278 (24 items), from 55,683 to 139 (165 items) and from 80,139 to 205 (241 items).
+- The board quotes one short line beside each verdict (120 characters), shows a report without the recap or answer of the same turn beside it, gives a fully ticked task list as its count and only the steps left otherwise, and leaves out a "latest instruction" that was a notification or another session's message. On today's records the board is 37–49% shorter (2,508 characters to 1,402; 26,312 to 14,207).
+- A report's full account goes to a file. The `report` tool takes a `detail`, which the mod saves to `~/.claude/project-pm/reports/<session id>/<time>.md`; the report keeps its path, the board shows it, and the pane's card has a *Detail* button that opens it for the person. The sessions of a project with a PM are asked to keep their messages to the PM (SendMessage, the wrap_up recap, the final answer) to the same short form, about 300 characters: status, commit, a one-line summary and the detail file's path.
+
 ## [0.7.1] - 2026-11-16
 
 ### Added
