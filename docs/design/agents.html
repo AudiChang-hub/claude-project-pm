@@ -1,0 +1,286 @@
+<!doctype html>
+<!--
+  Mockup for docs/design/agents.md: the PM pane with agents beside sessions. Not wired to anything.
+  Tokens, marks and type follow docs/demo/board.html (which follows hooks/view.tsx), so the page reads as the real pane.
+  Views: agents.html  ·  ?lang=zh-TW  ·  ?theme=dark  (combine with &).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agents on the Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --canvas: #f3efe6; --canvas-2: #ebe5d8; --pane: #fbfaf7; --pane-head: #f4f1ea;
+    --ink: #1c1b18; --ink-2: #5d5a52; --ink-3: #6f6b61;
+    --line: rgba(28, 27, 24, 0.12); --btn-2: rgba(28, 27, 24, 0.06);
+    --claude: #b5552f; --success: #1b7a43; --warning: #96590a; --error: #b8322f; --planMode: #0d6b62; --muted: #6f6b61;
+    --shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 40px 80px -30px rgba(60, 40, 20, .35), 0 12px 24px -12px rgba(60, 40, 20, .18);
+    --sans: "Inter", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --canvas: #1b1a18; --canvas-2: #141412; --pane: #262522; --pane-head: #2d2c28;
+    --ink: #f3f1ea; --ink-2: #c9c5ba; --ink-3: #a29e93;
+    --line: rgba(243, 241, 234, 0.12); --btn-2: rgba(243, 241, 234, 0.08);
+    --claude: #e8977a; --success: #5cd08a; --warning: #f2b04f; --error: #f58080; --planMode: #3fd9c4; --muted: #a29e93;
+    --shadow: 0 1px 0 rgba(255,255,255,.05) inset, 0 40px 80px -30px rgba(0,0,0,.7);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--canvas); color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  body { min-height: 100vh; background:
+    radial-gradient(700px 480px at 85% 0%, rgba(217, 119, 87, .14), transparent 60%),
+    linear-gradient(180deg, var(--canvas), var(--canvas-2)); }
+  .tab { font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { svg animate { display: none; } }
+
+  .page { max-width: 1120px; margin: 0 auto; padding: 48px 32px 64px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 500px); column-gap: 64px; row-gap: 32px; align-items: start; }
+  .notes h1 { font: 700 30px/1.2 var(--sans); letter-spacing: -.015em; }
+  .notes .kicker { font: 600 12px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--claude); margin-bottom: 14px; }
+  .notes p { margin-top: 14px; font-size: 15px; line-height: 1.6; color: var(--ink-2); max-width: 480px; }
+  .legend { list-style: none; margin-top: 28px; display: grid; row-gap: 14px; }
+  .legend li { display: grid; grid-template-columns: 20px 1fr; column-gap: 12px; align-items: start; font-size: 14px; line-height: 1.5; color: var(--ink-2); }
+  .legend b { color: var(--ink); font-weight: 600; }
+  .legend svg { margin-top: 4px; }
+  .switch { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .switch a { font: 500 13px/1 var(--sans); color: var(--ink); text-decoration: none; padding: 9px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--btn-2); }
+  .switch a[aria-current="true"] { background: var(--ink); color: var(--pane); border-color: var(--ink); }
+  .switch a:hover { border-color: var(--ink-3); }
+  .switch a:focus-visible, .btn:focus-visible { outline: 2px solid var(--claude); outline-offset: 2px; }
+
+  .pane { width: 100%; background: var(--pane); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); }
+  .pane-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--pane-head); border-bottom: 1px solid var(--line); border-radius: 16px 16px 0 0; }
+  .pane-head span { font-size: 13px; font-weight: 600; }
+  .body { padding: 18px 20px 20px; display: flex; flex-direction: column; row-gap: 6px; }
+  .row { display: flex; align-items: center; }
+  .caption { font-size: 12px; line-height: 1.45; }
+  .footnote { font-size: 13px; line-height: 1.5; }
+  .dim { color: var(--ink-3); }
+  .trunc { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .medium { font-weight: 500; }
+  .semibold { font-weight: 600; }
+  .btn { font: 500 12.5px/1 var(--sans); padding: 7px 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--btn-2); color: var(--ink); cursor: pointer; }
+  .btn.primary { background: var(--ink); color: var(--pane); border-color: var(--ink); }
+  .btn.plain { background: none; border: 0; padding: 4px 0; color: var(--ink-3); }
+  .btn.plain:hover { color: var(--ink); }
+  .box { border: 1px solid var(--line); border-radius: 12px; padding: 10px 16px; }
+  .kpi { display: flex; flex-direction: column; row-gap: 10px; margin-top: 10px; }
+  .metric { width: 33.33%; padding: 0 6px; min-width: 0; }
+  .title { font-size: 22px; line-height: 1.2; font-weight: 600; letter-spacing: -.01em; }
+  .heading { font-size: 18px; line-height: 1.3; font-weight: 600; letter-spacing: -.01em; }
+  .section { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; margin-bottom: 2px; }
+  .ledger { display: flex; column-gap: 10px; align-items: flex-start; padding: 5px 0; }
+  .ledger code { font: 500 11.5px/1.65 var(--mono); color: var(--ink-3); }
+  .owner { display: inline-flex; align-items: center; column-gap: 5px; max-width: 100%; }
+  .card { display: flex; flex-direction: column; row-gap: 5px; transition: border-color .15s ease; }
+  .card:hover { border-color: var(--ink-3); }
+  .card + .card { margin-top: 6px; }
+  .card .head { display: flex; align-items: center; column-gap: 9px; }
+  .card .head .t { flex: 1 1 auto; font-weight: 600; font-size: 14px; }
+  .chip { font: 500 11px/1 var(--mono); color: var(--ink-3); border: 1px solid var(--line); border-radius: 4px; padding: 3px 5px; }
+
+  @media (max-width: 860px) {
+    .page { grid-template-columns: minmax(0, 1fr); padding: 28px 16px 40px; }
+    .notes h1 { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const q = new URLSearchParams(location.search)
+const lang = q.get('lang') === 'zh-TW' ? 'zh-TW' : 'en'
+const theme = q.get('theme') === 'dark' ? 'dark' : 'light'
+document.documentElement.lang = lang
+document.documentElement.dataset.theme = theme
+
+// Marks: the session dot is hooks/view.tsx's dotSvg; the agent diamond is new, in the same hues and size.
+const TRACK_HEX = '#9ca3af', ACCENT_HEX = '#d97757'
+const dot = (hex, live) => `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">${live ? `<circle cx="6" cy="6" r="3" fill="none" stroke="${hex}" stroke-width="1.2"><animate attributeName="r" values="3;5.6" dur="1.8s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.9;0" dur="1.8s" repeatCount="indefinite"/></circle>` : ''}<circle cx="6" cy="6" r="3" fill="${hex}"/></svg>`
+const diamond = (hex, live) => `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">${live ? `<rect x="3" y="3" width="6" height="6" fill="none" stroke="${hex}" stroke-width="1.1" transform="rotate(45 6 6)"><animate attributeName="opacity" values="0.9;0" dur="1.8s" repeatCount="indefinite"/></rect>` : ''}<rect x="3.4" y="3.4" width="5.2" height="5.2" rx=".6" fill="${hex}" transform="rotate(45 6 6)"/></svg>`
+const ring = ratio => { const r = 17, c = 2 * Math.PI * r, arc = ratio * c; return `<svg width="42" height="42" viewBox="0 0 42 42" aria-hidden="true"><circle cx="21" cy="21" r="${r}" fill="none" stroke="${TRACK_HEX}" stroke-opacity="0.22" stroke-width="4"/><circle cx="21" cy="21" r="${r}" fill="none" stroke="${ACCENT_HEX}" stroke-width="4" stroke-linecap="round" stroke-dasharray="${arc.toFixed(2)} ${c.toFixed(2)}" transform="rotate(-90 21 21)"/></svg>` }
+const steps = (plan, hex) => { const w = 320, gap = 3, seg = (w - gap * (plan.length - 1)) / plan.length; return `<svg style="width:100%;height:4px;display:block;margin:2px 0" preserveAspectRatio="none" viewBox="0 0 ${w} 4" aria-hidden="true">${plan.map((s, i) => `<rect x="${(i * (seg + gap)).toFixed(2)}" y="0" width="${seg.toFixed(2)}" height="4" rx="2" fill="${s === 0 ? TRACK_HEX : hex}" fill-opacity="${s === 2 ? 1 : s === 1 ? .5 : .22}"/>`).join('')}</svg>` }
+
+// Agent states (docs/design/agents.md §4.2) and the session statuses used here, with their hues from hooks/sessions.ts.
+const LOOK = {
+  running: { hex: '#22c55e', color: 'success' }, verify: { hex: '#0d9488', color: 'planMode' }, decide: { hex: '#f59e0b', color: 'warning' },
+  failed: { hex: '#ef4444', color: 'error' }, done: { hex: '#9ca3af', color: 'muted' }, open: { hex: '#d97757', color: 'claude' },
+}
+const W = {
+  en: {
+    kicker: 'Design · T-24 · mockup', h1: 'Agents on the PM board',
+    lede: 'The PM can hand work to a background agent as well as to a session. You still talk only to the PM. Agents get their own section, and a diamond where sessions have a dot, so an owner always shows which kind it is.',
+    legendSession: '<b>Session</b>: a conversation you can open; it remembers, commits, pushes and waits on CI.',
+    legendAgent: '<b>Agent</b>: a background task that finishes and ends; it works in its own worktree and hands its commit to the PM.',
+    legendStates: '<b>Agent states</b>: running, to verify (commit not merged yet), needs decision, failed. Done agents fold away after an hour.',
+    title: 'Acme Storefront · PM', project: 'PROJECT', role: '5 sessions · 4 agents · PM: this session', scopeProject: 'This project', scopeAll: 'All',
+    done: 'Work items done 7/12', open: '5 open', kRun: 'Running', kRunSub: 'incl. 2 agents', kAsk: 'Waiting on you', kOpen: 'Not finished',
+    items: 'WORK ITEMS', itemsMeta: '5 open', agents: 'AGENTS', agentsMeta: '2 running · 3 ended today', sessions: 'SESSIONS', sessionsMeta: '2 active · 3 ended',
+    showAgents: 'Show ended agents (3)', showEnded: 'Show ended sessions (3)', synced: 'Synced just now · updates every 30 s', refresh: 'Sync now', detail: 'Detail',
+    state: { running: 'Running', verify: 'To verify', decide: 'Needs decision', failed: 'Failed', open: 'Unfinished' },
+    ownerLabel: (kind, name, st) => `Owner　${kind} · ${name} · ${st}`, session: 'Session', agent: 'Agent',
+    elapsed: m => `running ${m} min`, took: s => `took ${s}`, worktree: 'worktree', readOnly: 'read-only', usage: (k, n) => `${k}k tokens · ${n} tool calls`,
+    ledger: [
+      { id: 12, text: 'Reconcile October payouts', owner: ['agent', 'T-12 Reconcile payouts', 'running'] },
+      { id: 14, text: 'Fix the column order of the CSV export', owner: ['agent', 'T-14 Fix CSV column order', 'verify'] },
+      { id: 15, text: 'Check how old orders store dates', owner: ['agent', 'T-15 Check old date format', 'decide'] },
+      { id: 9, text: 'Search ranking for in-stock items', owner: ['session', 'Search ranking for in-stock items', 'open'] },
+      { id: 16, text: 'Image sizes in the product feed', owner: ['agent', 'T-16 Audit feed image sizes', 'failed'] },
+    ],
+    agentCards: [
+      { state: 'running', name: 'T-12 Reconcile payouts', item: 'T-12', type: 'Explore', iso: false, min: 3, line: 'Matched 412 of 430 payouts so far' },
+      { state: 'verify', name: 'T-14 Fix CSV column order', item: 'T-14', type: 'general-purpose', iso: true, took: '2 m 20 s', line: '[done, 3fa1c2e] Columns follow the template; 6 tests added', usage: [58, 12] },
+      { state: 'decide', name: 'T-15 Check old date format', item: 'T-15', type: 'Explore', iso: false, took: '1 m 05 s', line: '[waiting_user] 312 old orders use day-first dates: convert them, or leave them?', usage: [21, 7] },
+      { state: 'failed', name: 'T-16 Audit feed image sizes', item: 'T-16', type: 'Explore', iso: false, took: '40 s', line: 'Stopped: the feed URL needs a login', usage: [9, 3] },
+    ],
+    sessionCards: [
+      { state: 'open', title: 'Search ranking for in-stock items', min: 41, plan: [2, 2, 2, 1, 0, 0, 0], line: '▸ Boost in-stock items in the ranker　(+3 more)' },
+      { state: 'running', title: 'Holiday banner on the home page', min: 0, plan: [2, 2, 1, 0], line: 'Instruction: Add the banner behind a feature flag' },
+    ],
+  },
+  'zh-TW': {
+    kicker: '設計 · T-24 · 示意', h1: 'PM 看板上的 Agent',
+    lede: 'PM 派工時，除了開 Session，也可以交給背景 Agent。你仍然只跟 PM 說話。Agent 有自己的區塊，Session 用圓點、Agent 用菱形，所以負責人是哪一種，一眼就看得出來。',
+    legendSession: '<b>Session</b>：可以打開來對話；記得做過什麼，會 commit、push、等 CI。',
+    legendAgent: '<b>Agent</b>：做完就結束的背景工作；在自己的 worktree 裡改，commit 交給 PM 驗收。',
+    legendStates: '<b>Agent 狀態</b>：執行中、待驗收（commit 還沒合併）、待決定、失敗。已完成的一小時後收起來。',
+    title: 'Acme 商店後台 · PM', project: 'PROJECT', role: '5 Sessions · 4 Agents · PM：本 Session', scopeProject: '本專案', scopeAll: '全部',
+    done: '工作項目完成 7/12', open: '5 項進行中', kRun: '執行中', kRunSub: '其中 Agent 2', kAsk: '待回覆', kOpen: '尚未完成',
+    items: '工作項目', itemsMeta: '5 項進行中', agents: 'AGENTS', agentsMeta: '2 執行中 · 今天已結束 3', sessions: 'SESSIONS', sessionsMeta: '2 進行中 · 3 已結束',
+    showAgents: '顯示已結束的 Agent（3）', showEnded: '顯示已結束的 Session（3）', synced: '同步於 剛剛 · 每 30 秒自動更新', refresh: '重新同步', detail: '詳細',
+    state: { running: '執行中', verify: '待驗收', decide: '待決定', failed: '失敗', open: '未完成' },
+    ownerLabel: (kind, name, st) => `負責　${kind}・${name}・${st}`, session: 'Session', agent: 'Agent',
+    elapsed: m => `已執行 ${m} 分鐘`, took: s => `耗時 ${s}`, worktree: 'worktree', readOnly: '唯讀', usage: (k, n) => `${k}k tokens · 工具 ${n} 次`,
+    ledger: [
+      { id: 12, text: '核對 10 月撥款', owner: ['agent', 'T-12 比對撥款報表', 'running'] },
+      { id: 14, text: '修正 CSV 匯出的欄位順序', owner: ['agent', 'T-14 修正匯出欄位順序', 'verify'] },
+      { id: 15, text: '確認舊資料的日期格式', owner: ['agent', 'T-15 查詢舊日期格式', 'decide'] },
+      { id: 9, text: '搜尋排序：有庫存的商品優先', owner: ['session', '搜尋排序：有庫存的商品優先', 'open'] },
+      { id: 16, text: '商品 feed 的圖片尺寸', owner: ['agent', 'T-16 檢查 feed 圖片尺寸', 'failed'] },
+    ],
+    agentCards: [
+      { state: 'running', name: 'T-12 比對撥款報表', item: 'T-12', type: 'Explore', iso: false, min: 3, line: '已比對 430 筆中的 412 筆' },
+      { state: 'verify', name: 'T-14 修正匯出欄位順序', item: 'T-14', type: 'general-purpose', iso: true, took: '2 分 20 秒', line: '[done, 3fa1c2e] 欄位依範本排序，新增 6 項測試', usage: [58, 12] },
+      { state: 'decide', name: 'T-15 查詢舊日期格式', item: 'T-15', type: 'Explore', iso: false, took: '1 分 05 秒', line: '[waiting_user] 312 筆舊資料是日在前的格式：要轉換，還是維持原樣？', usage: [21, 7] },
+      { state: 'failed', name: 'T-16 檢查 feed 圖片尺寸', item: 'T-16', type: 'Explore', iso: false, took: '40 秒', line: '已停止：feed 網址需要登入', usage: [9, 3] },
+    ],
+    sessionCards: [
+      { state: 'open', title: '搜尋排序：有庫存的商品優先', min: 41, plan: [2, 2, 2, 1, 0, 0, 0], line: '▸ 在排序器中提高有庫存商品的權重　（另 3 項）' },
+      { state: 'running', title: '首頁節慶橫幅', min: 0, plan: [2, 2, 1, 0], line: '指令：用功能開關加上橫幅' },
+    ],
+  },
+}[lang]
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const col = c => `var(--${c})`
+const mark = (kind, state) => (kind === 'agent' ? diamond : dot)(LOOK[state].hex, state === 'running')
+const metric = (value, label, color, sub) => `
+  <div class="metric">
+    <div class="title tab" style="color:${col(color)}">${value}</div>
+    <div class="caption dim trunc">${label}</div>
+    ${sub ? `<div class="caption trunc" style="color:${col('success')}">${sub}</div>` : ''}
+  </div>`
+
+const ledgerRow = i => {
+  const [kind, name, st] = i.owner
+  return `
+  <div class="ledger">
+    <code>T-${String(i.id).padStart(2, '0')}</code>
+    <div style="flex:1;min-width:0">
+      <div class="footnote">${esc(i.text)}</div>
+      <div class="caption trunc owner" style="color:var(--ink-3)">${mark(kind, st)}<span class="trunc">${esc(W.ownerLabel(kind === 'agent' ? W.agent : W.session, name.replace(/^T-\d+\s*/, ''), W.state[st]))}</span></div>
+    </div>
+  </div>`
+}
+
+const agentCard = a => {
+  const look = LOOK[a.state]
+  // The item code leads the name; the meta line says what kind of agent and where it writes.
+  const meta = [a.type, a.iso ? W.worktree : W.readOnly]
+  return `
+  <article class="card box" aria-label="${esc(a.name)}">
+    <div class="head">${diamond(look.hex, a.state === 'running')}<span class="t trunc">${esc(a.name)}</span><span class="caption dim tab">${a.state === 'running' ? W.elapsed(a.min) : W.took(a.took)}</span></div>
+    <div class="caption trunc"><span class="medium" style="color:${col(look.color)}">${W.state[a.state]}</span><span class="dim">${meta.map(m => `　·　${esc(m)}`).join('')}</span></div>
+    <div class="footnote trunc ${a.state === 'running' ? 'dim' : ''}">${esc(a.line)}</div>
+    ${a.usage ? `<div class="row" style="justify-content:space-between;column-gap:12px"><span class="caption dim tab trunc">${W.usage(...a.usage)}</span><button class="btn plain" type="button">${W.detail}</button></div>` : ''}
+  </article>`
+}
+
+const sessionCard = s => {
+  const look = LOOK[s.state]
+  const done = s.plan.filter(x => x === 2).length
+  return `
+  <article class="card box" aria-label="${esc(s.title)}">
+    <div class="head">${dot(look.hex, s.state === 'running')}<span class="t trunc">${esc(s.title)}</span><span class="caption dim tab">${s.min ? (lang === 'en' ? `${s.min} min ago` : `${s.min} 分鐘前`) : (lang === 'en' ? 'just now' : '剛剛')}</span></div>
+    <div class="caption trunc"><span class="medium" style="color:${col(look.color)}">${W.state[s.state]}</span><span class="dim">　·　${lang === 'en' ? 'Steps' : '步驟'} ${done}/${s.plan.length}</span></div>
+    ${steps(s.plan, look.hex)}
+    <div class="footnote trunc" style="${s.state === 'open' ? 'color:var(--claude)' : 'color:var(--ink-3)'}">${esc(s.line)}</div>
+  </article>`
+}
+
+const link = (label, params, isCurrent) => `<a href="?${new URLSearchParams(params)}" aria-current="${isCurrent}">${label}</a>`
+document.getElementById('app').innerHTML = `
+<main class="page">
+  <section class="notes">
+    <div class="kicker">${W.kicker}</div>
+    <h1>${W.h1}</h1>
+    <p>${W.lede}</p>
+    <ul class="legend">
+      <li>${dot('#22c55e', false)}<span>${W.legendSession}</span></li>
+      <li>${diamond('#22c55e', false)}<span>${W.legendAgent}</span></li>
+      <li>${diamond('#0d9488', false)}<span>${W.legendStates}</span></li>
+    </ul>
+    <nav class="switch" aria-label="View">
+      ${link('English', { lang: 'en', theme }, lang === 'en')}${link('繁體中文', { lang: 'zh-TW', theme }, lang === 'zh-TW')}
+      ${link(lang === 'en' ? 'Light' : '淺色', { lang, theme: 'light' }, theme === 'light')}${link(lang === 'en' ? 'Dark' : '深色', { lang, theme: 'dark' }, theme === 'dark')}
+    </nav>
+  </section>
+  <div class="pane" role="region" aria-label="${esc(W.title)}">
+    <div class="pane-head"><span>${esc(W.title)}</span>
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="color:var(--ink-3)"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg></div>
+    <div class="body">
+      <div class="row" style="justify-content:space-between;align-items:flex-start;column-gap:8px;flex-wrap:wrap;row-gap:8px">
+        <div style="min-width:0">
+          <div class="caption medium" style="color:var(--claude);letter-spacing:.04em">${W.project}</div>
+          <div class="heading trunc">${esc(W.title.split(' · ')[0])}</div>
+          <div class="caption dim tab">${W.role}</div>
+        </div>
+        <div class="row" style="column-gap:6px;flex-shrink:0"><button class="btn primary" type="button">${W.scopeProject}</button><button class="btn" type="button">${W.scopeAll}</button></div>
+      </div>
+      <div class="kpi box">
+        <div class="row" style="column-gap:14px">
+          ${ring(7 / 12)}
+          <div style="flex:1;min-width:0">
+            <div class="title tab">58%</div>
+            <div class="caption dim trunc tab">${W.done}</div>
+            <div class="caption dim trunc tab">${W.open}</div>
+          </div>
+        </div>
+        <div class="row" style="align-items:flex-start">
+          ${metric(3, W.kRun, 'success', W.kRunSub)}
+          ${metric(1, W.kAsk, 'warning')}
+          ${metric(4, W.kOpen, 'claude')}
+        </div>
+      </div>
+      <div class="section"><span class="caption semibold dim">${W.items}</span><span class="caption dim tab">${W.itemsMeta}</span></div>
+      ${W.ledger.map(ledgerRow).join('')}
+      <div class="section"><span class="caption semibold dim">${W.agents}</span><span class="caption dim tab">${W.agentsMeta}</span></div>
+      ${W.agentCards.map(agentCard).join('')}
+      <div class="row" style="margin-top:4px"><button class="btn plain" type="button">${W.showAgents}</button></div>
+      <div class="section"><span class="caption semibold dim">${W.sessions}</span><span class="caption dim tab">${W.sessionsMeta}</span></div>
+      ${W.sessionCards.map(sessionCard).join('')}
+      <div class="row" style="margin-top:4px"><button class="btn plain" type="button">${W.showEnded}</button></div>
+      <div class="row" style="justify-content:space-between;margin-top:6px;column-gap:12px">
+        <span class="caption dim tab trunc">${W.synced}</span><button class="btn plain" type="button">${W.refresh}</button>
+      </div>
+    </div>
+  </div>
+</main>`
+</script>
+</body>
+</html>
