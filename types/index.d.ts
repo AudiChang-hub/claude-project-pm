@@ -49,6 +49,8 @@ export type Track = {
   background?: BackgroundTask[]
   /** Whether the person left this session's board open (/board, the pane's close): absent while they have not said. */
   isBoardOpen?: boolean
+  /** The agents this session (the PM) has handed work to, the latest last. */
+  agents?: AgentRecord[]
   /** What the session last reported through the report tool: the board goes by it over the session's words. */
   report?: Report
   /** When the report was made, ms: a turn that ends after it without its own report drops it. */
@@ -70,6 +72,41 @@ export type Report = {
   next?: string
   /** The file the report's full telling was written to (report tool's `detail`), read by people, not by the PM. */
   detail?: string
+}
+
+/**
+ * Where an agent's work stands: running; done; verify (it committed in its own worktree, and the PM has not merged
+ * the commit yet); decide (it stopped to ask the person something); failed (it failed or was stopped); lost (the PM's
+ * process ended while it ran, and it with it).
+ */
+export type AgentState = 'running' | 'done' | 'verify' | 'decide' | 'failed' | 'lost'
+
+/** An agent the PM started with the Agent tool, as the PM's mod follows it (hooks/agents.ts). */
+export type AgentRecord = {
+  /** The engine's agent id: SendMessage reaches it by this while it runs. */
+  id: string
+  /** The Agent call's description, led by the work item's code (T-12 …). */
+  description: string
+  /** The work item it does, from that code; null without one. */
+  item: number | null
+  /** Its agent type (subagent_type). */
+  type: string
+  /** It works in a git worktree of its own. */
+  isolated: boolean
+  state: AgentState
+  startedAt: number
+  endedAt?: number
+  /** Its final reply's first line, clipped. */
+  result?: string
+  /** The file its full account is in: the one it was asked to write, else its final reply saved by the mod. */
+  detail?: string
+  /** The commit its first line names. */
+  commit?: string
+  /** The worktree it worked in, from its notification. */
+  worktree?: { path: string; branch: string }
+  tokens?: number
+  tools?: number
+  durationMs?: number
 }
 
 /** What git says of the commit and push a session's words leave: facts stand over words (leftOf). */
@@ -162,6 +199,8 @@ declare module 'claude-code' {
       isEndedShown: boolean
       /** A report's detail file shown open on its card: the session and the file's text. */
       detailShown: { id: string; text: string } | null
+      /** The PM's agents, as its track holds them: drawn on its board. */
+      agents: AgentRecord[]
     }
   }
 }

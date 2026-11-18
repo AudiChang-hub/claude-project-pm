@@ -1,7 +1,8 @@
 // Reading sessions into a project's board: who is working, who waits on you,
 // who stopped with steps left, and what the PM was asked to keep track of.
 
-import type { BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, PushCheck, Report, ReportStatus, Session, Step, Track } from '../types'
+import type { AgentRecord, BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, PushCheck, Report, ReportStatus, Session, Step, Track } from '../types'
+import { agentName } from './agents'
 import { t } from './messages'
 
 export type Status = 'running' | 'asking' | 'failed' | 'open' | 'unreleased' | 'ci' | 'waiting' | 'done' | 'stale'
@@ -1079,8 +1080,32 @@ export type BoardInput = {
   ci?: Record<string, CiCheck>
   push?: Record<string, PushCheck>
   ledger: LedgerItem[]
+  /** The PM's agents, on its own project's board. */
+  agents?: AgentRecord[]
   now: number
   isIncludingDone: boolean
+}
+
+/** How long a done agent stays on the board before it folds away (include_done shows it). */
+export const AGENT_SHOWN_MS = 60 * 60_000
+
+/** A duration as the board says it: 2 m 20 s, 40 s. */
+export function tookText(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000))
+
+  return total >= 60 ? t('time.minSec', { m: Math.floor(total / 60), s: String(total % 60).padStart(2, '0') }) : t('time.sec', { s: total })
+}
+
+/** An agent's time: how long it has run, or how long it took. */
+export function agentTime(one: AgentRecord, now: number): string {
+  return one.state === 'running'
+    ? t('board.agentRunning', { min: Math.max(0, Math.round((now - one.startedAt) / 60000)) })
+    : t('board.agentTook', { took: tookText(one.durationMs ?? (one.endedAt ?? now) - one.startedAt) })
+}
+
+/** The agents a board lists: every one not done, and the done ones of the last hour (all with `isIncludingDone`). */
+export function shownAgents(list: AgentRecord[], now: number, isIncludingDone: boolean): AgentRecord[] {
+  return list.filter(a => isIncludingDone || a.state !== 'done' || now - (a.endedAt ?? a.startedAt) < AGENT_SHOWN_MS)
 }
 
 /** The board as the PM model reads it: what needs attention first, then every session. */
@@ -1142,14 +1167,30 @@ export function boardText(input: BoardInput): string {
   }
   const openLedger = ledger.filter(item => item.status === 'open')
   const known = new Set(everyone.map(s => s.id))
+  // The PM's agents that need it: failed, interrupted, waiting on the person, or committed for the PM to verify.
+  const agents = input.agents ?? []
+  for (const one of agents) {
+    const name = agentName(one)
+    const line = clip(one.result ?? '', QUOTE)
+    if (one.state === 'failed') attention.push(t('board.attention.agentFailed', { name, line }))
+    if (one.state === 'lost') attention.push(t('board.attention.agentLost', { name }))
+    if (one.state === 'decide') attention.push(t('board.attention.agentDecide', { name, line }))
+    if (one.state === 'verify') attention.push(t('board.attention.agentVerify', { name, commit: one.commit ?? '', branch: one.worktree?.branch ?? '' }))
+  }
   for (const item of openLedger) {
     if (!item.owner) attention.push(t('board.attention.unassigned', { code: itemCode(item.id), text: item.text }))
-    else if (!known.has(item.owner)) attention.push(t('board.attention.lost', { code: itemCode(item.id), text: item.text, owner: item.owner }))
+    // An agent owner is accounted for by its own record (above, and in the owner's words below).
+    else if (!item.owner.startsWith('agent:') && !known.has(item.owner)) attention.push(t('board.attention.lost', { code: itemCode(item.id), text: item.text, owner: item.owner }))
   }
   const inProject = new Set(sessions.map(s => s.id))
   /** An owner as the ledger shows it: its title and status, and whether it works from another project's folder. */
   const ownerText = (id: string | null) => {
     if (!id) return t('board.owner.unassigned')
+    if (id.startsWith('agent:')) {
+      const agent = agents.find(a => `agent:${a.id}` === id)
+
+      return agent ? t('board.owner.agent', { name: agentName(agent), status: t(`agent.state.${agent.state}`) }) : t('board.owner.agentGone', { id })
+    }
     const one = everyone.find(s => s.id === id)
     if (!one) return t('board.owner.gone', { id })
     const status = statusOf(one, tracks[id], words[id], now, ci[id], push[id], settled(id))
@@ -1164,6 +1205,16 @@ export function boardText(input: BoardInput): string {
   for (const item of shown) {
     const note = item.note ? t('board.itemNote', { note: clip(item.note, ITEM_NOTE) }) : ''
     lines.push(t('board.item', { code: itemCode(item.id), id: item.id, status: item.status, text: clip(item.text, ITEM_TEXT), owner: ownerText(item.owner), note }))
+  }
+
+  if (agents.length) {
+    lines.push('', t('board.section.agents'))
+    const listedAgents = shownAgents(agents, now, input.isIncludingDone)
+    for (const one of listedAgents) {
+      const line = one.result ? t('board.agentLine', { line: clip(one.result, QUOTE) }) : ''
+      lines.push(t('board.agent', { state: t(`agent.state.${one.state}`), name: agentName(one), id: one.id, time: agentTime(one, now), line }))
+    }
+    if (agents.length > listedAgents.length) lines.push(t('board.agentsHidden', { n: agents.length - listedAgents.length }))
   }
 
   lines.push('', '## Sessions')

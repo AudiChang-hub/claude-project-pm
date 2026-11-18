@@ -4,8 +4,9 @@
 import { atom, read, update } from 'claude-code'
 import type { ElementConstructor, EngineInterface, RenderInputOf, RenderSurface, SvgProps } from 'claude-code'
 
-import type { CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Step, Track } from '../types'
-import { STATUS, ago, caveatOf, clip, groupProjects, isActive, itemCode, liveTracks, openSteps, projectKey, settledAt, statusOf } from './sessions'
+import type { AgentRecord, AgentState, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Step, Track } from '../types'
+import { agentName } from './agents'
+import { STATUS, agentTime, ago, caveatOf, clip, groupProjects, isActive, itemCode, liveTracks, openSteps, projectKey, settledAt, shownAgents, statusOf } from './sessions'
 import type { Project, Status } from './sessions'
 import { archive, claim, dismissBand, refresh, startPmSession } from './actions'
 import { t } from './messages'
@@ -25,6 +26,26 @@ const notice = atom({ plugin: 'project-pm', key: 'notice' } as const, null as No
 const isBandHidden = atom({ plugin: 'project-pm', key: 'isBandHidden' } as const, false)
 const isEndedShown = atom({ plugin: 'project-pm', key: 'isEndedShown' } as const, false)
 const detailShown = atom({ plugin: 'project-pm', key: 'detailShown' } as const, null as { id: string; text: string } | null)
+const agents = atom({ plugin: 'project-pm', key: 'agents' } as const, [] as AgentRecord[])
+
+/** An agent state's look, in the hues of the session statuses that mean the same (hooks/sessions.ts STATUS). */
+const AGENT_LOOK: Record<AgentState, { color: string; hex: string }> = {
+  running: { color: STATUS.running.color, hex: STATUS.running.hex },
+  verify: { color: STATUS.unreleased.color, hex: STATUS.unreleased.hex },
+  decide: { color: STATUS.asking.color, hex: STATUS.asking.hex },
+  failed: { color: STATUS.failed.color, hex: STATUS.failed.hex },
+  lost: { color: STATUS.failed.color, hex: STATUS.failed.hex },
+  done: { color: STATUS.done.color, hex: STATUS.done.hex },
+}
+
+/** An agent's mark: the session dot's size and hues, as a diamond, so an owner shows which kind it is. */
+function diamondSvg(hex: string, isPulsing: boolean): string {
+  const pulse = isPulsing
+    ? `<rect x="3" y="3" width="6" height="6" fill="none" stroke="${hex}" stroke-width="1.1" transform="rotate(45 6 6)"><animate attributeName="opacity" values="0.9;0" dur="1.8s" repeatCount="indefinite"/></rect>`
+    : ''
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12">${pulse}<rect x="3.4" y="3.4" width="5.2" height="5.2" rx="0.6" fill="${hex}" transform="rotate(45 6 6)"/></svg>`
+}
 
 /** How much of a report's detail file a card shows: the file itself has the rest. */
 const DETAIL_SHOWN = 4000
@@ -127,6 +148,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const working = await read($, busy)
   const note = await read($, notice)
   const isEndedOpen = await read($, isEndedShown)
+  const myAgents = self?.isPm ? await read($, agents) : []
   const detail = await read($, detailShown)
   const now = await $.clock.now()
 
@@ -176,6 +198,8 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const ratio = isByItems ? itemsDone / items.length : steps.length ? stepsDone / steps.length : 0
   const hasRatio = isByItems || steps.length > 0
   const count = (s: Status) => everyone.filter(one => statusOfOne(one) === s).length
+  const agentCount = (...states: AgentState[]) => myAgents.filter(a => states.includes(a.state)).length
+  const runningAgents = agentCount('running')
   const pmFile: ProjectFile | undefined = !isAll && self ? files[self.projectKey] : undefined
   const role = isAll
     ? t('pane.projects', { n: shown.length })
@@ -185,7 +209,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
         : t('pane.pmOther')
       : t('pane.pmNone')
 
-  const metric = (key: string, value: number, label: string, color: string) => (
+  const metric = (key: string, value: number, label: string, color: string, sub?: string) => (
     <Box key={key} flexDirection="column" width="33%" paddingX="sm">
       <Text size="title" weight="semibold" tabular color={value ? color : undefined} dimColor={!value}>
         {String(value)}
@@ -193,6 +217,11 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
       <Text size="caption" dimColor wrap="truncate-end">
         {label}
       </Text>
+      {sub && (
+        <Text size="caption" color={color} wrap="truncate-end">
+          {sub}
+        </Text>
+      )}
     </Box>
   )
 
@@ -220,9 +249,9 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
         </Box>
       </Box>
       <Box flexDirection="row">
-        {metric('kpi:running', count('running') + count('waiting'), t('pane.kpiRunning'), 'success')}
-        {metric('kpi:asking', count('asking'), t('pane.kpiAsking'), 'warning')}
-        {metric('kpi:open', count('open') + count('ci') + count('failed') + count('unreleased'), t('pane.kpiOpen'), 'claude')}
+        {metric('kpi:running', count('running') + count('waiting') + runningAgents, t('pane.kpiRunning'), 'success', runningAgents ? t('pane.kpiAgents', { n: runningAgents }) : undefined)}
+        {metric('kpi:asking', count('asking') + agentCount('decide'), t('pane.kpiAsking'), 'warning')}
+        {metric('kpi:open', count('open') + count('ci') + count('failed') + count('unreleased') + agentCount('verify', 'failed', 'lost'), t('pane.kpiOpen'), 'claude')}
       </Box>
     </Box>
   )
@@ -416,12 +445,17 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const ledgerRow = ({ project, item }: { project: Project; item: LedgerItem }) => {
     // An owner working from another project's folder is still there: only one gone from the list is lost.
     const owner = item.owner ? state.list.find(s => s.id === item.owner) : undefined
+    // An agent owner: the PM's agent, by its record (its name without the item code the row already shows).
+    const agent = item.owner?.startsWith('agent:') ? myAgents.find(a => `agent:${a.id}` === item.owner) : undefined
     const elsewhere = owner && !project.sessions.includes(owner) ? t('pane.elsewhere') : ''
     const ownerText = !item.owner
       ? t('pane.ownerNone')
-      : owner
-        ? t('pane.owner', { title: owner.title, status: STATUS[statusOfOne(owner)].label, elsewhere })
-        : t('pane.ownerGone')
+      : agent
+        ? t('pane.ownerAgent', { name: agentName(agent).replace(/^\s*T-\d+\s*/i, ''), status: t(`agent.state.${agent.state}`) })
+        : owner
+          ? t('pane.owner', { title: owner.title, status: STATUS[statusOfOne(owner)].label, elsewhere })
+          : t('pane.ownerGone')
+    const isKnown = !!owner || !!agent
 
     return (
       <Box key={`ledger:${project.key}:${item.id}`} flexDirection="row" columnGap="sm" alignItems="flex-start" paddingY="xs">
@@ -432,10 +466,72 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
           <Text size="footnote" wrap="wrap">
             {item.text}
           </Text>
-          <Text size="caption" color={owner ? undefined : 'warning'} dimColor={!!owner} wrap="truncate-end">
-            {isAll ? `${project.name}　·　${ownerText}` : ownerText}
+          <Box flexDirection="row" columnGap="xs" alignItems="center">
+            {agent && agentMark(`ownerMark:${item.id}`, agent.state)}
+            <Text size="caption" color={isKnown ? undefined : 'warning'} dimColor={isKnown} wrap="truncate-end">
+              {isAll ? `${project.name}　·　${ownerText}` : ownerText}
+            </Text>
+          </Box>
+        </Box>
+      </Box>
+    )
+  }
+
+  const agentMark = (key: string, state: AgentState) =>
+    svg(key, diamondSvg(AGENT_LOOK[state].hex, state === 'running'), t(`agent.state.${state}`), { width: 12, height: 12 }, state === 'running') ?? (
+      <Text key={key} color={AGENT_LOOK[state].color}>
+        ◆
+      </Text>
+    )
+
+  /** An agent's card: its name and time, its state and kind, its first line, and its usage with its detail file. */
+  const agentCard = (one: AgentRecord) => {
+    const look = AGENT_LOOK[one.state]
+    const meta = [one.type, one.isolated ? t('pane.agentWorktree') : t('pane.agentReadOnly')]
+
+    return (
+      <Box key={`agent:${one.id}`} flexDirection="column" rowGap="xs" borderStyle="round" borderDimColor paddingX="md" paddingY="sm" hover={{ scope: `agent:${one.id}`, borderColor: look.color, borderDimColor: false }}>
+        <Box flexDirection="row" alignItems="center" columnGap="sm">
+          {agentMark(`agentMark:${one.id}`, one.state)}
+          <Box flexGrow={1} flexShrink={1}>
+            <Text weight="semibold" wrap="truncate-end">
+              {agentName(one)}
+            </Text>
+          </Box>
+          <Text size="caption" dimColor tabular>
+            {agentTime(one, now)}
           </Text>
         </Box>
+        <Text size="caption" wrap="truncate-end">
+          <Text color={look.color} weight="medium">
+            {t(`agent.state.${one.state}`)}
+          </Text>
+          <Text dimColor>{meta.map(m => `　·　${m}`).join('')}</Text>
+        </Text>
+        <Text size="footnote" dimColor={one.state === 'running'} wrap="truncate-end">
+          {one.result ? clip(one.result, 160) : t('pane.agentWorking')}
+        </Text>
+        {(one.tokens !== undefined || one.detail) && (
+          <Box flexDirection="row" justifyContent="space-between" alignItems="center" columnGap="sm">
+            <Text size="caption" dimColor tabular wrap="truncate-end">
+              {one.tokens !== undefined ? t('pane.agentUsage', { tokens: Math.round(one.tokens / 1000), tools: one.tools ?? 0 }) : ''}
+            </Text>
+            {one.detail && (
+              <Button
+                key={`agentDetail:${one.id}`}
+                plain
+                dimColor={detail?.id !== one.id}
+                label={detail?.id === one.id ? t('pane.detailHide') : t('pane.detailShow')}
+                onPress={() => toggleDetail($, one.id, one.detail!)}
+              />
+            )}
+          </Box>
+        )}
+        {detail?.id === one.id && (
+          <Text key={`agentDetailText:${one.id}`} size="footnote" wrap="wrap">
+            {detail.text}
+          </Text>
+        )}
       </Box>
     )
   }
@@ -477,6 +573,8 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const endedTotal = shown.reduce((n, p) => n + ended(p.sessions).length, 0)
   const liveTotal = everyone.length - endedTotal
   const canClaim = !!self?.id && !self.isScratch && !self.isPm && !isAll && !pmFile?.pmId
+  // Every agent that is not done, and the done ones of the last hour.
+  const listedAgents = shownAgents(myAgents, now, false)
 
   return (
     <Box flexDirection="column" rowGap="xs">
@@ -498,6 +596,13 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
       )}
       {ledgers.length > 0 && sectionTitle('h:ledger', t('pane.items'), t('pane.itemsOpen', { n: ledgers.length }))}
       {ledgers.map(ledgerRow)}
+      {listedAgents.length > 0 && sectionTitle('h:agents', t('pane.agents'), t('pane.agentsMeta', { running: runningAgents, ended: myAgents.length - runningAgents }))}
+      {listedAgents.map(agentCard)}
+      {myAgents.length > listedAgents.length && (
+        <Text key="agents-hidden" size="caption" dimColor>
+          {t('pane.agentsHidden', { n: myAgents.length - listedAgents.length })}
+        </Text>
+      )}
       {sectionTitle('h:sessions', t('pane.sessions'), t('pane.sessionsMeta', { live: liveTotal, ended: endedTotal }))}
       {shown.map(sessionsBlock)}
       {endedTotal > 0 && (

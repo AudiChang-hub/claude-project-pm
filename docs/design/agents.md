@@ -1,6 +1,11 @@
 # 設計：PM 派工給 Agent（T-24，只設計、未實作）
 
-狀態：草案，等使用者確認後才實作。示意畫面：[agents.html](agents.html)（`?lang=zh-TW`、`?theme=dark`）。
+狀態：已實作（見 CHANGELOG 的 Unreleased）。第 6 節第 1～6 項實測都成立，走主要做法。示意畫面：[agents.html](agents.html)（`?lang=zh-TW`、`?theme=dark`）。
+
+實作和本文的差異：
+- 已完成的 Agent 超過一小時後，面板只寫「另有 n 個已完成的 Agent」，沒有展開按鈕。board 工具加 `include_done: true` 時會全部列出。
+- worktree 的路徑和分支從結束通知的 `<worktree>` 取得（實測第 4 項），不需要寫進回報合約。
+- Agent 寫了被要求的詳細檔時，PM 讀到的是那個檔案；沒寫時，mod 把它的完整回覆存成 `reports/agents/<agentId>.md`。
 
 使用者永遠只跟 PM 說話。PM 派工時可以開 Session，也可以開 Agent。中途要調整時，使用者告訴 PM，PM 用 SendMessage 轉給 Agent。已實測：背景 Agent 會在下一個工具回合收到訊息並照做，約 17 秒內生效。
 

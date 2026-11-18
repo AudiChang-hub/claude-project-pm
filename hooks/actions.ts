@@ -4,7 +4,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, McpToolResult } from 'claude-code'
 
-import type { CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Track } from '../types'
+import type { AgentRecord, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Track } from '../types'
+import { AGENTS_KEPT, READ_ONLY_TYPES, agentName, commitOfLine, firstLine, itemOf, noticesOf, shortNotices, stateOf } from './agents'
 import {
   boardText,
   betterCi,
@@ -56,6 +57,7 @@ const busy = atom({ plugin: 'project-pm', key: 'busy' } as const, null as string
 const notice = atom({ plugin: 'project-pm', key: 'notice' } as const, null as Notice | null)
 const isBandHidden = atom({ plugin: 'project-pm', key: 'isBandHidden' } as const, false)
 const scope = atom({ plugin: 'project-pm', key: 'scope' } as const, 'project' as Scope)
+const agents = atom({ plugin: 'project-pm', key: 'agents' } as const, [] as AgentRecord[])
 
 export const MGMT = 'ccd_session_mgmt'
 export const STARTER = 'ccd_session'
@@ -736,6 +738,7 @@ export async function refresh($: EngineInterface, isForced = false, isWide = fal
     await catchUp($, list, asked)
     await verifyCi($, list, asked)
     await verifyPushes($, list, asked)
+    if (self?.isPm) await checkAgents($)
     await announce($)
     await saveRound($)
   } catch (err) {
@@ -895,6 +898,174 @@ export async function ensureBoard($: EngineInterface, why: 'start' | 'prompt' | 
   await openBoard($, self)
 }
 
+// ── The PM's agents ──
+
+/** How a work item names an agent as its owner: `agent:<agent id>`. */
+export const AGENT_OWNER = 'agent:'
+
+/** The agents this session (the PM) started, as its track keeps them. */
+export function agentRecords(): AgentRecord[] {
+  return getMine()?.agents ?? []
+}
+
+/** The latest AGENTS_KEPT, and every one still running whatever its age. */
+function keptAgents(list: AgentRecord[]): AgentRecord[] {
+  const old = list.slice(0, Math.max(0, list.length - AGENTS_KEPT))
+
+  return [...old.filter(a => a.state === 'running'), ...list.slice(old.length)]
+}
+
+/** Shows the PM's agents to its board: the pane draws from this, the track is the record. */
+export async function mirrorAgents($: EngineInterface) {
+  const list = agentRecords()
+  if (!sameJson(await read($, agents), list)) await update($, agents, () => list)
+}
+
+async function changeAgents($: EngineInterface, change: (list: AgentRecord[]) => AgentRecord[]) {
+  await changeMine($, track => ({ ...track, agents: keptAgents(change(track.agents ?? [])) }))
+  await mirrorAgents($)
+}
+
+/** Whether a call is the PM's own (its main loop, not one of its agents). */
+export async function isPmCall($: EngineInterface, agentId: string | undefined): Promise<boolean> {
+  return agentId === undefined && !!(await read($, me))?.isPm
+}
+
+/** Whether a folder is in a git repository, asked once per folder. */
+const repos = new Map<string, boolean>()
+async function isGitRepo($: EngineInterface, cwd: string): Promise<boolean> {
+  if (!repos.has(cwd)) repos.set(cwd, (await run($, ['git', 'rev-parse', '--is-inside-work-tree'], cwd, GIT_TIMEOUT_MS)) === 'true')
+
+  return repos.get(cwd)!
+}
+
+/**
+ * The PM's Agent call as it runs: in the background, so the PM goes on and the person can talk to it; and, unless the
+ * type only reads, in a git worktree of its own, where it commits for the PM to verify. A project outside git has no
+ * worktree to give: an agent that may write is refused there, to be a session instead.
+ */
+export async function agentCallInput($: EngineInterface, input: Record<string, unknown>): Promise<{ input: Record<string, unknown> } | { deny: string }> {
+  const type = str(input.subagent_type) ?? 'general-purpose'
+  const rewritten: Record<string, unknown> = { ...input, run_in_background: true }
+  if (!READ_ONLY_TYPES.includes(type) && input.isolation === undefined) {
+    const self = await read($, me)
+    if (!(await isGitRepo($, self?.projectPath ?? (await $.session.cwd())))) return { deny: t('agent.noRepo') }
+    rewritten.isolation = 'worktree'
+  }
+
+  return { input: rewritten }
+}
+
+/** The detail file each Agent call's agent is asked to write, by the call (the spawn hook picks it, the call keeps it). */
+const detailsByCall = new Map<string, string>()
+let detailCount = 0
+
+/** A new agent's detail file, remembered for the Agent call it belongs to. */
+export async function agentDetailPath($: EngineInterface, callId: string): Promise<string> {
+  detailCount += 1
+  const stamp = new Date(await $.clock.now()).toISOString().replace(/[:.]/g, '-')
+  const path = `${await dataDir($)}/reports/agents/${stamp}-${detailCount}.md`
+  if (callId) detailsByCall.set(callId, path)
+
+  return path
+}
+
+/** Records an agent the PM's Agent call started. */
+export async function startAgent($: EngineInterface, input: Record<string, unknown>, result: unknown, callId: string) {
+  const id = (result as { agentId?: unknown } | undefined)?.agentId
+  const detail = detailsByCall.get(callId)
+  detailsByCall.delete(callId)
+  if (typeof id !== 'string' || !id) return
+  const description = str(input.description) ?? ''
+  const record: AgentRecord = {
+    id,
+    description,
+    item: itemOf(description),
+    type: str(input.subagent_type) ?? 'general-purpose',
+    isolated: input.isolation === 'worktree',
+    state: 'running',
+    startedAt: await $.clock.now(),
+    ...(detail ? { detail } : {}),
+  }
+  await changeAgents($, list => [...list.filter(a => a.id !== id), record])
+}
+
+/**
+ * Takes in the notifications of the PM's agents: each one's state, first line, usage and worktree. Its reply beyond the
+ * first line goes to a file (unless it wrote the detail file it was asked to), and the text the PM reads keeps the first
+ * line and that file's path. A notification of anything else passes as it came; one agent may notify more than once
+ * (it was sent a message and ran again), and its record is updated, not added again.
+ */
+export async function takeNotices($: EngineInterface, text: string): Promise<string> {
+  const known = Object.fromEntries(agentRecords().map(a => [a.id, a]))
+  const notices = noticesOf(text).filter(n => known[n.id])
+  if (notices.length === 0) return text
+  const now = await $.clock.now()
+  const updated: Record<string, AgentRecord> = { ...known }
+  for (const notice of notices) {
+    const one = known[notice.id]!
+    const line = firstLine(notice.result)
+    let detail = one.detail && (await $.fs.exists(one.detail)) ? one.detail : undefined
+    if (!detail && notice.result.trim() !== line) {
+      detail = `${await dataDir($)}/reports/agents/${notice.id}.md`
+      try {
+        await $.fs.write(detail, `${notice.result}
+`)
+      } catch {
+        detail = undefined
+      }
+    }
+    const commit = commitOfLine(line)
+    updated[notice.id] = {
+      ...one,
+      state: stateOf(notice.status, line, one.isolated),
+      endedAt: now,
+      result: line,
+      ...(detail ? { detail } : { detail: undefined }),
+      ...(commit ? { commit } : {}),
+      ...(notice.worktree ? { worktree: notice.worktree } : {}),
+      ...(notice.tokens !== undefined ? { tokens: notice.tokens } : {}),
+      ...(notice.tools !== undefined ? { tools: notice.tools } : {}),
+      ...(notice.durationMs !== undefined ? { durationMs: notice.durationMs } : {}),
+    }
+  }
+  await changeAgents($, list => list.map(a => updated[a.id] ?? a))
+
+  return shortNotices(text, updated)
+}
+
+/**
+ * Checks the agents still open. One marked running that the engine no longer runs ended with the PM's process (a
+ * reload keeps agents running; a restart does not): lost. One to verify is done once the PM has merged its commit into
+ * the project's checked-out branch, as itself or picked over (`git cherry`).
+ */
+export async function checkAgents($: EngineInterface) {
+  const list = agentRecords()
+  if (list.length === 0) return
+  const changes: Record<string, Partial<AgentRecord>> = {}
+  const now = await $.clock.now()
+  if (list.some(a => a.state === 'running')) {
+    try {
+      const live = new Set((await $.agent.list()).map(a => a.id))
+      for (const one of list) if (one.state === 'running' && !live.has(one.id)) changes[one.id] = { state: 'lost', endedAt: now }
+    } catch {
+      // The engine could not say: nothing is concluded.
+    }
+  }
+  const cwd = (await read($, me))?.projectPath
+  if (cwd) {
+    for (const one of list) {
+      if (one.state !== 'verify' || !one.commit) continue
+      const isMerged =
+        (await run($, ['git', 'merge-base', '--is-ancestor', one.commit, 'HEAD'], cwd, GIT_TIMEOUT_MS)) !== null ||
+        ((await run($, ['git', 'cherry', 'HEAD', one.commit, `${one.commit}^`], cwd, GIT_TIMEOUT_MS)) ?? '').startsWith('-')
+      if (isMerged) changes[one.id] = { state: 'done' }
+    }
+  }
+  if (Object.keys(changes).length) await changeAgents($, all => all.map(a => (changes[a.id] ? { ...a, ...changes[a.id] } : a)))
+  else await mirrorAgents($)
+}
+
 export async function registerTools($: EngineInterface) {
   await $.tool.register({
     name: 'board',
@@ -1047,6 +1218,7 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
         ci,
         push,
         ledger: files[p.key]?.ledger ?? [],
+        agents: self?.isPm && p.key === self.projectKey ? agentRecords() : [],
         now,
         isIncludingDone,
       }),
@@ -1056,6 +1228,14 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
 
 /** Why the owner's work cannot be counted done yet, or null when nothing stands in the way. */
 async function ownerBlocker($: EngineInterface, ownerId: string): Promise<string | null> {
+  // An agent: done only once it is (a commit it made counts once the PM has merged it).
+  if (ownerId.startsWith(AGENT_OWNER)) {
+    await checkAgents($)
+    const one = agentRecords().find(a => a.id === ownerId.slice(AGENT_OWNER.length))
+    if (!one) return t('blocker.agentGone', { id: ownerId })
+
+    return one.state === 'done' ? null : t('blocker.agent', { name: agentName(one), why: t(`agent.state.${one.state}`) })
+  }
   await refresh($, true, true)
   const list = (await read($, sessions)).list
   const one = list.find(s => s.id === ownerId)

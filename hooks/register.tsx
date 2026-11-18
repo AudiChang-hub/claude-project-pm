@@ -9,12 +9,15 @@ import {
   CLAIM,
   LEDGER_TOOL,
   MGMT,
-  REPORT_TOOL,
   PANE,
   POLL_MS,
+  REPORT_TOOL,
   ROLE,
+  agentCallInput,
+  agentDetailPath,
   board,
   changeMine,
+  checkAgents,
   claim,
   closesBoard,
   deliveryAsk,
@@ -22,6 +25,7 @@ import {
   ensureTools,
   getMine,
   identify,
+  isPmCall,
   isReporter,
   ledger,
   loadRound,
@@ -35,11 +39,14 @@ import {
   release,
   rememberBoard,
   report,
+  startAgent,
   str,
+  takeNotices,
   textOf,
   updateOf,
 } from './actions'
 import { MAX_CHARS, WRITING_TOOLS, asksForGuidelines, guidelinesPath, isSameFile, readGuidelines } from './guidelines'
+import { READ_ONLY_TYPES, briefOf, itemOf } from './agents'
 import { getLang, resolveLang, setLang, systemLocale, t } from './messages'
 import { reloadIfUpdated } from './update'
 import { renderBand, renderPane } from './view'
@@ -87,6 +94,16 @@ async function guidelinesSection($: EngineInterface, self: Me): Promise<string |
   const parts = [t('guidelines.section', { file: found.file, project: self.projectName })]
   if (self.isPm) parts.push(t('guidelines.pm'))
   parts.push(found.text)
+  if (found.isClipped) parts.push(t('guidelines.clipped', { max: MAX_CHARS, file: found.file }))
+
+  return parts.join('\n\n')
+}
+
+/** The guidelines as an agent of the PM is given them: the file, without the PM's own part. */
+async function agentGuidelines($: EngineInterface, self: Me): Promise<string | null> {
+  const found = await readGuidelines($, guidelinesOption, self.projectPath)
+  if (!found || 'error' in found) return null
+  const parts = [t('guidelines.section', { file: found.file, project: self.projectName }), found.text]
   if (found.isClipped) parts.push(t('guidelines.clipped', { max: MAX_CHARS, file: found.file }))
 
   return parts.join('\n\n')
@@ -176,9 +193,11 @@ async function start($: EngineInterface) {
   isStarted = true
   await registerCommands($)
   try {
-    await identify($)
+    const self = await identify($)
     // The PM's board and ledger, or a reporting session's report tool.
     await ensureTools($)
+    // The PM's agents: one the engine no longer runs ended with the process before this one.
+    if (self?.isPm) await checkAgents($)
     // A new process draws the board from the last round at once; its own first round follows.
     await loadRound($)
   } catch (err) {
@@ -230,8 +249,35 @@ export const register: Register = (on, options) => {
     const finished = finishedTasks(e.text)
     if (finished.length) await changeMine($, t => ({ ...t, background: (t.background ?? []).filter(b => !finished.includes(b.id)) }))
     refreshSoon($, 500)
+    // The PM's agents that finished: taken in, and each reply read as its first line and the file the rest is in.
+    if (e.text.includes('<task-notification>') && (await read($, me))?.isPm) {
+      const text = await takeNotices($, e.text)
+      if (text !== e.text) return next({ ...e, text })
+    }
 
     return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // The PM's Agent call: in the background, and in a worktree of its own unless it only reads (agentCallInput).
+  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    if (!(await isPmCall($, e.agentId))) return next(e)
+    const input = e as unknown as Record<string, unknown>
+    const made = await agentCallInput($, input)
+    if ('deny' in made) return { deny: made.deny }
+    const result = await next(made.input as unknown as typeof e)
+    if (result.deny === undefined && result.isError !== true) await startAgent($, made.input, result.result, str(input.tool_use_id) ?? '')
+
+    return result
+  }).catch(($, e, next) => next(e))
+
+  // What the PM's agent is told beside its task: how to report, where to write the rest, and the guidelines.
+  on('agent.spawn', async ($, e, next) => {
+    if (e.parentAgentId !== undefined || e.workflow || !(await isPmCall($, undefined))) return next(e)
+    const self = await read($, me)
+    const detail = await agentDetailPath($, e.tool_use_id)
+    const rules = self ? await agentGuidelines($, self) : null
+
+    return next({ ...e, prompt: `${e.prompt}${briefOf(detail, itemOf(e.description), !READ_ONLY_TYPES.includes(e.subagentType), rules)}` })
   }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'mcp__ccd_turn__update_plan' }, async ($, e, next) => {
@@ -348,6 +394,8 @@ export const register: Register = (on, options) => {
     deny: t('command.denyBoard'),
   }))
   on('tool.call', { tool: LEDGER_TOOL }, async ($, e) => {
+    // The PM's agents read the ledger; changing it is the PM's.
+    if (e.agentId !== undefined && (e as unknown as Record<string, unknown>).action !== 'list') return { deny: t('ledger.agentDenied') }
     const text = await ledger($, e as unknown as Record<string, unknown>)
     refreshSoon($)
 

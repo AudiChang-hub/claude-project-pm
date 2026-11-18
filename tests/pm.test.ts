@@ -3,6 +3,7 @@ import type { On } from 'claude-code'
 
 import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, statusOf, undeliveredOf } from '../hooks/sessions'
 import { closesBoard } from '../hooks/actions'
+import { commitOfLine, itemOf, noticesOf, stateOf } from '../hooks/agents'
 import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hooks/messages'
 import type { Lang, MessageKey } from '../hooks/messages'
 import { installOf, isReplaced } from '../hooks/update'
@@ -2157,4 +2158,194 @@ test('the board points to the detail file and quotes one short line', ZH, () => 
     expect(text).not.toContain('畫表格')
     expect(text).not.toContain('task-notification')
   }
+})
+
+/** The PM with agents: the engine's Agent tool, spawn, list and notifications, from memory. */
+function agentWorld(on: On, files: Files, git: (argv: readonly string[]) => { exitCode: number; stdout: string } | null) {
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  const calls: Record<string, unknown>[] = []
+  const spawned: { prompt: string }[] = []
+  const seen: string[] = []
+  const live: { id: string }[] = []
+  world(on, 'local_pm', files, [], argv => (argv[0] === 'git' ? git(argv) : null))
+  on('tool.call', { tool: 'Agent' }, ($, e) => {
+    const input = e as unknown as Record<string, unknown>
+    calls.push(input)
+    const agentId = `a${calls.length}`
+    live.push({ id: agentId })
+
+    return { result: { agentId, isAsync: true, status: 'async_launched' } } as never
+  })
+  on('agent.spawn', ($, e) => {
+    spawned.push({ prompt: e.prompt })
+
+    return { model: 'claude-opus-5-5' } as never
+  })
+  on('agent.list', () => ({ value: live.map(one => ({ id: one.id, description: '', type: 'general-purpose', status: 'running' })) }) as never)
+  on('prompt.submit', ($, e) => {
+    seen.push(e.text)
+
+    return { text: e.text } as never
+  })
+
+  return { calls, spawned, seen, live }
+}
+
+const notice = (id: string, result: string, extra = '') =>
+  `<task-notification>\n<task-id>${id}</task-id>\n<status>completed</status>\n<summary>Agent finished</summary>\n<result>${result}</result>\n<usage><subagent_tokens>58000</subagent_tokens><tool_uses>12</tool_uses><duration_ms>140000</duration_ms></usage>${extra}\n</task-notification>`
+const worktreeOf = (id: string) => `\n<worktree><worktreePath>C:/w/.claude/worktrees/agent-${id}</worktreePath><worktreeBranch>worktree-agent-${id}</worktreeBranch></worktree>`
+
+test("the PM's agents: in the background, in a worktree unless they only read, followed to the end", ZH, async ($, on) => {
+  const files: Files = new Map()
+  let merged = false
+  const clock = mock.clock(on, { now: NOW })
+  const w = agentWorld(on, files, argv => {
+    if (argv[1] === 'rev-parse') return { exitCode: 0, stdout: 'true' }
+    if (argv[1] === 'merge-base') return merged ? { exitCode: 0, stdout: '' } : { exitCode: 1, stdout: '' }
+    return null
+  })
+  await $.session.start(START)
+  const agents = () => JSON.parse(files.get(`${DIR}/sessions/local_pm.json`)!).agents as { id: string; state: string; [k: string]: unknown }[]
+  const ledger = async (input: object) => {
+    const out = (await $.tool.call({ tool: 'mcp__project-pm__ledger', ...input } as never)) as { result?: unknown; deny?: string }
+    return String(out.result ?? out.deny)
+  }
+  const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board', include_done: true } as never)) as { result?: unknown }).result)
+
+  // The spawn: the brief, its detail file, and the work item it does.
+  await $.agent.spawn({ tool_use_id: 'call-1', prompt: '依範本排序匯出欄位', description: 'T-12 修正匯出欄位順序', subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-opus-5-5', background: true, fork: false } as never)
+  const brief = w.spawned[0]!.prompt
+  expect(brief).toMatch(/^依範本排序匯出欄位\n\n---\n這是 PM 派給你的背景工作（工作項目 T-12）/)
+  expect(brief).toMatch(/不要 push、不要發布，也不要改 PM 的 ledger/)
+  expect(brief).toMatch(/你在自己的 git worktree 裡工作/)
+  const detail = /寫進這個檔案：(\S+\.md)。/.exec(brief)?.[1]
+  expect(detail).toMatch(/^C:\/home\/\.claude\/project-pm\/reports\/agents\/.+\.md$/)
+
+  // The call: in the background and in a worktree; recorded as running.
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'call-1', description: 'T-12 修正匯出欄位順序', prompt: '依範本排序匯出欄位', subagent_type: 'general-purpose' } as never)
+  expect([w.calls[0]!.run_in_background, w.calls[0]!.isolation]).toEqual([true, 'worktree'])
+  expect(agents()).toEqual([{ id: 'a1', description: 'T-12 修正匯出欄位順序', item: 12, type: 'general-purpose', isolated: true, state: 'running', startedAt: NOW, detail }])
+  // A type that only reads stays in the folder.
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'call-2', description: 'T-13 查詢舊日期格式', prompt: '查一下', subagent_type: 'Explore' } as never)
+  expect([w.calls[1]!.run_in_background, w.calls[1]!.isolation]).toEqual([true, undefined])
+  expect(agents()[1]).toMatchObject({ id: 'a2', isolated: false, state: 'running', item: 13 })
+
+  // An agent owns a work item: it is not closed while the agent runs, and an agent cannot change the ledger.
+  await ledger({ action: 'add', text: '修正匯出欄位順序', owner: 'agent:a1' })
+  expect(await ledger({ action: 'update', id: 1, status: 'done' })).toMatch(/^無法將 T-01 標記為完成：負責的 Agent「T-12 修正匯出欄位順序」執行中/)
+  expect(await ledger({ action: 'update', id: 1, status: 'done', agentId: 'a1' })).toBe('Agent 只能讀 ledger（list），新增和修改工作項目是 PM 的事。把要改的內容寫在你的回覆裡，交給 PM。')
+  expect(await ledger({ action: 'add', text: '另一件事', agentId: 'a1' })).toMatch(/^Agent 只能讀 ledger/)
+  expect(await ledger({ action: 'list', agentId: 'a1' })).toMatch(/^T-01 \(id 1\) \[open\] 修正匯出欄位順序｜負責：agent:a1/)
+
+  // It finishes: its long reply goes to a file, the PM reads the first line and the path; it waits to be verified.
+  const reply = '[done, 3fa1c2e] 欄位依範本排序，新增 6 項測試\n做法：…\n驗證：…'
+  await $.prompt.submit({ text: notice('a1', reply, worktreeOf('a1')), isMeta: true } as never)
+  const kept = `${DIR}/reports/agents/a1.md`
+  expect(files.get(kept)).toBe(`${reply}\n`)
+  expect(w.seen.at(-1)).toContain(`<result>[done, 3fa1c2e] 欄位依範本排序，新增 6 項測試\n詳細：${kept}</result>`)
+  expect(w.seen.at(-1)).not.toContain('做法')
+  expect(agents()[0]).toMatchObject({ state: 'verify', commit: '3fa1c2e', tokens: 58000, tools: 12, durationMs: 140000, detail: kept, worktree: { branch: 'worktree-agent-a1' } })
+  expect(await ledger({ action: 'update', id: 1, status: 'done' })).toMatch(/負責的 Agent「T-12 修正匯出欄位順序」待驗收/)
+  const text = await board()
+  expect(text).toMatch(/- \[Agent 待驗收\] T-12 修正匯出欄位順序：commit 3fa1c2e 在分支 worktree-agent-a1，尚未合併進專案分支/)
+  expect(text).toMatch(/負責：Agent「T-12 修正匯出欄位順序」（待驗收）/)
+  expect(text).toMatch(/## Agents\n- ◆ \[待驗收\] T-12 修正匯出欄位順序（a1）・耗時 2 分 20 秒：\[done, 3fa1c2e\] 欄位依範本排序，新增 6 項測試/)
+  expect(text).not.toMatch(/負責人失聯/)
+  // The pane: the agents beside the sessions, a diamond for each, the work item's agent owner and the detail file.
+  const ui = await $.ui.mount({
+    plugin: 'project-pm',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: 'project-pm',
+    props: { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 60 } },
+  } as never)
+  expect(await ui.find({ type: 'Text', text: '其中 Agent 1' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'AGENTS' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'T-12 修正匯出欄位順序' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '待驗收' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '58k tokens　·　工具 12 次' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '負責　Agent・修正匯出欄位順序・待驗收' })).toBeDefined()
+  expect(await ui.find({ key: 'agentDetail:a1' })).toBeDefined()
+
+  // A second notice of the same agent (it was sent a message and ran again) updates its record, not a new one.
+  await $.prompt.submit({ text: notice('a1', '[done, 3fa1c2e] 補上一項測試', worktreeOf('a1')), isMeta: true } as never)
+  expect(agents().filter(a => a.id === 'a1').length).toBe(1)
+  expect(agents()[0]).toMatchObject({ state: 'verify', result: '[done, 3fa1c2e] 補上一項測試' })
+  // A command's notification is none of the agents' business: it passes as it came.
+  const command = '<task-notification>\n<task-id>bxyz</task-id>\n<status>completed</status>\n<result>output</result>\n</task-notification>'
+  await $.prompt.submit({ text: command, isMeta: true } as never)
+  expect(w.seen.at(-1)).toBe(command)
+
+  // The read-only agent is no longer running anywhere: the PM's process before this one ended with it.
+  w.live.splice(1, 1)
+  await clock.advance(31_000)
+  expect(agents()[1]).toMatchObject({ id: 'a2', state: 'lost' })
+  expect(await board()).toMatch(/- \[Agent 已中斷\] T-13 查詢舊日期格式：PM 的程序結束時它還在執行，需要重新派工/)
+
+  // The PM merges the commit: done, and the work item closes.
+  merged = true
+  expect(await ledger({ action: 'update', id: 1, status: 'done' })).toMatch(/^已更新工作項目 T-01/)
+  expect(agents()[0]).toMatchObject({ state: 'done' })
+})
+
+test('an agent that may write is refused outside git; one that only reads goes ahead', ZH, async ($, on) => {
+  const files: Files = new Map()
+  mock.clock(on, { now: NOW })
+  const w = agentWorld(on, files, () => null)
+  await $.session.start(START)
+  const write = (await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', description: '改檔案', prompt: 'x', subagent_type: 'general-purpose' } as never)) as { deny?: string }
+  expect(write.deny).toMatch(/^這個專案的資料夾不是 git repo/)
+  expect(w.calls).toEqual([])
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'c2', description: '只查詢', prompt: 'x', subagent_type: 'Explore' } as never)
+  expect(w.calls.length).toBe(1)
+})
+
+test('a session that is not the PM starts agents as it likes', ZH, async ($, on) => {
+  const files: Files = new Map()
+  mock.clock(on, { now: NOW })
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  const calls: Record<string, unknown>[] = []
+  world(on, 'local_open', files)
+  on('tool.call', { tool: 'Agent' }, ($, e) => {
+    calls.push(e as unknown as Record<string, unknown>)
+    return { result: { agentId: 'z1' } } as never
+  })
+  await $.session.start(START)
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', description: 'x', prompt: 'x', subagent_type: 'general-purpose' } as never)
+  expect([calls[0]!.run_in_background, calls[0]!.isolation]).toEqual([undefined, undefined])
+  expect(JSON.parse(files.get(`${DIR}/sessions/local_open.json`)!).agents).toBe(undefined)
+})
+
+test("the PM's agents in English: the brief, the notice and the board", { options: { language: 'en' } }, async ($, on) => {
+  const files: Files = new Map()
+  mock.clock(on, { now: NOW })
+  const w = agentWorld(on, files, argv => (argv[1] === 'rev-parse' ? { exitCode: 0, stdout: 'true' } : null))
+  await $.session.start(START)
+  await $.agent.spawn({ tool_use_id: 'call-1', prompt: 'Sort the export columns', description: 'T-12 Fix CSV column order', subagentType: 'general-purpose', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-opus-5-5', background: true, fork: false } as never)
+  expect(w.spawned[0]!.prompt).toMatch(/\n---\nThis is background work the PM has given you \(work item T-12\)/)
+  expect(w.spawned[0]!.prompt).toMatch(/You work in a git worktree of your own/)
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'call-1', description: 'T-12 Fix CSV column order', prompt: 'x', subagent_type: 'general-purpose' } as never)
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'call-2', description: 'T-15 Check old date format', prompt: 'x', subagent_type: 'Explore' } as never)
+  await $.prompt.submit({ text: notice('a1', '[done, 3fa1c2e] Columns follow the template\nHow: …', worktreeOf('a1')), isMeta: true } as never)
+  expect(w.seen.at(-1)).toContain(`<result>[done, 3fa1c2e] Columns follow the template\nDetail: ${DIR}/reports/agents/a1.md</result>`)
+  await $.prompt.submit({ text: notice('a2', '[waiting_user] 312 old orders use day-first dates: convert them?'), isMeta: true } as never)
+  const ledger = (await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'add', text: 'x', agentId: 'a2' } as never)) as { deny?: string }
+  expect(ledger.deny).toMatch(/^An agent may only read the ledger/)
+  const text = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(text).toMatch(/- \[Agent to verify\] T-12 Fix CSV column order: commit 3fa1c2e on branch worktree-agent-a1/)
+  expect(text).toMatch(/- \[Agent needs decision\] T-15 Check old date format: \[waiting_user\] 312 old orders/)
+  expect(text).toMatch(/## Agents\n- ◆ \[To verify\] T-12 Fix CSV column order \(a1\) · took 2 m 20 s: /)
+})
+
+test('a notice and a first line read as the agent wrote them', () => {
+  const [one] = noticesOf(notice('a7', '[blocked] needs a login\nmore', worktreeOf('a7')))
+  expect(one).toEqual({ id: 'a7', status: 'completed', result: '[blocked] needs a login\nmore', tokens: 58000, tools: 12, durationMs: 140000, worktree: { path: 'C:/w/.claude/worktrees/agent-a7', branch: 'worktree-agent-a7' } })
+  expect(stateOf('completed', '[blocked] needs a login', true)).toBe('decide')
+  expect(stateOf('completed', '[done, 3fa1c2e] x', true)).toBe('verify')
+  expect(stateOf('completed', '[done, 3fa1c2e] x', false)).toBe('done')
+  expect(stateOf('failed', '[done] x', false)).toBe('failed')
+  expect(stateOf('killed', '', false)).toBe('failed')
+  expect(itemOf('T-07 Fix it')).toBe(7)
+  expect(itemOf('Fix it')).toBe(null)
+  expect(commitOfLine('[done, 3FA1C2E] x')).toBe('3fa1c2e')
 })

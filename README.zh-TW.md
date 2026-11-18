@@ -99,6 +99,20 @@ Project PM 會讀取每個 Session 的任務清單、收尾摘要與待決策問
   <img src="docs/images/board-dark-zh-TW.png" alt="深色模式的完整看板：工作項目與七個進行中的 Session，包含待發布、執行中與背景執行。" width="420">
 </p>
 
+## Session 還是 Agent
+
+PM 派工時，每件事會交給 Session 或 Agent；你仍然只跟 PM 說話。之後會追問、要 commit／push／等 CI／發布、或要做比較久的，交給 Session。做完就結束、唯讀查詢、或幾分鐘內的小改動，交給 Agent（Agent 工具）。很小的事直接交給已經開著的 Session：每開一個 Agent 都要重新載入整份系統提示，實測約 3.7 萬到 5.8 萬 tokens。要中途調整，告訴 PM，PM 會轉達給 Agent。
+
+PM 自己呼叫 Agent 時，mod 會：
+
+- 讓 Agent 在背景執行，PM 不會被卡住，你可以繼續跟 PM 說話；
+- 把會寫檔的 Agent 放進自己的 git worktree（`isolation: "worktree"`），在那裡 commit，交給 PM 驗收和合併；`Explore`、`Plan`、`claude-code-guide` 只讀，留在原資料夾；不是 git repo 的專案，會寫檔的 Agent 會被拒絕；
+- 在它的指示後面附上說明：回覆只寫一行（`[狀態, commit] 摘要`）、完整內容寫進詳細檔、不要 push 或發布，以及你的開發準則；
+- 把 PM 收到的結束通知裡的回覆，縮成第一行加詳細檔路徑，其餘內容存在檔案裡；
+- 讓 Agent 可以讀 ledger，但不能修改。
+
+每個 Agent 都記在 PM 的紀錄裡：執行中、已完成、待驗收（它在 worktree 分支上 commit 了，PM 還沒合併）、待決定、失敗，或已中斷（PM 的程序結束時它還在執行）。工作項目的負責人可以是 Agent（`agent:<agentId>`）；Agent 完成後 ledger 才能結案，有 commit 的要等合併進專案分支才算完成。看板有 Agents 區塊，Session 用圓點、Agent 用菱形；Agent 失敗、需要決定、待驗收或已中斷時，會列在「需要處理」。設計和實測：[docs/design/agents.md](docs/design/agents.md)。
+
 ## 交付怎麼判斷
 
 事實優先，文字最後：

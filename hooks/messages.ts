@@ -69,7 +69,10 @@ const zhTW = {
 6. 說「都完成了」之前，看板的「需要處理」必須是空的、工作項目沒有 open；不是的話，逐條列出還差什麼。
 7. 子 Session 在等使用者回覆時，把它的問題原文轉述給使用者，使用者回答後用 SendMessage 轉達回去。
 8. 封存 Session 前先確認它沒有未完成步驟、沒有開著的 PR，並問過使用者。
-9. 提到 Session 時用 [標題](#local_…) 連結它。`,
+9. 提到 Session 時用 [標題](#local_…) 連結它。
+10. 派工前先決定交給 Session 還是 Agent（Agent 工具）。之後會追問、要 commit／push／等 CI／發布、或要做比較久的，交給 Session；做完就結束、唯讀查詢、或幾分鐘內的小改動，開 Agent。拿不準時用 Session。很小的事直接交給既有的 Session（SendMessage），不要另開 Agent：每開一個 Agent 都要重新載入整份系統提示，實測約 3.7 萬到 5.8 萬 tokens。
+11. 開 Agent 時，description 以工作項目代號開頭（例如「T-12 比對撥款報表」），派出後用 ledger update 把 owner 設成 agent:<agentId>。mod 會讓它在背景執行，會寫檔的類型放進自己的 git worktree（Explore、Plan、claude-code-guide 留在原資料夾），並把它的回覆縮成一行加詳細檔路徑。要調整進行中的 Agent，用 SendMessage（to 填 agentId）轉達使用者的話。
+12. Agent 失敗、需要使用者決定、待驗收或已中斷時，看板的需要處理會列出來。待驗收的是它在 worktree 分支上的 commit：檢查過、合併進專案的分支後，它才算完成，工作項目才能結案。`,
   'role.delivery': `「{project}」有 PM Session 在追蹤各 Session 的狀態。完成、暫停或卡住一項工作時（收尾、wrap_up 之前），請呼叫 {tool} 回報一次：status 寫現在的狀態，summary 用一句話說做了什麼、還差什麼；有 commit 就填 commit，CI 還在跑就填 ci（run 網址或 id），需要發布的就填 delivery。完整的說明（做法、驗證、數字、取捨）寫進 detail，mod 會存成檔案並回傳路徑；PM 只讀摘要，使用者可以從看板打開詳細檔。回報是給 PM 看板用的，不需要向使用者解釋。
 給 PM 的訊息（SendMessage、wrap_up 摘要、最後的回答）也用同樣的短格式，總長約 300 字以內：狀態、commit、一行摘要，以及詳細檔的路徑。不要把完整說明貼進訊息。
 無法呼叫 {tool} 時，改在 wrap_up 摘要（沒有 wrap_up 時就是最後的回答）最後加一行交付宣告，三選一：
@@ -275,6 +278,47 @@ const zhTW = {
   'pane.warnPr': 'PR 仍開啟',
   'pane.warnPinned': '已釘選',
   'pane.moreSteps': '　（另 {n} 項）',
+  'pane.agents': 'AGENTS',
+  'pane.agentsMeta': '{running} 執行中　·　{ended} 已結束',
+  'pane.kpiAgents': '其中 Agent {n}',
+  'pane.agentWorking': '進行中',
+  'pane.agentUsage': '{tokens}k tokens　·　工具 {tools} 次',
+  'pane.agentWorktree': 'worktree',
+  'pane.agentReadOnly': '唯讀',
+  'pane.ownerAgent': '負責　Agent・{name}・{status}',
+  'pane.agentsHidden': '另有 {n} 個已完成的 Agent',
+  'agent.brief': `這是 PM 派給你的背景工作（工作項目 {item}）。規則：
+- 只做這件事。不要 push、不要發布，也不要改 PM 的 ledger。
+- 最後一則回覆只寫一行：[狀態, commit] 一行摘要。狀態寫 done、waiting_user（需要使用者決定，把問題寫在摘要）或 blocked；沒有 commit 就省略。
+- 完整說明（做法、驗證、數字、取捨）寫進這個檔案：{detail}。PM 只讀那一行，使用者可以從看板打開這個檔案。`,
+  'agent.noItem': '未指定',
+  'agent.briefWorktree': '你在自己的 git worktree 裡工作：可以修改檔案，並在這個分支上 commit，交給 PM 驗收和合併。不要切換到其他分支，也不要 push。',
+  'agent.briefReadOnly': '這是唯讀工作：除了上面的詳細檔，不要修改任何檔案。',
+  'agent.detailLine': '詳細：{path}',
+  'agent.noRepo': '這個專案的資料夾不是 git repo，沒有 worktree 可以隔離會寫檔的 Agent。唯讀的工作改用 Explore 類型；要修改檔案的工作請交給 Session。',
+  'agent.state.running': '執行中',
+  'agent.state.done': '已完成',
+  'agent.state.verify': '待驗收',
+  'agent.state.decide': '待決定',
+  'agent.state.failed': '失敗',
+  'agent.state.lost': '已中斷',
+  'blocker.agent': '負責的 Agent「{name}」{why}',
+  'blocker.agentGone': '找不到負責的 Agent {id} 的紀錄',
+  'ledger.agentDenied': 'Agent 只能讀 ledger（list），新增和修改工作項目是 PM 的事。把要改的內容寫在你的回覆裡，交給 PM。',
+  'board.section.agents': '## Agents',
+  'board.agent': '- ◆ [{state}] {name}（{id}）・{time}{line}',
+  'board.agentLine': '：{line}',
+  'board.agentRunning': '已執行 {min} 分鐘',
+  'board.agentTook': '耗時 {took}',
+  'board.agentsHidden': '另有 {n} 個已完成的 Agent 未列出；以 include_done: true 檢視全部。',
+  'board.attention.agentFailed': '- [Agent 失敗] {name}：{line}',
+  'board.attention.agentLost': '- [Agent 已中斷] {name}：PM 的程序結束時它還在執行，需要重新派工',
+  'board.attention.agentDecide': '- [Agent 待決定] {name}：{line}',
+  'board.attention.agentVerify': '- [Agent 待驗收] {name}：commit {commit} 在分支 {branch}，尚未合併進專案分支',
+  'board.owner.agent': 'Agent「{name}」（{status}）',
+  'board.owner.agentGone': 'Agent {id}（找不到紀錄）',
+  'time.minSec': '{m} 分 {s} 秒',
+  'time.sec': '{s} 秒',
   'pane.caveat': '需追蹤',
   'pane.detailShow': '詳細',
   'pane.detailHide': '收起詳細',
@@ -358,7 +402,10 @@ Rules:
 6. Before you say "it's all done", the board's "Needs attention" must be empty and no work item may be open; otherwise list, one by one, what is still missing.
 7. When a sub-session is waiting on the user, pass its question on word for word, then relay the user's answer back with SendMessage.
 8. Before archiving a session, make sure it has no steps left and no open PR, and ask the user.
-9. When you mention a session, link it as [title](#local_…).`,
+9. When you mention a session, link it as [title](#local_…).
+10. Before handing out work, choose a session or an agent (the Agent tool). Work you will follow up on, that commits, pushes, waits on CI or releases, or that takes long goes to a session; work that ends when it is done, read-only questions and changes of a few minutes go to an agent. When unsure, use a session. Give a small thing to a session that is already open (SendMessage) rather than start an agent: every agent loads the whole system prompt again, measured at about 37,000 to 58,000 tokens.
+11. When you start an agent, lead its description with the work item's code (for example "T-12 Reconcile payouts"), and once it is started set the item's owner to agent:<agentId> with a ledger update. The mod runs it in the background, puts a type that may write in a git worktree of its own (Explore, Plan and claude-code-guide stay in the folder), and cuts its reply to one line and the path of its detail file. To adjust a running agent, pass the user's words on with SendMessage (to: its agentId).
+12. An agent that failed, needs the user to decide, is waiting to be verified or was interrupted shows under the board's "Needs attention". One to verify has committed on its worktree branch: once you have checked the commit and merged it into the project's branch, it is done and its work item can close.`,
   'role.delivery': `"{project}" has a PM session tracking each session's state. When you finish, pause or get stuck on a piece of work (at the end, before wrap_up), call {tool} once: status is where it stands now, summary one sentence on what was done and what is left; fill commit when you committed, ci (the run URL or id) while CI is still running, and delivery when the work needs releasing. Put the full account (how, how it was checked, numbers, trade-offs) in detail: the mod saves it to a file and answers with its path. The PM reads the summary alone; the user can open the detail file from the board. The report is for the PM's board; there is no need to explain it to the user.
 Messages to the PM (SendMessage, the wrap_up recap, your final answer) take the same short form, about 300 characters in all: the status, the commit, a one-line summary and the detail file's path. Do not paste the full account into a message.
 When you cannot call {tool}, end your wrap_up recap (or, without wrap_up, your final answer) with one delivery line instead, one of:
@@ -556,6 +603,47 @@ Delivery: pending (what it waits on)`,
   'pane.warnPr': 'PR still open',
   'pane.warnPinned': 'pinned',
   'pane.moreSteps': '　(+{n} more)',
+  'pane.agents': 'AGENTS',
+  'pane.agentsMeta': '{running} running　·　{ended} ended',
+  'pane.kpiAgents': 'incl. {n} {n|agent|agents}',
+  'pane.agentWorking': 'Working on it',
+  'pane.agentUsage': '{tokens}k tokens　·　{tools} tool {tools|call|calls}',
+  'pane.agentWorktree': 'worktree',
+  'pane.agentReadOnly': 'read-only',
+  'pane.ownerAgent': 'Owner　Agent · {name} · {status}',
+  'pane.agentsHidden': '{n} more {n|agent|agents} done',
+  'agent.brief': `This is background work the PM has given you (work item {item}). The rules:
+- Do this and nothing else. Do not push, do not release, and do not change the PM's ledger.
+- Your final reply is one line: [status, commit] a one-line summary. The status is done, waiting_user (the user must decide: put the question in the summary) or blocked; leave the commit out when you made none.
+- Write the full account (how, how it was checked, numbers, trade-offs) to this file: {detail}. The PM reads the one line; the user can open the file from the board.`,
+  'agent.noItem': 'none given',
+  'agent.briefWorktree': 'You work in a git worktree of your own: you may change files and commit on its branch, for the PM to verify and merge. Do not switch to another branch, and do not push.',
+  'agent.briefReadOnly': 'This work only reads: change no file other than the detail file above.',
+  'agent.detailLine': 'Detail: {path}',
+  'agent.noRepo': 'This project\'s folder is not a git repository, so there is no worktree to keep an agent that may write apart. Use the Explore type for work that only reads; give work that changes files to a session.',
+  'agent.state.running': 'Running',
+  'agent.state.done': 'Done',
+  'agent.state.verify': 'To verify',
+  'agent.state.decide': 'Needs decision',
+  'agent.state.failed': 'Failed',
+  'agent.state.lost': 'Interrupted',
+  'blocker.agent': 'its agent "{name}" is {why}',
+  'blocker.agentGone': 'there is no record of its agent {id}',
+  'ledger.agentDenied': 'An agent may only read the ledger (list); adding and changing work items is the PM\'s job. Put the change in your reply for the PM.',
+  'board.section.agents': '## Agents',
+  'board.agent': '- ◆ [{state}] {name} ({id}) · {time}{line}',
+  'board.agentLine': ': {line}',
+  'board.agentRunning': 'running {min} min',
+  'board.agentTook': 'took {took}',
+  'board.agentsHidden': '{n} more {n|agent|agents} done and not listed; pass include_done: true to see all.',
+  'board.attention.agentFailed': '- [Agent failed] {name}: {line}',
+  'board.attention.agentLost': '- [Agent interrupted] {name}: it was still running when the PM\'s process ended; hand the work out again',
+  'board.attention.agentDecide': '- [Agent needs decision] {name}: {line}',
+  'board.attention.agentVerify': '- [Agent to verify] {name}: commit {commit} on branch {branch}, not merged into the project\'s branch yet',
+  'board.owner.agent': 'agent "{name}" ({status})',
+  'board.owner.agentGone': 'agent {id} (no record)',
+  'time.minSec': '{m} m {s} s',
+  'time.sec': '{s} s',
   'pane.caveat': 'Follow up',
   'pane.detailShow': 'Detail',
   'pane.detailHide': 'Hide detail',

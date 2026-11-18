@@ -99,6 +99,20 @@ At the top: a completion ring and three counters (running, waiting on you, not f
   <img src="docs/images/board-dark.png" alt="The full board in dark mode: ledger items and seven active sessions, including one not released, one running and one in the background." width="420">
 </p>
 
+## Sessions or agents
+
+The PM hands each piece of work to a session or to an agent; you still talk only to the PM. Work it will follow up on, that commits, pushes, waits on CI or releases, or that takes long goes to a session. Work that ends when it is done, read-only questions and changes of a few minutes go to an agent (the Agent tool). A small thing goes to a session that is already open: every agent loads the whole system prompt again, measured at about 37,000 to 58,000 tokens. To change course mid-way, tell the PM; it passes your words on to the agent.
+
+For the PM's own Agent calls the mod:
+
+- runs the agent in the background, so the PM goes on and you can keep talking to it;
+- puts an agent that may write in a git worktree of its own (`isolation: "worktree"`), where it commits for the PM to verify and merge; `Explore`, `Plan` and `claude-code-guide` only read and stay in the folder; outside a git repository an agent that may write is refused;
+- adds a brief to its prompt: report in one line (`[status, commit] summary`), write the full account to a detail file, do not push or release, and your development guidelines;
+- cuts the agent's reply in the notification the PM reads to that first line and the detail file's path, and keeps the rest on disk;
+- lets an agent read the ledger but not change it.
+
+Each agent is tracked in the PM's record: running, done, *to verify* (it committed on its worktree branch and the PM has not merged it yet), *needs decision*, failed, or *interrupted* (the PM's process ended while it ran). A work item's owner can be an agent (`agent:<agentId>`); the ledger closes it only once the agent is done, a commit counting once it is merged into the project's branch. The board has an *Agents* section, agents are drawn with a diamond where sessions have a dot, and an agent that failed, needs a decision, waits to be verified or was interrupted shows under *Needs attention*. The design and its tests: [docs/design/agents.md](docs/design/agents.md).
+
 ## How delivery is judged
 
 Facts first, words last:

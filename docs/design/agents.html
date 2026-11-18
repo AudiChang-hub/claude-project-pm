@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  Mockup for docs/design/agents.md: the PM pane with agents beside sessions. Not wired to anything.
+  Mockup for docs/design/agents.md: the PM pane with agents beside sessions, as hooks/view.tsx draws it. Not wired to anything.
   Tokens, marks and type follow docs/demo/board.html (which follows hooks/view.tsx), so the page reads as the real pane.
   Views: agents.html  ·  ?lang=zh-TW  ·  ?theme=dark  (combine with &).
 -->
@@ -117,11 +117,11 @@ const W = {
     lede: 'The PM can hand work to a background agent as well as to a session. You still talk only to the PM. Agents get their own section, and a diamond where sessions have a dot, so an owner always shows which kind it is.',
     legendSession: '<b>Session</b>: a conversation you can open; it remembers, commits, pushes and waits on CI.',
     legendAgent: '<b>Agent</b>: a background task that finishes and ends; it works in its own worktree and hands its commit to the PM.',
-    legendStates: '<b>Agent states</b>: running, to verify (commit not merged yet), needs decision, failed. Done agents fold away after an hour.',
+    legendStates: '<b>Agent states</b>: running, to verify (commit not merged yet), needs decision, failed, interrupted. Done agents fold away after an hour.',
     title: 'Acme Storefront · PM', project: 'PROJECT', role: '5 sessions · 4 agents · PM: this session', scopeProject: 'This project', scopeAll: 'All',
     done: 'Work items done 7/12', open: '5 open', kRun: 'Running', kRunSub: 'incl. 2 agents', kAsk: 'Waiting on you', kOpen: 'Not finished',
-    items: 'WORK ITEMS', itemsMeta: '5 open', agents: 'AGENTS', agentsMeta: '2 running · 3 ended today', sessions: 'SESSIONS', sessionsMeta: '2 active · 3 ended',
-    showAgents: 'Show ended agents (3)', showEnded: 'Show ended sessions (3)', synced: 'Synced just now · updates every 30 s', refresh: 'Sync now', detail: 'Detail',
+    items: 'WORK ITEMS', itemsMeta: '5 open', agents: 'AGENTS', agentsMeta: '2 running · 5 ended', sessions: 'SESSIONS', sessionsMeta: '2 active · 3 ended',
+    showAgents: '3 more agents done', showEnded: 'Show ended sessions (3)', synced: 'Synced just now · updates every 30 s', refresh: 'Sync now', detail: 'Detail',
     state: { running: 'Running', verify: 'To verify', decide: 'Needs decision', failed: 'Failed', open: 'Unfinished' },
     ownerLabel: (kind, name, st) => `Owner　${kind} · ${name} · ${st}`, session: 'Session', agent: 'Agent',
     elapsed: m => `running ${m} min`, took: s => `took ${s}`, worktree: 'worktree', readOnly: 'read-only', usage: (k, n) => `${k}k tokens · ${n} tool calls`,
@@ -148,11 +148,11 @@ const W = {
     lede: 'PM 派工時，除了開 Session，也可以交給背景 Agent。你仍然只跟 PM 說話。Agent 有自己的區塊，Session 用圓點、Agent 用菱形，所以負責人是哪一種，一眼就看得出來。',
     legendSession: '<b>Session</b>：可以打開來對話；記得做過什麼，會 commit、push、等 CI。',
     legendAgent: '<b>Agent</b>：做完就結束的背景工作；在自己的 worktree 裡改，commit 交給 PM 驗收。',
-    legendStates: '<b>Agent 狀態</b>：執行中、待驗收（commit 還沒合併）、待決定、失敗。已完成的一小時後收起來。',
+    legendStates: '<b>Agent 狀態</b>：執行中、待驗收（commit 還沒合併）、待決定、失敗、已中斷。已完成的一小時後收起來。',
     title: 'Acme 商店後台 · PM', project: 'PROJECT', role: '5 Sessions · 4 Agents · PM：本 Session', scopeProject: '本專案', scopeAll: '全部',
     done: '工作項目完成 7/12', open: '5 項進行中', kRun: '執行中', kRunSub: '其中 Agent 2', kAsk: '待回覆', kOpen: '尚未完成',
-    items: '工作項目', itemsMeta: '5 項進行中', agents: 'AGENTS', agentsMeta: '2 執行中 · 今天已結束 3', sessions: 'SESSIONS', sessionsMeta: '2 進行中 · 3 已結束',
-    showAgents: '顯示已結束的 Agent（3）', showEnded: '顯示已結束的 Session（3）', synced: '同步於 剛剛 · 每 30 秒自動更新', refresh: '重新同步', detail: '詳細',
+    items: '工作項目', itemsMeta: '5 項進行中', agents: 'AGENTS', agentsMeta: '2 執行中 · 5 已結束', sessions: 'SESSIONS', sessionsMeta: '2 進行中 · 3 已結束',
+    showAgents: '另有 3 個已完成的 Agent', showEnded: '顯示已結束的 Session（3）', synced: '同步於 剛剛 · 每 30 秒自動更新', refresh: '重新同步', detail: '詳細',
     state: { running: '執行中', verify: '待驗收', decide: '待決定', failed: '失敗', open: '未完成' },
     ownerLabel: (kind, name, st) => `負責　${kind}・${name}・${st}`, session: 'Session', agent: 'Agent',
     elapsed: m => `已執行 ${m} 分鐘`, took: s => `耗時 ${s}`, worktree: 'worktree', readOnly: '唯讀', usage: (k, n) => `${k}k tokens · 工具 ${n} 次`,
@@ -271,7 +271,7 @@ document.getElementById('app').innerHTML = `
       ${W.ledger.map(ledgerRow).join('')}
       <div class="section"><span class="caption semibold dim">${W.agents}</span><span class="caption dim tab">${W.agentsMeta}</span></div>
       ${W.agentCards.map(agentCard).join('')}
-      <div class="row" style="margin-top:4px"><button class="btn plain" type="button">${W.showAgents}</button></div>
+      <div class="caption dim" style="margin-top:4px">${W.showAgents}</div>
       <div class="section"><span class="caption semibold dim">${W.sessions}</span><span class="caption dim tab">${W.sessionsMeta}</span></div>
       ${W.sessionCards.map(sessionCard).join('')}
       <div class="row" style="margin-top:4px"><button class="btn plain" type="button">${W.showEnded}</button></div>
