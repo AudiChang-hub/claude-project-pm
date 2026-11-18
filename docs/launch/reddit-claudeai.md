@@ -54,6 +54,12 @@ The part I didn't expect: most of the fixes came from actually using it, on itse
 Each time, the PM handed the fix to a sub-session, then checked the board again before closing the
 item.
 
+The latest version (v0.8.0) changed two things for me. Small, self-contained work no longer needs a
+session of its own: the PM can hand it to a background agent, and an agent that changes files works
+in its own git worktree, merged only after the PM has checked it. And the PM got much cheaper to
+run: a ledger change now answers with one line instead of the whole list, and full write-ups go to
+files instead of into the conversation.
+
 [In your own words: one honest sentence about what it's been like, e.g. what changed in how you
 work, or what still bugs you.]
 
@@ -102,6 +108,8 @@ rule of only N at a time? Curious what works for other people.
 - 回報裡只是引用了「等待 CI」這個狀態名稱，就被當成 CI 還在跑。
 
 每次都是 PM 把修正交給子 Session，修完再回看板確認，才把那一項結案。
+
+最新版（v0.8.0）對我來說有兩個改變。一是小而獨立的工作不用再特地開一個 Session：PM 可以交給背景 agent 去做；會改檔案的 agent 在自己的 git worktree 裡作業，PM 驗收過才合併。二是 PM 省了很多 Token：清單有變動時只回一行，不再整份重列；完整的說明寫進檔案，不塞進對話裡。
 
 [用你自己的話：一句誠實的話講使用感受，例如工作方式有什麼改變，或還有什麼讓你困擾。]
 
