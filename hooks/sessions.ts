@@ -916,7 +916,10 @@ export function statusOf(
     // whatever its task list still holds: while the work runs (its notification not yet in), however long that takes.
     if (backgroundOf(track, now).length > 0) return 'waiting'
     // Words alone say the same for a while: a session that never came back has stopped after all.
-    if (!track.report && WAITING.test(reportedText(track.lastAnswer)) && minutes < WAITING_MINUTES) return 'waiting'
+    // Only for a turn that left neither a report nor a wrap_up recap: one that did said where it stands, and the work it
+    // waits on is tracked (its background commands and agents, above). Its words may well describe waiting (要等它完成
+    // 才能結案) without doing any.
+    if (!track.report && !track.recap && WAITING.test(reportedText(track.lastAnswer)) && minutes < WAITING_MINUTES) return 'waiting'
     if (openSteps(track).length > 0 && !isSettled) return 'open'
     // Not committed, pushed or released, however ticked its task list (wrap_up ticks every step).
     if (isUndelivered(latestWords(track), push) && !isSettled) return 'unreleased'

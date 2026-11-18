@@ -2349,3 +2349,30 @@ test('a notice and a first line read as the agent wrote them', () => {
   expect(itemOf('Fix it')).toBe(null)
   expect(commitOfLine('[done, 3FA1C2E] x')).toBe('3fa1c2e')
 })
+
+test('a turn that ended with wrap_up waits only on what it started, not on words that describe waiting', ZH, async ($, on) => {
+  const one = { id: 'x', title: 't', cwd: PROJECT, isRunning: false, lastActivityAt: new Date(NOW - 5 * 60_000).toISOString(), isPinned: false, hasOpenPr: false }
+  // A real session's closing words: how the board treats work items, not anything it waits on.
+  const answer = 'T-24 完成。交給 Agent 的工作項目，要等它完成才能結案；有 commit 的，要等 PM 合併進專案分支才算完成。'
+  const wrapped = track('x', { lastAnswer: answer, recap: 'T-24 完成，已 commit。', recapAt: NOW - 600_000 - 1 })
+  expect(statusOf(one, wrapped as never, undefined, NOW)).toBe('done')
+  // With no wrap_up, the words are all there is to go on, for a while.
+  expect(statusOf(one, track('x', { lastAnswer: answer }) as never, undefined, NOW)).toBe('waiting')
+  // A background command it started still counts, recap or not.
+  expect(statusOf(one, { ...wrapped, background: [{ id: 'b1', label: 'tests', at: NOW - 60_000 }] } as never, undefined, NOW)).toBe('waiting')
+})
+
+test("a session's own background agent keeps it in the background until its notification", ZH, async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  mock.clock(on, { now: NOW })
+  world(on, 'local_open', files)
+  on('tool.call', { tool: 'Agent' }, () => ({ result: { agentId: 'ag1', isAsync: true, status: 'async_launched' } }) as never)
+  on('prompt.submit', ($, e) => ({ text: e.text }) as never)
+  await $.session.start(START)
+  const file = () => JSON.parse(files.get(`${DIR}/sessions/local_open.json`)!)
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', description: '跑整合測試', prompt: 'x', subagent_type: 'general-purpose', run_in_background: true } as never)
+  expect(file().background).toEqual([{ id: 'ag1', label: '跑整合測試', at: NOW }])
+  await $.prompt.submit({ text: '<task-notification>\n<task-id>ag1</task-id>\n<status>completed</status>\n<result>ok</result>\n</task-notification>', isMeta: true } as never)
+  expect(file().background).toEqual([])
+})

@@ -74,7 +74,7 @@ Requires the **Claude Code desktop app (Code tab)**; see [Requirements](#require
 | Not released (待發布) | Work is left to deliver, judged facts first (see *How delivery is judged* below): a commit or push git shows is left, a release the session declared pending, or, with neither to go on, words that say the work is still to come. A fully ticked task list does not override it (`wrap_up` ticks every step). |
 | Waiting on CI (等待 CI) | Its last words say CI has not finished, and GitHub has not said it passed. |
 | Running (執行中) | The session is working right now. |
-| In the background (背景執行) | A command it started in the background (`run_in_background`, or moved there) has not reported back yet, for up to 6 hours; or, for a session without that record, it said work goes on in the background (for up to 45 minutes). Open steps on its task list do not make it *Unfinished* meanwhile. |
+| In the background (背景執行) | A command or an agent it started in the background (`run_in_background`, or moved there) has not reported back yet, for up to 6 hours; or, for a turn that ended with neither a `report` nor a `wrap_up` recap, it said work goes on in the background (for up to 45 minutes). Open steps on its task list do not make it *Unfinished* meanwhile. |
 | Ended (已結束) / Idle (長期閒置) | Nothing left; idle for more than 3 days. Hidden behind a toggle. |
 
 At the top: a completion ring and three counters (running, waiting on you, not finished: unfinished, waiting on CI, CI failed or not released). Switch between **this project** and **all projects**.

@@ -260,7 +260,20 @@ export const register: Register = (on, options) => {
 
   // The PM's Agent call: in the background, and in a worktree of its own unless it only reads (agentCallInput).
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
-    if (!(await isPmCall($, e.agentId))) return next(e)
+    if (!(await isPmCall($, e.agentId))) {
+      const result = await next(e)
+      // Another session's agent in the background: the session waits on it, as on a background command, until its
+      // notification (prompt.submit, finishedTasks) comes in.
+      const started = result.result as { agentId?: unknown; isAsync?: unknown } | undefined
+      if (e.agentId === undefined && started?.isAsync === true && typeof started.agentId === 'string') {
+        const id = started.agentId
+        const now = await $.clock.now()
+        const label = clip(str((e as unknown as Record<string, unknown>).description) ?? id, 120)
+        await changeMine($, t => ({ ...t, background: [...(t.background ?? []).filter(b => b.id !== id), { id, label, at: now }] }))
+      }
+
+      return result
+    }
     const input = e as unknown as Record<string, unknown>
     const made = await agentCallInput($, input)
     if ('deny' in made) return { deny: made.deny }
