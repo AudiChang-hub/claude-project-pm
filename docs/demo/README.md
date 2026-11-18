@@ -1,27 +1,30 @@
-# Board demo
+# README images
 
-`board.html` is an offline copy of the Project PM board, filled with a made-up
-project ("Acme Storefront"). It draws the README images without touching any real
-session or `~/.claude/project-pm/` data.
+The README images are drawn from two offline pages filled with made-up data. Nothing here reads a
+real session or `~/.claude/project-pm/`.
 
-- The marks (completion ring, status dots, step bars) and status colors are copied from
-  `hooks/view.tsx` and `hooks/sessions.ts`, the board's words from `hooks/messages.ts`
-  (only the keys the pane uses); the layout follows `renderPane()`. If those change, update
-  this file to match.
-- `board.html?view=hero` is the annotated light image; `board.html?view=pane&theme=dark`
-  is the pane alone in dark mode. Add `&lang=zh-TW` for the Traditional Chinese board, with
-  its own made-up data and callouts; the default is English.
-- `README.md` uses `board-hero.png` and `board-dark.png`; `README.zh-TW.md` uses
-  `board-hero-zh-TW.png` and `board-dark-zh-TW.png`.
+| Page | Images | Used in |
+| --- | --- | --- |
+| `overview.html?lang=en` · `?lang=zh-TW` | `overview.png` · `overview-zh-TW.png` | The top of each README |
+| `board.html?lang=…&theme=light` · `&theme=dark` | `board-light.png`, `board-dark.png` and their `-zh-TW` versions | *See the board*, chosen by GitHub's light or dark theme (`<picture>`) |
 
-To regenerate the images (Windows, Edge or Chrome installed), from the repository root:
+- `overview.html` is the v0.8.0 one-page overview. Its figures come from CHANGELOG `[0.8.0]` and
+  `docs/design/agents.md`; the 37 s is one measured hand-off to an agent (2026-11-18).
+- `board.html` is the PM's pane for a made-up project ("Acme Storefront"). Its marks (ring, status
+  dots, agent diamonds, step bars) and colors are copied from `hooks/view.tsx` and
+  `hooks/sessions.ts`, its words from `hooks/messages.ts` (only the keys the pane uses), and its
+  layout follows `renderPane()`. When those change, update this page to match.
+
+To regenerate (Windows, with Edge or Chrome), from the repository root:
 
 ```powershell
 pwsh docs/demo/capture.ps1
 ```
 
-The committed PNGs were then reduced to 256 colors to keep the README light:
+Name images to redraw only those (`pwsh docs/demo/capture.ps1 overview.png`). Every shot is
+transparent outside its rounded corners, so GitHub's light or dark page shows through. Then crop
+each to its content and reduce it to 256 colors, keeping the transparency:
 
 ```bash
-python -c "from PIL import Image; [Image.open(f'docs/images/{n}.png').convert('RGB').quantize(256, dither=Image.Dither.FLOYDSTEINBERG).save(f'docs/images/{n}.png', optimize=True) for n in ('board-hero', 'board-dark', 'board-hero-zh-TW', 'board-dark-zh-TW')]"
+python -c "from PIL import Image; [(lambda p: (lambda im: im.crop(im.getchannel('A').getbbox()).quantize(256, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.FLOYDSTEINBERG).save(p, optimize=True))(Image.open(p).convert('RGBA')))(f'docs/images/{n}.png') for n in ('overview', 'overview-zh-TW', 'board-light', 'board-dark', 'board-light-zh-TW', 'board-dark-zh-TW')]"
 ```

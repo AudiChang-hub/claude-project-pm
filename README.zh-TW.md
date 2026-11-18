@@ -2,200 +2,85 @@
 
 [English](README.md) | **繁體中文**
 
-**同時開很多個 Claude Code Session，也不會漏掉任何一件工作。**
-
 [![CI](https://github.com/AudiChang-hub/claude-project-pm/actions/workflows/ci.yml/badge.svg)](https://github.com/AudiChang-hub/claude-project-pm/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-一個專案往往同時開著好幾個 Claude Code Session，各自做不同的事。**Project PM** 會為每個專案指派一個 PM Session：你只要跟 PM 對話，它就能掌握所有子 Session 的進度、等你回覆的問題、中途停下的工作，以及你交辦過的每一件事；只要還有 Session 在等你、做到一半停下、或 CI 還沒跑完，PM 就不會說「都完成了」。
+**同時開很多個 Claude Code Session 和 Agent，你只跟一個 PM 說話，一件工作也不漏。**
 
 <p align="center">
-  <img src="docs/images/board-hero-zh-TW.png" alt="示範專案的 Project PM 看板：工作項目完成 44%，一個 Session 待回覆、一個 CI 失敗、一個中斷且還有 4 項步驟未完成、一個已合併但還沒 push。" width="100%">
+  <img src="docs/images/overview-zh-TW.png" alt="Project PM v0.8.0 一頁圖解：你只跟 PM 說話，PM 管看板和交辦清單，把工作交給 Session（要記憶、會追問、push 和 CI）或 Agent（做完就走、大量讀取、背景執行）。清單更新縮小 97%，看板輸出縮短最多 49%。Agent 在獨立 worktree 工作，PM 合併後才算完成，只能讀清單，也不會 push。" width="100%">
 </p>
-
-<sub>畫面為示範資料。看板有英文與繁體中文介面，預設跟隨系統語言（見[介面語言](#介面語言)）。</sub>
 
 ## 解決什麼問題
 
-同一個專案開了五個、十個 Session 之後，很容易漏掉：
+同一個專案開了好幾個 Session，工作就會漏掉：問題等你等了一小時、Session 還剩幾步就停了、說好「CI 跑完再部署」卻沒人回頭確認，而且每個 Session 收尾時都會把自己的清單全勾掉，不管事情做完了沒。
 
-- 某個 Session 一小時前問了你問題，之後就一直停在那裡。
-- 某個 Session 任務清單還剩三步就停了，沒有任何提示。
-- 某個 Session 說「CI 在跑，通過後我再部署」，然後沒有人回頭確認。
-- 每個 Session 收尾時都會把自己的清單全部勾掉，所以側欄看起來全綠，不代表你交代的事真的做完。
-
-Project PM 會讀取每個 Session 的任務清單、收尾摘要與待決策問題，到 GitHub 確認 CI 結果，並把需要你處理的事排在看板最前面。
+Project PM 讓專案裡的一個 Session 擔任 PM。它即時掌握每個 Session 和 Agent 的狀態，記下你交辦的每件事；只要還有事在等你、沒做完、等 CI，或還沒 push、還沒發布，它就不會說「都完成了」。
 
 ## 快速上手
 
-需要 **Claude Code 桌面版（Code 分頁）**，詳見[需求](#需求)。
+需要 Claude Code 桌面版（Code 分頁）。
 
-1. 安裝。在 Claude Code 提示字元輸入：
+1. 安裝：
 
    ```
    /plugin install project-pm --marketplace AudiChang-hub/claude-project-pm
    ```
 
-   桌面版無法使用 `/plugin`：點提示框旁的 **+** → **Plugins** → **Add marketplace**，輸入 `AudiChang-hub/claude-project-pm`，再點 **Add plugin**。
+   桌面版：點提示框旁的 **+** → **Plugins** → **Add marketplace** → 輸入 `AudiChang-hub/claude-project-pm` → **Add plugin**。
 
-   也可以在 shell 執行：
+2. 在專案裡新開一個 Session，輸入 `/pm`。它會成為 PM、打開看板，並告訴你有哪些事在等你。
+3. 直接跟 PM 說話：「有沒有漏掉的工作？」「找出沒有頁面描述的頁面。」「哪些 Session 在等我回覆？」
+4. 保持更新。第三方 Plugin，Claude Code 不會自己更新：在終端機執行 `claude` → `/plugin` → **Marketplaces** → `claude-project-pm` → **Enable auto-update**，或手動執行 `claude plugin update project-pm@claude-project-pm`。
 
-   ```bash
-   claude plugin install project-pm --marketplace AudiChang-hub/claude-project-pm
-   ```
+## v0.8.0 亮點
 
-2. 在專案裡新開一個 Session（安裝前就開著的 Session 不會載入），輸入：
+- **PM 可以派工給 Agent。** 做完就結束的小事，交給背景 Agent，你照樣跟 PM 說話。之後還會追問、要 push、等 CI 或發布的工作，仍然交給 Session。看板上 Agent 和 Session 並列（Session 是 ●，Agent 是 ◆），看得到狀態、耗時和 token 用量。
+- **大幅省 token。** 交辦清單每次更新只回傳改到的那一項（實際清單從 10,354 字降到 278 字），看板縮短 37–49%，完整說明寫進詳細檔，在卡片上按「詳細」就能打開。
+- **預設就安全。**
+  - 會改檔案的 Agent 在自己的 git worktree 工作，不會動到你的工作目錄；不是 git repo 的專案，PM 不能開這種 Agent。
+  - 它的 commit 要等 PM 合併進你的分支才算完成。
+  - Agent 只能讀交辦清單、不能修改，也不會 push 或發布。
 
-   ```
-   /pm
-   ```
+[發布說明](https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.8.0) · [CHANGELOG](CHANGELOG.md) · [Agent 怎麼運作](docs/design/agents.md)
 
-   這個 Session 就成為專案的 PM，會開啟看板並報告目前有哪些事在等你。
+## PM 幫你守住什麼
 
-3. 接著直接跟 PM 對話，例如：「目前有沒有漏掉的工作？」「幫我把匯出 CSV 交給商品列表那個 Session 做。」「哪些 Session 在等我回覆？」
+- **等你回覆的排最前面**，附上原本的問題。
+- **CI 要 GitHub 說通過才算**：PM 用 `gh` 查實際結果。
+- **沒上線就不算完成**：有沒有 commit、push 由 git 判斷，有沒有發布看 Session 的回報。
+- **沒做完的工作不能結案**，除非你明確同意。
 
-4. 開啟自動更新。第三方 marketplace 的 Plugin，Claude Code 不會自己更新，重開 App 也不會；沒開自動更新，就會一直停在安裝時的版本。在終端機執行 `claude`，打開 `/plugin` → **Marketplaces** → `claude-project-pm`，選 **Enable auto-update**。之後 Session 啟動時，Claude Code 會在背景檢查新版。也可以隨時手動更新：
-
-   ```bash
-   claude plugin update project-pm@claude-project-pm
-   ```
-
-   新版裝好後，已經開著的 Session 會在閒置時自動重新載入。
-
-## 功能
-
-**每個專案一個看板。** 面板列出專案裡的 Session，最需要處理的排最前面；每張卡片有狀態燈號、逐步進度條、目前進行的步驟，以及最新的收尾摘要或問題。
-
-| 狀態 | 何時出現 |
-| --- | --- |
-| 待回覆 | Session 這一輪以問題結束，等你決定。 |
-| CI 失敗 | 最後回報說 CI 在跑，而 GitHub 上那次執行失敗。 |
-| 未完成 | 已停止，任務清單仍有未完成步驟，而且沒有它在等的作業還在跑。 |
-| 待發布 | 還有工作沒交付，判斷時事實優先（見下方〈交付怎麼判斷〉）：git 顯示還沒 commit 或 push、Session 宣告還要部署，或兩者都沒有時，回報明確說工作還沒做、還要做。任務清單全部打勾也不會蓋過它（`wrap_up` 會把每一步都勾掉）。 |
-| 等待 CI | 最後回報說 CI 還沒跑完，GitHub 也還沒確認通過。 |
-| 執行中 | Session 正在工作。 |
-| 背景執行 | 它在背景啟動的指令或 Agent（`run_in_background`，或被移到背景的）還沒回報結束（最多 6 小時）；最後一輪既沒有 `report` 也沒有 `wrap_up` 摘要時，才看回報有沒有說作業在背景繼續跑（45 分鐘內）。這段期間任務清單有未完成步驟，也不會標成「未完成」。 |
-| 已結束／長期閒置 | 沒有待辦；超過 3 天沒活動為長期閒置。預設收合。 |
-
-上方是完成率圓環與三項指標（執行中、待回覆、尚未完成：未完成、等待 CI、CI 失敗、待發布），可切換「本專案／全部」。
-
-**工作項目清單。** 你交代 PM 的每件事都以 T-01、T-02… 編號登記，並指派負責的 Session。專案進度以工作項目計算，而不是看各 Session 自己的勾選清單。負責的 Session 可以在別的專案資料夾工作（例如修共用函式庫的 Session），看板一樣會顯示它的標題和狀態；只有封存或找不到時才標「負責人失聯」。
-
-**CI 沒跑完就不算完成。** Session 最後一輪的回報如果說 CI 還在跑、或要等 CI 通過才部署，狀態會標成「等待 CI」，不管停了多久都不會變成「已結束」。引號裡的字（例如引用的狀態名稱「等待 CI」）和描述規則、舉例的句子不算。這時 PM 會在該 Session 的資料夾用 `gh` 查實際結果：回報裡提到的 run 和 commit，離回報本身講 CI 的地方越近越先查；commit 必須存在於該 repo 才查（引用自其他專案或範例的 hash 會跳過）；都查不到時，改查資料夾當時的 `HEAD`（只限在回報之前就提交的）。通過就不再標「等待 CI」，失敗則標成「CI 失敗」。查詢結果會快取：通過的不再重查，失敗的 5 分鐘後重查，還在跑或查不到的 1 分鐘後重查。沒裝 `gh` 或不在 GitHub 時，照文字判斷。
-
-**未完成的工作不能結案。** 負責 Session 還在執行中、待回覆、未完成、等待 CI、CI 失敗、待發布或背景執行時，ledger 會拒絕把工作項目標成完成；除非使用者明確確認，並由 PM 在備註寫明。
-
-**收尾摘要的未完成事項。** 摘要寫到「尚未部署」「還沒提交」「not yet deployed」「still needs」這類字眼時列為「需追蹤」；「沒有任何未提交的修改」這種表示已經做完的雙重否定不算。
-
-**只看最新一輪。** 收尾摘要只算寫下它的那一輪；之後沒有重新收尾的回合，舊摘要就不再算數。紀錄檔如果漏記了後面的回合，改用對話紀錄的最後一則訊息判斷。
-
-**像 PM 一樣做事。** PM 回報前一定先看看板；實作交給子 Session，自己不改程式碼；把子 Session 的問題原文轉述給你；封存前先問你；「需要處理」還沒清空之前，不會說「都完成了」。子 Session 開始等你回覆、CI 失敗、或中途停下時，PM 會跳出通知。
-
-**PM 立刻知道。** Session 回報或結束一輪時，它的 Mod 會傳一行更新給 PM（`$.session.send`），PM 的 Mod 在訊息進到 PM 對話之前就把它攔下（`session.receive`）：看板馬上重畫，不會讓 PM 多跑一輪，也不花 token。只有 Mod 能攔下更新的 PM 才會收到；每 30 秒的輪詢保留作為備援。
-
-**整理 Session。** 卡片上的封存按鈕要滑過才會出現，按下後還需再確認一次（會提醒未完成步驟、開啟中的 PR 或已釘選）。還沒有 PM 的專案，輸入框上方會出現「建立 PM Session」或「由此 Session 擔任」的選項。
-
+<details>
+<summary><b>看看板長什麼樣</b>（示範資料）</summary>
+<br>
 <p align="center">
-  <img src="docs/images/board-dark-zh-TW.png" alt="深色模式的完整看板：工作項目與七個進行中的 Session，包含待發布、執行中與背景執行。" width="420">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/board-dark-zh-TW.png">
+    <img src="docs/images/board-light-zh-TW.png" alt="示範專案的 Project PM 看板：工作項目完成 55%，負責人有 Session 也有 Agent；Agents 區塊有一個執行中、一個待驗收、一個已完成；Session 有待回覆、CI 失敗、未完成、待發布和執行中。" width="420">
+  </picture>
 </p>
+</details>
 
-## Session 還是 Agent
+每個狀態的意思、交付怎麼判斷、開發準則，以及 Mod 在你電腦上留下哪些資料：[運作方式](docs/how-it-works.zh-TW.md)。
 
-PM 派工時，每件事會交給 Session 或 Agent；你仍然只跟 PM 說話。之後會追問、要 commit／push／等 CI／發布、或要做比較久的，交給 Session。做完就結束、唯讀查詢、或幾分鐘內的小改動，交給 Agent（Agent 工具）。很小的事直接交給已經開著的 Session：每開一個 Agent 都要重新載入整份系統提示，實測約 3.7 萬到 5.8 萬 tokens。要中途調整，告訴 PM，PM 會轉達給 Agent。
-
-PM 自己呼叫 Agent 時，mod 會：
-
-- 讓 Agent 在背景執行，PM 不會被卡住，你可以繼續跟 PM 說話；
-- 把會寫檔的 Agent 放進自己的 git worktree（`isolation: "worktree"`），在那裡 commit，交給 PM 驗收和合併；`Explore`、`Plan`、`claude-code-guide` 只讀，留在原資料夾；不是 git repo 的專案，會寫檔的 Agent 會被拒絕；
-- 在它的指示後面附上說明：回覆只寫一行（`[狀態, commit] 摘要`）、完整內容寫進詳細檔、不要 push 或發布，以及你的開發準則；
-- 把 PM 收到的結束通知裡的回覆，縮成第一行加詳細檔路徑，其餘內容存在檔案裡；
-- 讓 Agent 可以讀 ledger，但不能修改。
-
-每個 Agent 都記在 PM 的紀錄裡：執行中、已完成、待驗收（它在 worktree 分支上 commit 了，PM 還沒合併）、待決定、失敗，已中斷（PM 的程序結束時它還在執行），或已捨棄（它結束後工作項目被捨棄，或它的 commit 已不在任何分支上）。工作項目的負責人可以是 Agent（`agent:<agentId>`）；Agent 完成後 ledger 才能結案，有 commit 的要等合併進專案分支才算完成。看板有 Agents 區塊，Session 用圓點、Agent 用菱形；Agent 失敗、需要決定、待驗收或已中斷時，會列在「需要處理」。設計和實測：[docs/design/agents.md](docs/design/agents.md)。
-
-## 交付怎麼判斷
-
-事實優先，文字最後：
-
-1. **commit 和 push 看 git。** PM 會讀自己專案每個 Session 的資料夾，只讀、不 fetch。資料夾沒有未提交的修改，就沒有要 commit 的。回報說是自己的 commit（commit 是 3fa1c2e、提交為 3fa1c2e、amend 成 3fa1c2e），或乾淨資料夾的 HEAD 已經在遠端分支上，就沒有要 push 的；回報說是自己的 commit 卻不在任何遠端分支上，不管文字怎麼寫，都算還沒 push。cherry-pick 或 rebase 到遠端分支的 commit，SHA 雖然不同，也算已 push：PM 會在遠端的預設分支和最近更新的四條分支上找，由便宜到貴依序比對：同一個 patch（`git cherry`）、標題相同且至少包含它 95% 新增行的 commit（中途解過衝突也認得）、檔案內容相同（squash）。git 只用來確認或解除：共用資料夾可能有別的 Session 的修改，所以資料夾有修改本身不會多算一項。
-2. **工作狀態看 Session 自己的回報。** 有 PM 的專案，其他 Session 會多一個 `report` 工具（`mcp__project-pm__report`），並被要求在完成、暫停或卡住時呼叫：填 `status`（`done`、`in_progress`、`blocked`、`waiting_user`、`waiting_ci`、`waiting_release`）、一句話的 `summary`，有的話再填 `commit`、還在跑的 `ci`、`delivery`（`not_needed`、`released`、`pending`），以及 `detail`：完整說明，mod 會存成 `~/.claude/project-pm/reports/<session id>/<時間>.md`。PM 只讀回報的那一行和檔案路徑；看板卡片上的「詳細」按鈕可以直接打開這個檔案給你看。各 Session 給 PM 的訊息（SendMessage、wrap_up 摘要、最後的回答）也被要求用同樣的短格式，約 300 字以內：狀態、commit、一行摘要，以及詳細檔的路徑。看板只看這些欄位，不讀摘要的文字；回報裡的 commit 和 CI run 仍會用 git（第 1 點）和 GitHub 查證。回報只代表做出回報的那一輪。`released`（或「交付：已部署」）代表什麼都不剩，commit 和 push 也算完成，不管 commit 是用什麼方式進到發布的版本；看板引用的是回報本身（`[done, released, 3fa1c2e] …`），和判斷理由放在一起。無法呼叫工具的 Session，改在收尾摘要最後加一行：`交付：不需要部署`、`交付：已部署（…）` 或 `交付：待部署（等…）`（英文是 `Delivery: not needed`、`deployed (…)`、`pending (…)`）。沒有 PM 的專案，Session 不會收到任何指示。
-3. **兩者都沒有時，才看文字。** 只有明確說工作還沒做、還要做，才算沒交付：還沒、尚未、未、not yet；接下來要做的（之後再部署、I'll push after review）；在等的（等 PM 放行後部署）；或還留在這裡的（只在本機，沒有 push）。單純的否定（沒有打標籤也沒有部署、didn't push）不算，因為它常常是「這次不需要」的意思。描述規則或舉例的句子、引號裡的字、別人的工作、描述看板的句子，都會先排除。
-
-工作項目結案就算定案：一個 Session 負責的工作項目全部完成後，從回報讀出的判斷（待發布、還有步驟）就不再列進「需要處理」，直到它再次回報。正在發生的狀態（執行中、待回覆、CI、背景執行）照常顯示。
-
-這樣會放過的情況：Session 沒有宣告、也沒寫出自己的 commit，只寫「沒有 commit」但其實真的沒提交，或只寫「沒有部署」但其實該部署。宣告、回報寫出自己的 commit，或任務清單還沒完成的步驟，都能把這些情況補回來。
-
-## 使用方式
+## 指令
 
 | 指令 | 作用 |
 | --- | --- |
-| `/pm` | 指定目前的 Session 為這個專案的 PM，並開啟專案看板 |
-| `/pm off` | 卸任 PM（工作項目會保留，由下一任 PM 接手） |
-| `/board` | 在任何 Session 開啟或收合專案看板 |
-| `/pm lang en`・`/pm lang zh-TW`・`/pm lang auto` | 立即切換看板、PM 與工具的語言，並存成 `language` 選項；`auto` 跟隨系統 |
-| `/pm guidelines <檔案>`・`/pm guidelines off` | 設定或取消開發準則（見下方）；只打 `/pm guidelines` 會顯示目前用的檔案和讀不讀得到 |
-
-PM 有兩個專屬工具（不需要你自己呼叫）：
-
-- `mcp__project-pm__board`：專案狀態報告（需要處理的事項、工作項目、所有 Session）。`scope: "all"` 看所有專案，`include_done: true` 一併列出已結束的 Session 與已完成的工作項目。
-- `mcp__project-pm__ledger`：工作項目的 `add`、`update`（負責人、狀態 `open`／`done`／`dropped`、備註）與 `list`。`add` 和 `update` 只回傳被改的那一項；`list` 預設只列未結案的，`include_done: true` 列出全部，指定 `id` 會顯示那一項的完整內容和備註。清單裡每項的內容和備註都截成一行，所以就算有幾百項，PM 每次呼叫也只讀幾百字。
-
-專案以 Session 的工作資料夾區分；`.claude/worktrees/` 或 `.worktrees/` 底下的 git worktree 算在它所屬的 repository。
-
-### 開發準則
-
-把 `guidelines` 選項指向一份你自己寫的 Markdown 準則（怎麼提交、改 schema 前要不要先問、做到哪裡才算完成），PM 和有 PM 的專案裡的其他 Session，每一輪都會在系統提示裡讀到它。PM 另外會被要求執行準則中交給協調者的事（版號、推版和部署的順序、完成定義），子 Session 違反準則時也要指出來。
-
-- **不符合準則的要求先問。** Session 會說明這個要求違反哪一條、問這次是否要例外執行，得到明確同意才做。
-- **例外只算一次。** 做完就回到準則，之後類似的要求會再問一次。PM 會把核准的例外記在對應工作項目的備註。
-- **準則只有你要求時才改。** 除非你在那個 Session 的最新一則訊息提到準則（含「準則」、「守則」或 guideline），否則修改準則檔會被擋下，並提示 Session 先問你。
-
-- 路徑可以是絕對路徑、`~/…`，或相對於各專案資料夾的路徑（例如 `docs/GUIDELINES.md`），讓每個專案各用自己的準則。
-- 每一輪都重新讀檔：改了檔案，各 Session 的下一輪就生效，不用重新載入。內容只留在你的電腦上；超過 24,000 字的部分會截掉，並提示去讀原檔。
-- 用 `/pm guidelines <檔案>` 或 `/config` 裡的 `project-pm.guidelines` 設定。沒有 PM 的專案，Session 不會收到準則。
+| `/pm` | 讓目前的 Session 擔任 PM，並打開看板 |
+| `/pm off` | 卸任 PM；交辦清單留給下一任 |
+| `/board` | 在任何 Session 打開或收合看板 |
+| `/pm lang en`・`zh-TW`・`auto` | 看板和 PM 的語言；`auto` 跟隨系統 |
+| `/pm guidelines <檔案>`・`off` | 讓 PM 和各 Session 遵守你的開發準則 |
 
 ## 需求
 
-- **Claude Code 桌面版的 Code 分頁。** PM 會用到桌面版內建的 Session 工具（`ccd_session_mgmt` 列出、讀取與封存 Session；`ccd_session` 建立 PM Session），各 Session 也是透過桌面版的 `update_plan` 與 `wrap_up` 回報任務清單。改用 `TodoWrite` 管理任務的 Session 也會追蹤。
-- **支援 function hooks Mod 的 Claude Code。** 已在 2.1.317 測試。
-- **選用：已登入的 [GitHub CLI](https://cli.github.com/)（`gh`）**，用來向 GitHub 確認 CI。沒有的話，CI 狀態依 Session 的回報文字判斷。
-- 由組織統一管理 Claude Code 的環境中，PM 的角色指示（`prompt.compose` hook）只有在組織把此 Plugin 列入 managed settings 時才會生效；看板與工作項目不受影響。
-
-## 介面語言
-
-看板、輸入框上方的提示列、指令的回覆、通知、PM 的指示與工具，都有**英文**與**繁體中文**兩種介面。
-
-- **預設跟隨系統語言**（Windows 為顯示語言）：任何中文語系都顯示繁體中文，其他語系顯示英文。簡體中文語系也會顯示繁體中文；想看英文可以執行 `/pm lang en`。
-- **指定語言**：把 Plugin 的 `language` 選項設為 `auto`、`en` 或 `zh-TW`（即 `/config` 裡的 `project-pm.language`，存在 `settings.json` 的 `pluginConfigs`），或在任何 Session 輸入 `/pm lang en`、`/pm lang zh-TW`、`/pm lang auto`。指令會立即生效，並存成選項。
-- 不論看板顯示哪種語言，狀態判斷都讀得懂中文與英文的回報，子 Session 用哪種語言工作都可以。
-
-所有介面文字都在 [`hooks/messages.ts`](hooks/messages.ts)，每種語言一份。
-
-## 運作方式與資料
-
-- 每個 Session 只寫自己的紀錄檔：`~/.claude/project-pm/sessions/<session id>.json`（任務清單、最後的收尾摘要、待決策問題、最新指令與最後回報，皆有截斷，以及看板是否開著）。
-- 每個專案一份檔案，記錄 PM 與工作項目：`~/.claude/project-pm/projects/<專案>-<hash>.json`。
-- 看板會把上一輪的結果（列出的 Session、它們的最後訊息、git 與 GitHub 的回答）存在 `~/.claude/project-pm/rounds/<session id>.json`，並用 `~/.claude/project-pm/transcripts.json` 記錄每份對話紀錄屬於哪個 Session，讓恢復的 Session 能立刻畫出看板。
-- Mod 本身不會把資料傳到任何地方。Session 清單、紀錄讀取與封存，都是透過桌面版內建的工具完成。查 CI 與交付狀態時，會在該 Session 的資料夾以唯讀方式執行 `git` 與 `gh`（`git status` 不更新索引、`branch -r --contains`、`rev-parse`，不會 fetch），`gh` 會用你自己的登入向 GitHub 查詢，和你手動執行一樣。
-- 有 PM 的專案，其他 Session 每一輪會收到一段簡短指示和 `report` 工具：回報工作狀態，或在收尾加一行交付宣告（見〈交付怎麼判斷〉）。它們回報或結束一輪時，會傳一行只寫自己 id 的更新給 PM。其他專案的 Session 不會收到任何指示。
-- Mod 安裝前就開著的 Session 沒有追蹤紀錄，看板只會顯示它們最後一則訊息。
-- PM 的 `board`／`ledger` 工具被引擎移除時（執行 `/reload-plugins` 後，或 Mod 資料夾有變動、執行 `/board` 這類指令時被重新載入），會在 PM 的下一輪（下一則訊息或通知叫醒）重新註冊，PM 閒置時也會在 30 秒內補回，不必重開 Session。
-- 看板會維持你留下的狀態：`/board` 或 `/pm` 會開啟，`/board` 或面板的關閉鈕會收合。桌面版為了釋放記憶體暫停閒置的 Session、之後再恢復，或引擎收掉面板時，原本開著的看板會在 Session 恢復時，以上一輪的結果立刻畫出來。
-- 可用記憶體低於 5% 時，桌面版會暫停所有閒置一分鐘以上的 Session；除了可用記憶體，也會看 Windows 的認可上限（記憶體加分頁檔）。看板常常消失，通常是認可上限不夠用：加大分頁檔，或減少吃記憶體的程式，Session 就不會被暫停。這個 Mod 本身每個 Session 約增加 40 MB 的認可記憶體；每個 PM 只向 git 與 GitHub 詢問自己專案的狀態（看板切到全部專案時才問全部），GitHub 查不到的 CI 每十分鐘才再問一次，看板也只在有變化或顯示在畫面上時才重畫。
-
-## 開發
-
-```bash
-claude plugin validate .
-claude plugin test .
-```
-
-測試（`tests/pm.test.ts`）在 Claude Code 的 plugin 測試環境中執行，桌面版、磁碟與 `gh` 都以記憶體模擬，不需要登入或 API key。CI 會在每次 push 與 pull request 執行這兩個指令。
-
-`docs/demo/board.html` 用虛構資料繪製 README 的截圖，說明見 [docs/demo/README.md](docs/demo/README.md)。
-
-變更紀錄見 [CHANGELOG.md](CHANGELOG.md)。
+- **Claude Code 桌面版**（Code 分頁）：PM 會用到它內建的 Session 工具。
+- 支援 function hooks Mod 的 Claude Code，已在 2.1.317 測試。
+- 選用：已登入的 [GitHub CLI](https://cli.github.com/)，讓 PM 能查 CI。
+- 會改檔案的 Agent 需要 git repo。Agent 跑在 PM 的程序裡，重開 Claude Code 會中斷它們，看板會標成「已中斷」。
 
 ## 授權
 
-[MIT](LICENSE)
+[MIT](LICENSE)。測試：`claude plugin validate .` 與 `claude plugin test .`，不需要登入。

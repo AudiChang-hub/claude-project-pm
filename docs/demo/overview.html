@@ -1,0 +1,194 @@
+<!doctype html>
+<!--
+  The v0.8.0 one-page overview at the top of the READMEs, as a static page to capture.
+  Rebuilt from the design canvas "Project PM v0.8.0 一頁圖解"; layout and colors as designed.
+
+  Views:  overview.html?lang=en      docs/images/overview.png
+          overview.html?lang=zh-TW   docs/images/overview-zh-TW.png
+  Capture: pwsh docs/demo/capture.ps1 (see docs/demo/README.md)
+
+  Every figure is from CHANGELOG [0.8.0] or docs/design/agents.md, except the 37 s run, which is
+  one measured hand-off (2026-11-18, the agent that wrote commit 6f99311).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1200">
+<title>Project PM Overview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&family=Noto+Sans+TC:wght@400;500;700;900&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0e1322; --panel: #182038; --line: #3a4565; --ink: #eef1f8; --ink-2: #b7bfd3; --ink-3: #8e97ae;
+    --blue: #6aa8ff; --blue-bg: #142443; --blue-chip: #1e3460;
+    --gold: #ffd84a; --gold-bg: #2a2610; --gold-chip: #3d3712;
+    --sans: "Inter", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    --num: "Space Grotesk", var(--sans);
+  }
+  :lang(zh-TW) { --sans: "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: transparent; }
+  body { font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: antialiased; }
+  .poster {
+    width: 1200px; padding: 64px 72px 56px; border-radius: 32px; overflow: hidden;
+    background: var(--bg) radial-gradient(rgba(255,255,255,.05) 1.4px, transparent 1.5px) 0 0 / 22px 22px;
+    display: flex; flex-direction: column; gap: 44px;
+    /* A faint edge keeps the card's shape on GitHub's dark page. */
+    box-shadow: inset 0 0 0 2px rgba(238, 241, 248, .09);
+  }
+  .row { display: flex; align-items: center; }
+  .head { justify-content: space-between; align-items: flex-end; gap: 24px; }
+  .eyebrow { font: 700 20px/1 var(--num); letter-spacing: .14em; color: var(--gold); }
+  h1 { margin: 10px 0 0; font-size: 64px; font-weight: 900; line-height: 1.1; letter-spacing: -.015em; }
+  :lang(zh-TW) h1 { letter-spacing: 0; }
+  .legend { gap: 16px; font-size: 20px; color: var(--ink-2); }
+  .legend span { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 18px; height: 18px; border-radius: 50%; background: var(--blue); display: inline-block; }
+  .diamond { width: 18px; height: 18px; transform: rotate(45deg); background: var(--gold); display: inline-block; }
+
+  .flow { display: flex; flex-direction: column; align-items: center; }
+  .you { gap: 18px; background: var(--panel); border: 3px solid var(--ink); border-radius: 20px; padding: 18px 30px; font-size: 30px; font-weight: 700; }
+  .stem { width: 4px; height: 44px; background: var(--ink); }
+  .pm { gap: 22px; background: var(--ink); color: var(--bg); border-radius: 24px; padding: 22px 36px; }
+  .pm b { display: block; font-size: 36px; font-weight: 900; }
+  .pm small { display: block; font-size: 20px; font-weight: 500; color: #414b66; }
+  .branch { display: flex; width: 760px; height: 44px; }
+  .branch i { flex: 1; margin-top: 22px; }
+  .branch i:first-child { border-top: 4px solid var(--blue); border-left: 4px solid var(--blue); border-top-left-radius: 18px; }
+  .branch i:last-child { border-top: 4px solid var(--gold); border-right: 4px solid var(--gold); border-top-right-radius: 18px; }
+  .two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px; width: 100%; }
+  .kind { border-radius: 22px; padding: 26px 28px; display: flex; flex-direction: column; gap: 16px; }
+  .kind.session { background: var(--blue-bg); border: 3px solid var(--blue); }
+  .kind.agent { background: var(--gold-bg); border: 3px solid var(--gold); }
+  .kind .title { gap: 14px; font-size: 32px; font-weight: 900; }
+  .kind .title .dot { width: 36px; height: 36px; }
+  .kind .title .diamond { width: 30px; height: 30px; margin: 0 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 10px; }
+  .chips > span { padding: 8px 16px; border-radius: 10px; font-size: 20px; }
+  .session .chips > span { background: var(--blue-chip); }
+  .agent .chips > span { background: var(--gold-chip); }
+  .note { justify-content: center; gap: 12px; font-size: 22px; color: var(--ink-2); }
+
+  .four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
+  .stat { background: var(--panel); border-radius: 20px; padding: 26px 22px; display: flex; flex-direction: column; gap: 10px; }
+  .stat b { font: 700 52px/1 var(--num); color: var(--gold); letter-spacing: -.01em; }
+  .stat p, .guard p { margin: 0; font-size: 20px; line-height: 1.45; color: var(--ink-2); }
+  .guard { border: 2px solid var(--line); border-radius: 18px; padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+  .guard b { font-size: 22px; font-weight: 700; }
+  .guard p { font-size: 18px; line-height: 1.4; }
+  .foot { justify-content: space-between; gap: 24px; border-top: 2px solid var(--line); padding-top: 22px; font-size: 18px; color: var(--ink-3); }
+  .foot .repo { font-family: var(--num); }
+  .sep { font-family: "Inter", sans-serif; margin: 0 .3em; }
+  .stat .top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .stat .tag { font: 600 14px/1 var(--num); letter-spacing: .08em; text-transform: uppercase; color: var(--gold);
+    border: 1.5px solid rgba(255, 216, 74, .45); border-radius: 6px; padding: 6px 8px 5px; }
+  :lang(zh-TW) .stat .tag { font: 500 15px/1 var(--sans); letter-spacing: .04em; padding: 6px 8px; }
+</style>
+</head>
+<body>
+<div class="poster" id="poster"></div>
+<script>
+const COPY = {
+  en: {
+    title: 'You only talk to the PM',
+    you: 'You',
+    pm: 'Board · Ledger',
+    session: ['Remembers', 'Follow-ups', 'Push · CI'],
+    agent: ['One-off', 'Read-heavy', 'Background'],
+    noteSession: 'One-line report + detail file',
+    noteAgent: 'Own worktree → PM review → merge',
+    stats: [
+      ['−97%', 'Ledger updates<br>10,354 → 278 chars'],
+      ['−49%', 'Board output<br>37–49% shorter'],
+      ['37 s', 'A small task, from<br>hand-off to report', 'measured'],
+      ['17 s', 'A redirect reaches<br>a running agent', 'measured'],
+    ],
+    guards: [
+      ['No collisions', 'Each agent in its own worktree'],
+      ['Reviewed first', 'Done once the PM merges'],
+      ['Ledger locked', 'Agents can only read it'],
+      ['No pushing', 'Agents never push or release'],
+    ],
+    foot: 'Small task → an open session　·　Long work → a session　·　One-off → an agent',
+  },
+  'zh-TW': {
+    title: '你只跟 PM 說話',
+    you: '你',
+    pm: '看板 · 交辦清單',
+    session: ['要記憶', '會追問', 'push · CI'],
+    agent: ['做完就走', '大量讀取', '背景執行'],
+    noteSession: '一行回報＋詳細檔',
+    noteAgent: '獨立 worktree → PM 驗收 → 合併',
+    stats: [
+      ['−97%', '清單更新<br>10,354 → 278 字'],
+      ['−49%', '看板輸出<br>縮短 37–49%'],
+      ['37 s', '小事交給 Agent<br>派工到回報', '實測'],
+      ['17 s', '中途改方向<br>不用重派', '實測'],
+    ],
+    guards: [
+      ['各改各的', 'worktree 隔離'],
+      ['驗收才合併', 'PM 合併後才算完成'],
+      ['清單鎖定', 'Agent 只能讀'],
+      ['公開等你', 'Agent 不 push、不發布'],
+    ],
+    foot: '小事 → 已開著的 Session　·　長期工作 → Session　·　做完就走 → Agent',
+  },
+}
+const lang = new URLSearchParams(location.search).get('lang') === 'zh-TW' ? 'zh-TW' : 'en'
+document.documentElement.lang = lang
+const c = COPY[lang]
+/** A middle dot set in Latin type: the Chinese face draws it full width. */
+const dot = text => text.replace(/ · /g, '<span class="sep">·</span>')
+const svg = (size, stroke, width, body) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`
+const ICON = {
+  person: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21c1-4.5 4.4-7 8-7s7 2.5 8 7"></path>',
+  clipboard: '<rect x="5" y="4" width="14" height="17" rx="2"></rect><path d="M9 3h6v3H9z"></path><path d="M9 11h6M9 15h4"></path>',
+  up: '<path d="M12 19V5M5 12l7-7 7 7"></path>',
+  branch: '<path d="M6 3v12"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path>',
+  stats: [
+    '<path d="M8 6h13M8 12h13M8 18h13"></path><path d="M3 6h.01M3 12h.01M3 18h.01"></path>',
+    '<rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 10h18M9 10v10"></path>',
+    '<circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l2.5 2.5M9 2h6"></path>',
+    '<path d="M3 12h6l3-7 3 14 3-7h3"></path>',
+  ],
+  guards: [
+    '<rect x="3" y="3" width="8" height="8" rx="1.5"></rect><rect x="13" y="13" width="8" height="8" rx="1.5"></rect><path d="M11 7h4a2 2 0 0 1 2 2v4"></path>',
+    '<path d="M20 6 9 17l-5-5"></path>',
+    '<rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path>',
+    '<path d="M12 3v12M7 8l5-5 5 5"></path><path d="M5 21h14"></path>',
+  ],
+}
+document.getElementById('poster').innerHTML = `
+  <div class="row head">
+    <div>
+      <div class="eyebrow">PROJECT PM · v0.8.0</div>
+      <h1>${c.title}</h1>
+    </div>
+    <div class="row legend"><span><i class="dot"></i>Session</span><span><i class="diamond"></i>Agent</span></div>
+  </div>
+
+  <div class="flow">
+    <div class="row you">${svg(56, '#eef1f8', 1.8, ICON.person)}${c.you}</div>
+    <div class="stem"></div>
+    <div class="row pm">${svg(64, '#0e1322', 1.8, ICON.clipboard)}<div><b>PM</b><small>${dot(c.pm)}</small></div></div>
+    <div class="branch"><i></i><i></i></div>
+    <div class="two">
+      <div class="kind session"><div class="row title"><i class="dot"></i>Session</div><div class="chips">${c.session.map(s => `<span>${dot(s)}</span>`).join('')}</div></div>
+      <div class="kind agent"><div class="row title"><i class="diamond"></i>Agent</div><div class="chips">${c.agent.map(s => `<span>${s}</span>`).join('')}</div></div>
+    </div>
+    <div class="two" style="margin-top:18px">
+      <div class="row note">${svg(34, '#6aa8ff', 2, ICON.up)}${c.noteSession}</div>
+      <div class="row note">${svg(34, '#ffd84a', 2, ICON.branch)}${c.noteAgent}</div>
+    </div>
+  </div>
+
+  <div class="four">${c.stats.map(([n, t, tag], i) => `<div class="stat"><div class="top">${svg(44, '#ffd84a', 1.8, ICON.stats[i])}${tag ? `<span class="tag">${tag}</span>` : ''}</div><b>${n}</b><p>${t}</p></div>`).join('')}</div>
+
+  <div class="four">${c.guards.map(([b, t], i) => `<div class="guard">${svg(48, '#eef1f8', 1.8, ICON.guards[i])}<b>${b}</b><p>${t}</p></div>`).join('')}</div>
+
+  <div class="row foot"><div>${c.foot}</div><div class="repo">AudiChang-hub/claude-project-pm</div></div>`
+</script>
+</body>
+</html>

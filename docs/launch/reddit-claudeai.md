@@ -9,8 +9,8 @@ look for: which flair fits a project you built (it has had a "Built with Claude"
 whether a self-promotion disclosure is required, and whether links must be free to try (this one
 is: MIT, no sign-up).
 
-Attach `docs/images/board-hero.png` if the post type allows an image; otherwise the repository link
-shows it.
+Attach `docs/images/overview.png` (the one-page overview) if the post type allows an image; otherwise
+the repository link shows it.
 
 ---
 

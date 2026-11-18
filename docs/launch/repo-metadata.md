@@ -30,5 +30,5 @@ gh repo edit AudiChang-hub/claude-project-pm \
 
 ## Social preview (optional)
 
-GitHub → Settings → General → Social preview accepts a 1280×640 image. `docs/images/board-hero.png`
-is 1280×1040 (at 2×), so it would need a crop; not prepared.
+GitHub → Settings → General → Social preview accepts a 1280×640 image. `docs/images/overview.png`
+is 1200×1369 (at 2×), portrait, so it would need its own layout; not prepared.
