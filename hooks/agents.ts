@@ -1,7 +1,7 @@
 // The PM's agents: what a task notification says of one, the state its reply leaves it in, the brief each one is
 // given, and the notification as the PM reads it. Pure: actions.ts keeps the records and register.tsx the hooks.
 
-import type { AgentRecord, AgentState } from '../types'
+import type { AgentRecord, AgentState, LedgerItem } from '../types'
 import { t } from './messages'
 
 /** One line, cut to `max` characters (the same as sessions.ts's clip, which imports this file). */
@@ -109,6 +109,25 @@ export function shortNotices(text: string, known: Readonly<Record<string, AgentR
 
     return whole.replace(/<result>[\s\S]*?<\/result>/, `<result>${kept}</result>`)
   })
+}
+
+/**
+ * What the person's closing of an ended agent's work items settles it as: once every item it owns is closed (none
+ * open) after it ended, done when any is done, dropped when all were dropped. Null while it runs, while one is open,
+ * for one that owns none, and when the items were closed before it ended (its own end says more then).
+ */
+export function settledAgentState(one: AgentRecord, ledger: LedgerItem[]): AgentState | null {
+  if (one.state === 'running' || one.endedAt === undefined) return null
+  const owned = ledger.filter(item => item.owner === `agent:${one.id}`)
+  if (owned.length === 0 || owned.some(item => item.status === 'open')) return null
+  if (Math.max(...owned.map(item => item.updatedAt)) < one.endedAt) return null
+
+  return owned.some(item => item.status === 'done') ? 'done' : 'dropped'
+}
+
+/** States an agent's work ends in: it needs nothing more, and folds away after a while. */
+export function isSettledAgent(state: AgentState): boolean {
+  return state === 'done' || state === 'dropped'
 }
 
 /** An agent as a short name: its description, else its id. */

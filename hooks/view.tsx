@@ -36,6 +36,7 @@ const AGENT_LOOK: Record<AgentState, { color: string; hex: string }> = {
   failed: { color: STATUS.failed.color, hex: STATUS.failed.hex },
   lost: { color: STATUS.failed.color, hex: STATUS.failed.hex },
   done: { color: STATUS.done.color, hex: STATUS.done.hex },
+  dropped: { color: STATUS.done.color, hex: STATUS.done.hex },
 }
 
 /** An agent's mark: the session dot's size and hues, as a diamond, so an owner shows which kind it is. */

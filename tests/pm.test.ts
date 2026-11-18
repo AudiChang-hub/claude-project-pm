@@ -1,9 +1,10 @@
 import { expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, statusOf, undeliveredOf } from '../hooks/sessions'
 import { closesBoard } from '../hooks/actions'
-import { commitOfLine, itemOf, noticesOf, stateOf } from '../hooks/agents'
+import { commitOfLine, isSettledAgent, itemOf, noticesOf, settledAgentState, stateOf } from '../hooks/agents'
 import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hooks/messages'
 import type { Lang, MessageKey } from '../hooks/messages'
 import { installOf, isReplaced } from '../hooks/update'
@@ -2375,4 +2376,91 @@ test("a session's own background agent keeps it in the background until its noti
   expect(file().background).toEqual([{ id: 'ag1', label: '跑整合測試', at: NOW }])
   await $.prompt.submit({ text: '<task-notification>\n<task-id>ag1</task-id>\n<status>completed</status>\n<result>ok</result>\n</task-notification>', isMeta: true } as never)
   expect(file().background).toEqual([])
+})
+
+/** A git that knows which agent commits exist and which branches still hold them. */
+function settlingGit(gone: Set<string>, holders: Record<string, string>) {
+  return (argv: readonly string[]) => {
+    if (argv[1] === 'rev-parse' && argv[2] === '--verify') return gone.has(String(argv[4]).replace('^{commit}', '')) ? { exitCode: 1, stdout: '' } : { exitCode: 0, stdout: 'x' }
+    if (argv[1] === 'rev-parse') return { exitCode: 0, stdout: 'true' }
+    if (argv[1] === 'merge-base') return { exitCode: 1, stdout: '' }
+    if (argv[1] === 'branch') return { exitCode: 0, stdout: holders[String(argv.at(-1))] ?? '' }
+    return null
+  }
+}
+const failedNotice = (id: string, result: string) => notice(id, result).replace('<status>completed</status>', '<status>failed</status>')
+
+/** Five agents the PM let go or settled in different ways, from the fake Acme shop's back office. */
+async function settleAgents($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en') {
+  const files: Files = new Map()
+  const clock = mock.clock(on, { now: NOW })
+  const gone = new Set(['2222222'])
+  const holders: Record<string, string> = { '1111111': '  worktree-agent-a1' }
+  agentWorld(on, files, settlingGit(gone, holders))
+  await $.session.start(START)
+  const agents = () => JSON.parse(files.get(`${DIR}/sessions/local_pm.json`)!).agents as { id: string; state: string }[]
+  const stateOf = (id: string) => agents().find(a => a.id === id)?.state
+  const ledger = async (input: object) => String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', ...input } as never)) as { result?: unknown }).result)
+  const call = (n: number, description: string, type = 'general-purpose') =>
+    $.tool.call({ tool: 'Agent', tool_use_id: `call-${n}`, description, prompt: 'x', subagent_type: type } as never)
+  await call(1, 'T-21 Bulk edit on the list')
+  await call(2, 'T-22 Keep the filter on reload')
+  await call(3, 'T-23 Check old date format', 'Explore')
+  await call(4, 'T-24 Speed up the export', 'Explore')
+  await call(5, 'T-25 Retry failed uploads', 'Explore')
+  for (const n of [3, 4, 5]) await ledger({ action: 'add', text: `item ${n}`, owner: `agent:a${n}` })
+  // Closed while its agent still ran: what the agent says when it ends counts.
+  await ledger({ action: 'update', id: 3, status: 'dropped' })
+  await clock.advance(1000)
+  await $.prompt.submit({ text: notice('a1', '[done, 1111111] Bulk edit', worktreeOf('a1')), isMeta: true } as never)
+  await $.prompt.submit({ text: notice('a2', '[done, 2222222] Filter kept', worktreeOf('a2')), isMeta: true } as never)
+  await $.prompt.submit({ text: notice('a3', '[waiting_user] 312 rows use day-first dates: convert them?'), isMeta: true } as never)
+  await $.prompt.submit({ text: failedNotice('a4', 'stopped'), isMeta: true } as never)
+  await $.prompt.submit({ text: failedNotice('a5', 'stopped'), isMeta: true } as never)
+  expect(agents().map(a => a.state)).toEqual(['verify', 'verify', 'decide', 'failed', 'failed'])
+
+  // The person's word, after they ended: one item dropped, one done (forced, with a note).
+  await clock.advance(1000)
+  await ledger({ action: 'update', id: 1, status: 'dropped' })
+  await ledger({ action: 'update', id: 2, status: 'done', force: true, note: 'done by hand' })
+  await clock.advance(31_000)
+  // A commit still on a branch waits; one git no longer has is let go; so are the closed items' agents.
+  expect([stateOf('a1'), stateOf('a2'), stateOf('a3'), stateOf('a4'), stateOf('a5')]).toEqual(['verify', 'dropped', 'dropped', 'done', 'failed'])
+  // Its worktree and branch deleted unmerged: no branch holds the commit any more.
+  delete holders['1111111']
+  await clock.advance(31_000)
+  expect(stateOf('a1')).toBe('dropped')
+
+  const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  const fresh = await board()
+  const attention = fresh.split('## Agents')[0]!
+  expect(attention).not.toMatch(/T-21|T-22|T-23|T-24/)
+  expect(attention).toMatch(/T-25/)
+  expect(fresh).toMatch(lang === 'en' ? /- ◆ \[Dropped\] T-21 Bulk edit on the list \(a1\)/ : /- ◆ \[已捨棄\] T-21 Bulk edit on the list（a1）/)
+  // An hour on, the settled ones fold away like the done ones; the failed one stays.
+  await clock.advance(61 * 60_000)
+  const later = await board()
+  expect(later).not.toMatch(/T-21|T-22|T-23|T-24/)
+  expect(later).toMatch(/T-25/)
+  expect(later).toContain(lang === 'en' ? '4 more agents done or dropped and not listed' : '另有 4 個已完成或已捨棄的 Agent 未列出')
+}
+
+test("an agent's card settles with its work items, and a commit no branch holds is let go", { ...ZH, timeoutMs: 20_000 }, async ($, on) => {
+  await settleAgents($, on, 'zh')
+})
+
+test("an agent's card settles with its work items, in English", { options: { language: 'en' }, timeoutMs: 20_000 }, async ($, on) => {
+  await settleAgents($, on, 'en')
+})
+
+test("the person's closing settles an ended agent only when it came after the end", () => {
+  const one = { id: 'a9', description: 'T-09 x', item: 9, type: 'general-purpose', isolated: true, state: 'verify', startedAt: 100, endedAt: 200 } as const
+  const item = (status: string, updatedAt: number, owner = 'agent:a9') => ({ id: 1, text: 'x', owner, status, createdAt: 50, updatedAt }) as never
+  expect(settledAgentState(one, [item('dropped', 300)])).toBe('dropped')
+  expect(settledAgentState(one, [item('dropped', 300), item('done', 250)])).toBe('done')
+  expect(settledAgentState(one, [item('dropped', 300), item('open', 250)])).toBe(null)
+  expect(settledAgentState(one, [item('dropped', 150)])).toBe(null)
+  expect(settledAgentState(one, [item('dropped', 300, 'agent:a8')])).toBe(null)
+  expect(settledAgentState({ ...one, state: 'running', endedAt: undefined }, [item('dropped', 300)])).toBe(null)
+  expect([isSettledAgent('done'), isSettledAgent('dropped'), isSettledAgent('verify'), isSettledAgent('failed')]).toEqual([true, true, false, false])
 })

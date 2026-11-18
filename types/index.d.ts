@@ -77,9 +77,10 @@ export type Report = {
 /**
  * Where an agent's work stands: running; done; verify (it committed in its own worktree, and the PM has not merged
  * the commit yet); decide (it stopped to ask the person something); failed (it failed or was stopped); lost (the PM's
- * process ended while it ran, and it with it).
+ * process ended while it ran, and it with it); dropped (its work was let go: its work items were dropped after it
+ * ended, or the commit it left is gone or on no branch any more).
  */
-export type AgentState = 'running' | 'done' | 'verify' | 'decide' | 'failed' | 'lost'
+export type AgentState = 'running' | 'done' | 'verify' | 'decide' | 'failed' | 'lost' | 'dropped'
 
 /** An agent the PM started with the Agent tool, as the PM's mod follows it (hooks/agents.ts). */
 export type AgentRecord = {

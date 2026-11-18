@@ -5,7 +5,19 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, McpToolResult } from 'claude-code'
 
 import type { AgentRecord, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Track } from '../types'
-import { AGENTS_KEPT, READ_ONLY_TYPES, agentName, commitOfLine, firstLine, itemOf, noticesOf, shortNotices, stateOf } from './agents'
+import {
+  AGENTS_KEPT,
+  READ_ONLY_TYPES,
+  agentName,
+  commitOfLine,
+  firstLine,
+  isSettledAgent,
+  itemOf,
+  noticesOf,
+  settledAgentState,
+  shortNotices,
+  stateOf,
+} from './agents'
 import {
   boardText,
   betterCi,
@@ -1037,7 +1049,9 @@ export async function takeNotices($: EngineInterface, text: string): Promise<str
 /**
  * Checks the agents still open. One marked running that the engine no longer runs ended with the PM's process (a
  * reload keeps agents running; a restart does not): lost. One to verify is done once the PM has merged its commit into
- * the project's checked-out branch, as itself or picked over (`git cherry`).
+ * the project's checked-out branch, as itself or picked over (`git cherry`); dropped once that commit is gone or on no
+ * branch (its worktree and branch deleted unmerged). And an ended one whose work items the person closed after it
+ * ended takes their word: done, or dropped (settledAgentState).
  */
 export async function checkAgents($: EngineInterface) {
   const list = agentRecords()
@@ -1059,8 +1073,22 @@ export async function checkAgents($: EngineInterface) {
       const isMerged =
         (await run($, ['git', 'merge-base', '--is-ancestor', one.commit, 'HEAD'], cwd, GIT_TIMEOUT_MS)) !== null ||
         ((await run($, ['git', 'cherry', 'HEAD', one.commit, `${one.commit}^`], cwd, GIT_TIMEOUT_MS)) ?? '').startsWith('-')
-      if (isMerged) changes[one.id] = { state: 'done' }
+      if (isMerged) {
+        changes[one.id] = { state: 'done' }
+        continue
+      }
+      // Its worktree and branch deleted without a merge: the commit is gone, or no branch holds it any more.
+      const isThere = (await run($, ['git', 'rev-parse', '--verify', '--quiet', `${one.commit}^{commit}`], cwd, GIT_TIMEOUT_MS)) !== null
+      const holders = isThere ? await run($, ['git', 'branch', '--all', '--contains', one.commit], cwd, GIT_TIMEOUT_MS) : ''
+      if (!isThere || holders?.trim() === '') changes[one.id] = { state: 'dropped' }
     }
+  }
+  // The person's word on its work items, closed after it ended, settles it either way.
+  const items = Object.values(await read($, projects)).flatMap(file => file.ledger)
+  for (const one of list) {
+    if (isSettledAgent(changes[one.id]?.state ?? one.state)) continue
+    const settled = settledAgentState(one, items)
+    if (settled) changes[one.id] = { state: settled }
   }
   if (Object.keys(changes).length) await changeAgents($, all => all.map(a => (changes[a.id] ? { ...a, ...changes[a.id] } : a)))
   else await mirrorAgents($)

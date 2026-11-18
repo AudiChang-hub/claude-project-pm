@@ -2,7 +2,7 @@
 // who stopped with steps left, and what the PM was asked to keep track of.
 
 import type { AgentRecord, BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, PushCheck, Report, ReportStatus, Session, Step, Track } from '../types'
-import { agentName } from './agents'
+import { agentName, isSettledAgent } from './agents'
 import { t } from './messages'
 
 export type Status = 'running' | 'asking' | 'failed' | 'open' | 'unreleased' | 'ci' | 'waiting' | 'done' | 'stale'
@@ -1106,9 +1106,9 @@ export function agentTime(one: AgentRecord, now: number): string {
     : t('board.agentTook', { took: tookText(one.durationMs ?? (one.endedAt ?? now) - one.startedAt) })
 }
 
-/** The agents a board lists: every one not done, and the done ones of the last hour (all with `isIncludingDone`). */
+/** The agents a board lists: every one not settled (done, dropped), and the settled ones of the last hour (all with `isIncludingDone`). */
 export function shownAgents(list: AgentRecord[], now: number, isIncludingDone: boolean): AgentRecord[] {
-  return list.filter(a => isIncludingDone || a.state !== 'done' || now - (a.endedAt ?? a.startedAt) < AGENT_SHOWN_MS)
+  return list.filter(a => isIncludingDone || !isSettledAgent(a.state) || now - (a.endedAt ?? a.startedAt) < AGENT_SHOWN_MS)
 }
 
 /** The board as the PM model reads it: what needs attention first, then every session. */

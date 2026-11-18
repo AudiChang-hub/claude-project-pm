@@ -111,7 +111,7 @@ For the PM's own Agent calls the mod:
 - cuts the agent's reply in the notification the PM reads to that first line and the detail file's path, and keeps the rest on disk;
 - lets an agent read the ledger but not change it.
 
-Each agent is tracked in the PM's record: running, done, *to verify* (it committed on its worktree branch and the PM has not merged it yet), *needs decision*, failed, or *interrupted* (the PM's process ended while it ran). A work item's owner can be an agent (`agent:<agentId>`); the ledger closes it only once the agent is done, a commit counting once it is merged into the project's branch. The board has an *Agents* section, agents are drawn with a diamond where sessions have a dot, and an agent that failed, needs a decision, waits to be verified or was interrupted shows under *Needs attention*. The design and its tests: [docs/design/agents.md](docs/design/agents.md).
+Each agent is tracked in the PM's record: running, done, *to verify* (it committed on its worktree branch and the PM has not merged it yet), *needs decision*, failed, *interrupted* (the PM's process ended while it ran), or *dropped* (its work items were dropped after it ended, or no branch holds its commit any more). A work item's owner can be an agent (`agent:<agentId>`); the ledger closes it only once the agent is done, a commit counting once it is merged into the project's branch. The board has an *Agents* section, agents are drawn with a diamond where sessions have a dot, and an agent that failed, needs a decision, waits to be verified or was interrupted shows under *Needs attention*. The design and its tests: [docs/design/agents.md](docs/design/agents.md).
 
 ## How delivery is judged
 

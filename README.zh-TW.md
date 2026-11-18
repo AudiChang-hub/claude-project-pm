@@ -111,7 +111,7 @@ PM 自己呼叫 Agent 時，mod 會：
 - 把 PM 收到的結束通知裡的回覆，縮成第一行加詳細檔路徑，其餘內容存在檔案裡；
 - 讓 Agent 可以讀 ledger，但不能修改。
 
-每個 Agent 都記在 PM 的紀錄裡：執行中、已完成、待驗收（它在 worktree 分支上 commit 了，PM 還沒合併）、待決定、失敗，或已中斷（PM 的程序結束時它還在執行）。工作項目的負責人可以是 Agent（`agent:<agentId>`）；Agent 完成後 ledger 才能結案，有 commit 的要等合併進專案分支才算完成。看板有 Agents 區塊，Session 用圓點、Agent 用菱形；Agent 失敗、需要決定、待驗收或已中斷時，會列在「需要處理」。設計和實測：[docs/design/agents.md](docs/design/agents.md)。
+每個 Agent 都記在 PM 的紀錄裡：執行中、已完成、待驗收（它在 worktree 分支上 commit 了，PM 還沒合併）、待決定、失敗，已中斷（PM 的程序結束時它還在執行），或已捨棄（它結束後工作項目被捨棄，或它的 commit 已不在任何分支上）。工作項目的負責人可以是 Agent（`agent:<agentId>`）；Agent 完成後 ledger 才能結案，有 commit 的要等合併進專案分支才算完成。看板有 Agents 區塊，Session 用圓點、Agent 用菱形；Agent 失敗、需要決定、待驗收或已中斷時，會列在「需要處理」。設計和實測：[docs/design/agents.md](docs/design/agents.md)。
 
 ## 交付怎麼判斷
 
