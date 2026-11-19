@@ -1,26 +1,29 @@
 # 設計：v1.0 跨平台核心 pm-core（T-34）
 
-狀態：草案，等使用者決定第 9 節的取捨。這份文件不改任何現有程式。
+狀態：已定案（2026-11-19）。使用者對第 9 節 D1～D13 的決定已寫進全文；寫入時發現的新問題列在 9.1 節，不影響已定案的結論。這份文件不改任何現有程式。
 
 背景：使用者選定 A 案，核心做成 MCP server，各平台用轉接層接上。目標使用者是不熟軟體工程的 Vibe Coder，要讓他們做出的軟體在品質、測試、安全上有一定水準，而且不限 Claude 桌面版。
 
 依據：
 
 - 第 0 步實測：[v1-cli-check.md](v1-cli-check.md)。現在的 mod 在 Claude Code CLI 能載入，ledger、QA 關卡、Agent 派工都能跑；失效的是「我是誰」和「有哪些 Session」，因為這兩件事只有桌面版的 `ccd_session_mgmt` 能回答。
-- 跨平台查證報告：`~/.claude/project-pm/reports/agents/a226af2b1f31b0f10.md`（7 個平台、13 種形態，附官方來源）。下文引用它的來源代號，例如 [C3]、[X2]，網址列在第 10 節。
+- 跨平台查證報告：`~/.claude/project-pm/reports/agents/a226af2b1f31b0f10.md`（7 個平台、13 種形態，附官方來源）。下文引用它的來源代號，例如 [C3]、[X2]，網址列在第 11 節。
 - 現有設計：[qa.md](qa.md)（QA 關卡，第 8 節已把核心和桌面版接線分開）、[agents.md](agents.md)（Agent 派工）。
 
 ## 摘要
 
 | 問題 | 做法 |
 | --- | --- |
-| 核心是什麼 | 一個 Node 程式 `project-pm`，同時是 MCP server（stdio＋Streamable HTTP，不用 SSE）、網頁看板、git hook 和 CI 用的檢查指令 |
+| 核心是什麼 | 一個程式 `project-pm`（Node 寫的），同時是 MCP server（stdio＋Streamable HTTP，不用 SSE）、網頁看板、git hook 和 CI 用的檢查指令 |
+| 怎麼發布 | 主要是各作業系統的單一執行檔，使用者不用另外裝 Node；npm 套件保留給開發者。沒有程式碼簽章，是已知限制（D3） |
 | 搬進核心的 | 交辦清單（ledger）、QA 關卡、交付判斷、CI 查詢、文字看板、網頁看板、Session 回報紀錄、Agent 紀錄 |
 | 留在轉接層的 | 「我是誰」、Session 清單、面板、把說明塞進提示、改寫 Agent 呼叫、截短通知（各平台的 hook 才做得到） |
 | 資料放哪 | 使用者層級 `~/.project-pm/`，不進 git；專案資料夾只放不含個資的設定和 AGENTS.md 段落 |
+| 多人協作 | v1.0 不同步，但工作項目先帶 `uid`、建立者、修改者、`rev`；v1.1 用 `gh` 同步到 GitHub Issues，預設關閉，上傳前掃描禁用詞（第 10 節） |
 | 舊資料 | 先擴充、後收斂：核心讀新舊兩處，過渡期同時寫回舊檔，桌面版 mod 不用同時改 |
 | 硬關卡在哪 | 在 git 和 CI，不在 AI 工具的 hook：pre-push 沒有 QA 通過就擋（可明確略過並留下紀錄），CI 跑測試、secret 掃描、真實資料掃描、套件安全檢查 |
-| 分版 | ① Claude Code CLI＋核心＋網頁看板＋hook 和 CI 範本；② Codex、Copilot、Antigravity；③ Cursor、Devin |
+| 測試花費 | 不花錢：CI 只跑不需要 AI 模型的測試；需要模型的冒煙測試在發版前用使用者現有的訂閱在本機手動跑（D9） |
+| 分版 | ① v1.0：Claude Code CLI＋核心＋網頁看板＋hook 和 CI 範本＋單一執行檔；② v1.1：多人協作（主打）＋Codex、Copilot、Antigravity；③ v1.2：Cursor、Devin |
 
 ## 1. 架構
 
@@ -51,7 +54,12 @@
 
 ### 1.2 核心程式的形態
 
-一個 npm 套件 `project-pm`，執行檔同名，子指令：
+一個程式 `project-pm`，用 Node 寫，發布成兩種形式（D3）：
+
+- **單一執行檔（主要）**：Windows、macOS、Linux 各一個檔，用 Node SEA 或 Bun 把程式和執行環境編在一起，使用者不用另外裝 Node。怎麼建置、怎麼安裝見 5.4、5.5 節。
+- **npm 套件（給開發者）**：`npx project-pm …`，給已經有 Node、想看原始碼或參與開發的人。兩種形式的功能和指令完全相同。
+
+子指令：
 
 | 指令 | 用途 |
 | --- | --- |
@@ -63,7 +71,9 @@
 | `project-pm uninstall` | 依安裝紀錄還原 `init` 改過的每個檔 |
 | `project-pm hook <工具> <事件>` | 給各平台 hook 呼叫：從 stdin 讀事件 JSON，寫入 Session 回報（第 3 層） |
 | `project-pm check pre-push` | git pre-push hook 呼叫（第 6 節） |
-| `project-pm skip "<理由>"` | 明確略過這次 push 的 QA，理由記進交辦清單 |
+| `project-pm skip "<理由>"` | 明確略過這次 push 的 QA，理由記進交辦清單。使用者平常打的是 `init` 設定好的 `git pm skip "<理由>"`（6.2 節） |
+| `project-pm sync on｜off｜resolve` | v1.1：多人協作的同步（第 10 節） |
+| `project-pm terms upload` | v1.1：把本機的禁用詞名單寫成 repo 的 `BLOCKED_TERMS` secret（10.4 節） |
 
 為什麼 stdio 和 HTTP 都要：
 
@@ -79,7 +89,8 @@
 
 - 每個寫入都是「鎖定 → 重新讀 → 改 → 寫暫存檔 → rename」。鎖用 `<檔名>.lock`（建立時加 exclusive 旗標），超過 10 秒視為殘留鎖，可以清掉。
 - 檔案有 `revision` 欄位，每寫一次加 1，方便看板判斷要不要重畫，也方便測試抓到遺失的更新。
-- 過渡期舊版 mod 不會加鎖（1.4 節的雙寫），這段時間靠「寫之前重新讀、以工作項目為單位依 `updatedAt` 合併」降低覆蓋的機會。這是已知風險，列在第 8 節的驗證項目。
+- 每個工作項目另有自己的 `rev`，和 `uid`、建立者、修改者一起，是給 v1.1 多人協作準備的（10.1 節）。
+- 過渡期舊版 mod 不會加鎖（2.4 節的雙寫），這段時間靠「寫之前重新讀、以工作項目為單位依 `updatedAt` 合併」降低覆蓋的機會。舊 mod 不認得 10.1 節的新欄位，合併時若舊檔那一份比較新但少了這些欄位，從核心那一份補回來，`rev` 加 1、`updatedBy.actor` 記成 `desktop-mod`（舊 mod 不記修改者）。這是已知風險，列在第 8 節的驗證項目。
 
 ### 1.4 哪些邏輯搬進核心
 
@@ -164,7 +175,7 @@
 
 #### 程式碼放哪
 
-建議同一個 repo 改成兩部分（第 9 節決定 D6）：
+同一個 repo 改成兩部分（第 9 節 D6，已定案）：
 
 ```
 core/          核心（純函式＋Node 層＋MCP server＋網頁看板＋CLI）
@@ -192,15 +203,15 @@ mod 現在就用相對路徑 import（`./qa`），所以 import `../core/...` �
 
 | 選項 | 共用 | 個資 | 多人協作 | 缺點 |
 | --- | --- | --- | --- | --- |
-| A. 使用者層級 `~/.project-pm/`（建議） | 同一台電腦的所有工具都讀得到 | 不進 git，不會外流 | 不支援 | 換電腦不會跟著走；刪掉專案資料夾不會一起刪 |
+| A. 使用者層級 `~/.project-pm/`（採用，D1） | 同一台電腦的所有工具都讀得到 | 不進 git，不會外流 | 檔案本身不共用；v1.1 選擇開啟後同步到 GitHub Issues（第 10 節） | 換電腦不會跟著走（v1.1 同步後可以）；刪掉專案資料夾不會一起刪 |
 | B. 專案資料夾 `.project-pm/`，加進 `.gitignore` | 同上 | 不進 git，但 Vibe Coder 可能誤把 `.gitignore` 那行刪掉 | 不支援 | 每個 worktree 一份，要另外對到主 repo；刪專案資料夾就沒了 |
 | C. 專案資料夾 `.project-pm/`，進 git | 換電腦、多人都看得到 | **風險高**：交辦文字常有客戶名稱、真實資料、內部網址，Vibe Coder 不會檢查 | 會衝突：兩個人同時改 `ledger.json` 一定合併衝突 | 歷史永遠留在 git |
 
-建議 A，理由：
+採用 A（D1 定案），理由：
 
 - 個資：交辦清單的內容是使用者對 AI 說的話，常常夾帶真實資料。這個專案自己就有 BLOCKED_TERMS 掃描，說明真實資料外流是實際風險；放進 git 等於把風險交給最不會處理的人。
 - 共用：目標是「同一個人在同一台電腦換著用不同 AI 工具」，A 就夠了。
-- 多人協作：v1 不做。之後若要做，建議同步到 GitHub Issues（有權限控制、不會合併衝突），而不是把檔案放進 git（第 9 節 D2）。
+- 多人協作：v1.1 的主打（D2 定案）。做法是同步到 GitHub Issues（有權限控制、不會有 git 的合併衝突），而不是把檔案放進 git；預設關閉，上傳前掃描禁用詞。v1.0 不同步，但工作項目先帶好同步需要的欄位（第 10 節）。
 
 路徑可以用環境變數 `PROJECT_PM_HOME` 改（測試和 CI 需要）。
 
@@ -221,6 +232,9 @@ mod 現在就用相對路徑 import（`./qa`），所以 import `../core/...` �
   reports/agents/<agentId>.md     Agent 的詳細內容
   server.json                     serve 的 port、pid、token（只有使用者本人可讀）
   install-log.json                init 改過哪些檔、原本內容的備份位置
+  bin/project-pm-<版本>[.exe]     init 複製過來的單一執行檔，各工具的設定都指向它（5.4 節）
+  sync/<專案名>-<hash>.json       v1.1：同步狀態（第 10 節）
+  blocked-terms.txt               v1.1：禁用詞名單的正本（只有使用者本人可讀，10.4 節）
 ```
 
 `<hash>` 沿用現在 `keyFile` 的規則，所以新舊檔名一一對應。
@@ -235,13 +249,21 @@ type ProjectFile = {
 }
 
 type LedgerItem = {
-  // 原有欄位不變（含 v0.9.0 的 criteria、qa）
+  // 原有欄位不變：id, text, owner, status, note, createdAt, updatedAt，以及 v0.9.0 的 criteria、qa
   commits?: string[]  // 這個項目的 commit（report、Agent 回報時記下），pre-push 用
+  // 以下給 v1.1 多人協作，v1.0 就開始寫（10.1 節）
+  uid?: string        // 穩定唯一 id（UUID v7），跨電腦不撞號
+  createdBy?: Author  // 建立者
+  updatedBy?: Author  // 最後修改者（修改時間沿用原有的 updatedAt）
+  rev?: number        // 這一項每改一次加 1，v1.1 判斷衝突用
 }
+
+type Author = { actor: string; person?: string }   // Session／Agent id，和 GitHub 帳號（10.1 節）
 
 type QaRecord = {
   // 原有：result, by, at, note
   sha?: string        // 驗收時的 commit；pre-push 比對用（第 6 節）
+  byPerson?: string   // 驗收者的 GitHub 帳號（10.1 節）
 }
 
 type Actor = {        // 取代桌面版的 Session 在核心裡的角色
@@ -255,7 +277,7 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 }
 ```
 
-規則和 v0.9.0 的 QA 欄位一樣：都是選填，舊檔沒有就當沒有，寫回時不補不需要的欄位（開發準則第 7 條）。
+規則和 v0.9.0 的 QA 欄位一樣：都是選填，舊檔沒有就當沒有，寫回時不補不需要的欄位（開發準則第 7 條）。所以舊項目不會在 v1.0 被補上 `uid`；它在 v1.1 第一次同步時才補（10.1 節）。`createdBy` 只在建立時寫，舊項目一直沒有；`updatedBy`、`rev` 在項目真的被修改時才寫。
 
 ### 2.4 從現有 mod 資料遷移：先擴充、後收斂
 
@@ -272,7 +294,7 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 
 - 舊路徑的 `sessions/<id>.json`、`rounds/`、`transcripts.json` 是桌面版專屬，不搬，留給 mod。
 - 舊路徑的 `reports/` 只讀不搬：看板的「詳細」連結照舊指向原檔。
-- 雙寫的衝突：E1 時舊 mod 不加鎖。核心寫之前重新讀舊檔，以工作項目為單位用 `updatedAt` 比新舊，取新的那份再寫。仍可能在毫秒級的重疊時遺失一次更新，測試要涵蓋（第 8 節）。
+- 雙寫的衝突：E1 時舊 mod 不加鎖。核心寫之前重新讀舊檔，以工作項目為單位用 `updatedAt` 比新舊，取新的那份再寫；舊檔那份比較新時，舊 mod 不認得的欄位（`uid`、`createdBy`、`commits` 等）從核心那份補回（1.3 節）；`qa.sha`、`qa.byPerson` 只在兩份的 `qa.at` 相同時才補，因為舊 mod 可能記了一筆新的 QA。仍可能在毫秒級的重疊時遺失一次更新，測試要涵蓋（第 8 節）。
 - 每一階段由版本號決定，不靠偵測：核心讀 mod 的 `plugin.json` 版本，判斷 mod 是否已在 E2。
 
 影響、驗證、回復：
@@ -329,6 +351,8 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 | `commit` | 選填。update 時加進這個項目的 `commits` |
 
 回傳：`content` 和現在一樣（add、update 回改到的那一項，list 回清單）；`structuredContent` 是那一項或那份清單的 JSON。結案關卡的順序不變：force＋note → QA（`qaUpdate`）→ 負責人。
+
+add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`rev`），模型不用帶任何新參數。v1.1 起 `id` 另外接受同步過的 Issue 編號（`"#12"`，10.2 節）。
 
 ### 3.4 `report`
 
@@ -409,11 +433,11 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 
 | 項目 | Claude Code（① 版） | 其他工具（② ③ 版，開工時查證確切路徑） |
 | --- | --- | --- |
-| MCP 設定 | `claude mcp add --scope user project-pm -- npx -y project-pm@<版本> mcp`（用官方指令，不直接改 JSON）[C1] | Codex：`~/.codex/config.toml` 的 `[mcp_servers.project-pm]` [X1]；Copilot CLI、Antigravity、Cursor、Devin 各自的設定檔 [H1][A1][U1][W1] |
+| MCP 設定 | `claude mcp add --scope user project-pm -- <執行檔的絕對路徑> mcp`（用官方指令，不直接改 JSON）[C1]。執行檔路徑是 `~/.project-pm/bin/project-pm-<版本>`，等於釘選版本；用 npm 安裝的開發者寫 `npx -y project-pm@<版本> mcp` | Codex：`~/.codex/config.toml` 的 `[mcp_servers.project-pm]` [X1]；Copilot CLI、Antigravity、Cursor、Devin 各自的設定檔 [H1][A1][U1][W1] |
 | 指示 | 專案的 `AGENTS.md` 段落；若專案有 `CLAUDE.md` 且沒有 `@AGENTS.md`，在 `CLAUDE.md` 開頭加一行 `@AGENTS.md`（Claude Code 有 CLAUDE.md 時不讀 AGENTS.md [C2]） | 同一份 `AGENTS.md` 段落；Antigravity 的 `.agents/rules` 要 frontmatter，Cursor 的 rules 要 `.mdc` [A2][U2]，只有在該工具不讀 AGENTS.md 時才另寫 |
 | Skills | `~/.claude/skills/project-pm/SKILL.md`：怎麼回報、怎麼派驗收、怎麼略過 | 各工具的 skills 目錄（格式都是 SKILL.md）[X10][A4][V4][U9][W1] |
 | hooks（第 3 層） | 使用者層級 `~/.claude/settings.json`：Stop、UserPromptSubmit 等事件呼叫 `project-pm hook claude-code <事件>` | 各工具的 hook 設定 [X3][A3][H3][U3][W2] |
-| git hook | 專案的 `.git/hooks/pre-push`（第 6 節） | 同左，和 AI 工具無關 |
+| git hook | 專案的 `.git/hooks/pre-push`（第 6 節），裡面寫執行檔的絕對路徑；專案 `.git/config` 的 alias `pm`，讓 `git pm skip` 不靠 PATH 也能用（6.2 節） | 同左，和 AI 工具無關 |
 | CI | 選填：`.github/workflows/project-pm-qa.yml`（第 6 節） | 同左 |
 
 ### 5.3 AGENTS.md 段落
@@ -424,13 +448,37 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 
 ### 5.4 前提
 
-- 需要 Node.js（用 `npx` 執行）。Claude Code 原生安裝版不需要 Node，Vibe Coder 可能沒裝；`init` 偵測不到 Node 時，用白話說明怎麼裝。之後再考慮單一執行檔（第 9 節 D3）。
+- **不需要 Node.js**（D3 定案）。使用者從 GitHub Releases 下載自己作業系統的單一執行檔，在終端機執行一次 `init`。`init` 把自己複製到 `~/.project-pm/bin/project-pm-<版本>`，各工具的設定和 git hook 都寫這個絕對路徑。
+- `init` **不改系統**：不幫使用者裝 Node 或任何執行環境，不改 PATH、登錄檔、系統設定，不需要系統管理員權限。它只改 5.2 節列出的檔，而且都記進 `install-log.json`，`uninstall` 能全部還原。
+- 不用 `npx` 也不用 PATH 的原因：Claude Code 原生安裝版不需要 Node，Vibe Coder 多半沒裝；改 PATH 屬於改系統，而且要重開終端機才生效，容易讓人以為裝壞了。
 - `init` 不做任何需要登入的事；`gh` 沒登入時，看板的 CI 欄位寫「沒有登入 GitHub，看不到 CI 結果」，並給 `gh auth login` 的說明。
+
+### 5.5 單一執行檔：建置、下載、放行
+
+建置（D3、D9：不花錢）：
+
+- 在 GitHub Actions 的 release workflow 建置，Windows、macOS、Linux 的 runner 各編各的。公開 repo 用標準 runner 免費。
+- 編譯工具用 Node SEA 或 Bun（`bun build --compile`）。v1.0 開工時兩個都試，比檔案大小、啟動時間、MCP SDK 和 `child_process` 能不能照常運作，選一個；這是技術選擇，不影響使用者。
+- 目標：Windows x64、macOS arm64 和 x64、Linux x64 和 arm64（編譯工具實際支援哪些，實作時確認）。
+- 每個檔約 50～100 MB，因為裡面帶了整個執行環境。這是不用另外裝 Node 的代價。
+- release 附 `SHA256SUMS`；release 只能由 Actions 發布，第三方 action 用 commit SHA 釘選。
+- macOS：Apple Silicon 不執行完全沒有簽章的程式，所以建置時做 ad-hoc 簽章（`codesign --sign -`，免費；它不是 Apple 的開發者簽章，擋不掉下面的 Gatekeeper 警告）。Bun 是否已自動做，實作時確認。
+- 更新：不自動更新。新版本就是下載新檔再跑一次 `init`，設定改指向新的 `project-pm-<版本>`；舊版本的檔留著，回到舊版只要用舊檔再跑一次 `init`。
+
+已知限制：沒有程式碼簽章。使用者不花錢，所以不買 Windows 的簽章憑證，也不付 Apple 開發者計畫的年費。第一次執行時作業系統會警告，安裝說明要用白話教怎麼放行：
+
+| 系統 | 使用者會看到 | 說明要教的 |
+| --- | --- | --- |
+| Windows | 瀏覽器下載時可能說「不常下載」；從檔案總管點兩下時，SmartScreen 跳出「Windows 已保護您的電腦」 | 下載時選「保留」；SmartScreen 視窗按「其他資訊」→「仍要執行」。從終端機執行不一定會跳，兩種情況都寫。開著「智慧型應用程式控制」（Smart App Control）的電腦可能直接擋下、沒有放行按鈕，實作時實測；真的擋下時，只能改用 npm 版本（要先裝 Node，和 D3 的目標相反，見 9.1 節 Q1） |
+| macOS | 「無法打開，因為 Apple 無法檢查是否包含惡意軟體」 | 系統設定 →「隱私權與安全性」→ 最下面的「仍要打開」；或在終端機執行 `xattr -d com.apple.quarantine <檔案>`，並用一句話說明這行在做什麼 |
+| Linux | 沒有警告，但下載的檔案不能執行 | `chmod +x <檔案>` |
+
+說明的原則：先講為什麼會警告（我們沒有付費買簽章，不代表程式有問題），再講怎麼確認檔案是真的（只從官方 Releases 頁下載、可以比對 SHA256），最後才是放行步驟。不叫使用者關掉防毒或系統的安全功能。
 
 影響、驗證、回復：
 
-- 影響：改使用者的 AI 工具設定和專案的 AGENTS.md、CLAUDE.md、git hook。
-- 驗證：每個工具的 `init` → 檢查 → `uninstall` → 比對檔案和安裝前完全相同（含沒有 CLAUDE.md、已有 `@AGENTS.md`、已有別的 pre-push hook 等情況）。
+- 影響：改使用者的 AI 工具設定和專案的 AGENTS.md、CLAUDE.md、git hook、`.git/config` 的 alias `pm`；在 `~/.project-pm/bin/` 放一個執行檔。
+- 驗證：每個工具的 `init` → 檢查 → `uninstall` → 比對檔案和安裝前完全相同（含沒有 CLAUDE.md、已有 `@AGENTS.md`、已有別的 pre-push hook、已有別的 git alias `pm` 等情況）。用建置出來的單一執行檔跑，不是用原始碼跑。放行步驟（SmartScreen、Gatekeeper）在 CI 測不到，發版前在實機照安裝說明走一次。
 - 回復：`project-pm uninstall`，依 `install-log.json` 還原；紀錄壞掉時，每個寫入都有標記，可以手動刪。
 
 ## 6. 品管關卡
@@ -448,10 +496,12 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 1. 這個專案沒有交辦清單（沒用 PM）：直接通過。
 2. 要 push 的 commit 範圍裡，若每個 commit 都被某個 QA 通過或略過的紀錄蓋到（`qa.sha` 是要 push 的最新 commit，或是它的後代），通過。
 3. 否則擋下，列出沒驗收的 commit 和對應的工作項目（從 `commits` 欄位找；找不到就寫「沒有對應的工作項目」）。
-4. 明確略過：`project-pm skip "<理由>"`。它把「這個 HEAD 略過 QA，理由是…」記進交辦清單（找得到對應項目就記在那一項，找不到就新增一項「未登記的 push」），然後 `git push` 就會通過。看板上會出現「略過 QA：理由」，事後看得到。
+4. 明確略過：`git pm skip "<理由>"`（就是 `project-pm skip`，見下面）。它把「這個 HEAD 略過 QA，理由是…」記進交辦清單（找得到對應項目就記在那一項，找不到就新增一項「未登記的 push」），然後 `git push` 就會通過。看板上會出現「略過 QA：理由」，事後看得到。
 5. `git push --no-verify` 會跳過所有 hook，沒辦法禁止。核心在下次看板更新時用 git 事實（第 1 層）發現「遠端有沒驗收的 commit」，列在需要處理，註明「push 時跳過了檢查」。
 
-用 `project-pm skip` 而不是環境變數，因為 Windows PowerShell 和 bash 設環境變數的寫法不同，Vibe Coder 照抄容易錯；一個指令在哪個終端機都一樣。
+用指令而不是環境變數，因為 Windows PowerShell 和 bash 設環境變數的寫法不同，Vibe Coder 照抄容易錯；一個指令在哪個終端機都一樣。
+
+為什麼是 `git pm skip`：D3 之後使用者沒有 Node，`npx project-pm` 不能用；`init` 又不改 PATH（5.4 節），直接打 `project-pm` 找不到。所以 `init` 在專案的 `.git/config` 加一個 alias `pm`，指向執行檔的絕對路徑（`git config alias.pm "!<路徑>"`）。git 一定在 PATH 上，`git pm skip "…"` 在 PowerShell、cmd、bash 都一樣。專案已經有別的 alias `pm` 時不覆蓋，訊息改印執行檔的完整路徑。`uninstall` 只在值仍是 `init` 寫的那個時才刪。用 npm 的開發者照樣可以打 `npx project-pm skip`。
 
 訊息範例（中文；英文版同樣結構）：
 
@@ -466,7 +516,7 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 接下來可以：
   1. 請 AI 驗收：對 PM 說「驗收 T-03」，通過後再 push 一次。
   2. 這次確定不用驗收（例如只改說明文字）：
-       npx project-pm skip "只改說明文字"
+       git pm skip "只改說明文字"
      然後再 push。理由會記在看板上。
 ```
 
@@ -531,7 +581,7 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 
 ### 7.3 配備表（資料來源）
 
-給 README 的「支援平台」表用。列是功能，欄是平台；每格寫「v0.9.0 現況 → 目標（在哪一版達成）」。版本對應第 8 節：v1.0 是 ①，v1.1 是 ②（含遷移 E2，桌面版 mod 改用核心），v1.2 是 ③。
+給 README 的「支援平台」表用。列是功能，欄是平台；每格寫「v0.9.0 現況 → 目標（在哪一版達成）」。版本對應第 8 節：v1.0 是 ①，v1.1 是 ②（多人協作，以及遷移 E2：桌面版 mod 改用核心），v1.2 是 ③。
 
 圖例：✅ 可用、◐ 部分、🗓 規劃中、— 不支援。「目標」都是計畫，各版做完、驗證過才能改成 ✅ 放進 README。
 
@@ -546,6 +596,7 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 | Agent 派工 | ✅ → ✅ | — 〔實測〕 ⁽ᶠ⁾ → ◐ v1.0 → ✅ v1.1 | — → ◐ v1.1 ⁽ᵍ⁾ | — → ◐ v1.1 ⁽ᵍ⁾ | — → ◐ v1.1 ⁽ᵍ⁾ | — → ◐ v1.2 ⁽ᵍ⁾ | — → ◐ v1.2 ⁽ᵍ⁾ |
 | 開發準則 | ✅ → ✅ | ◐ 〔讀程式，未實測〕 ⁽ʰ⁾ → ✅ v1.0 | — → ◐ v1.1 ⁽ⁱ⁾ | — → ◐ v1.1 ⁽ⁱ⁾ | — → ◐ v1.1 ⁽ⁱ⁾ | — → ◐ v1.2 ⁽ⁱ⁾ | — → ◐ v1.2 ⁽ⁱ⁾ |
 | CI 真實資料掃描 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 |
+| 多人協作 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 |
 
 Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1-cli-check.md)，Claude Code 2.1.326）。〔實測〕是用 `-p` 實際跑過的；〔讀程式〕是看程式碼判斷、沒有跑。其他欄的 v0.9.0 都是「—」，因為 mod 只能裝在 Claude Code；它們的目標來自查證報告和第 7.2 節，都還沒實測。
 
@@ -561,6 +612,7 @@ Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1
 - ⁽ʰ⁾ 讀程式：準則由 `prompt.compose` 放進提示，不需要 Session id，所以「PM 在桌面版、這個 Session 在 CLI」時 CLI 會拿到準則（實測確認同一條路徑的交付指示有放進 CLI 的提示）；但 CLI 自己當不了 PM。改準則檔的擋法（`tool.call`）也不需要 id。這次的測試沒設定準則檔，所以沒實際驗證。v1.0 改由使用者層級的 UserPromptSubmit hook 每輪放進提示，不再依賴 PM 在桌面版。
 - ⁽ⁱ⁾ 「部分」：AGENTS.md 段落指向準則檔，靠 AI 自己去讀（第 2 層）；「沒問過不能改準則檔」靠各平台的 PreToolUse 類 hook。能不能像 Claude Code 一樣每輪自動放進提示，看各平台有沒有對應的 hook 事件，該版開工時查證。
 - ⁽ʲ⁾ v0.9.0 只有本 repo 自己的 CI 有這一步（qa.md 第 7 節），使用者的專案沒有。v1.0 的 CI 範本（第 6.3 節）是 GitHub Actions，和用哪個 AI 工具無關，所以所有欄同時變成 ✅。
+- ⁽ᵏ⁾ v0.9.0 只有單機的交辦清單。v1.1 的同步做在核心、透過 `gh` 和 GitHub Issues（第 10 節），和用哪個 AI 工具無關，所以所有欄同時是 v1.1。Cursor、Devin 的轉接要到 v1.2，在那之前這兩欄的同步結果只能從網頁看板和 `project-pm board` 看到，工具裡的交辦清單要等 v1.2。v1.0 已經開始寫同步需要的欄位（10.1 節），但還不能同步，所以 v1.0 不算部分支援。
 
 註腳（同一平台的桌面版和 CLI 有差異）：
 
@@ -573,49 +625,66 @@ Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1
 
 每一版都遵守：新功能先擴充、不刪舊的；每版有獨立的回復方法；沒跑到的驗證如實寫在 release 說明。
 
-### ① v1.0：Claude Code CLI、核心、網頁看板、hook 和 CI 範本
+測試不花錢（D9）：
+
+- CI（GitHub Actions，公開 repo 的免費額度）只跑不需要 AI 模型的測試：單元、MCP 協定、hook、看板、安裝、同步（用假的 GitHub API）。每次 PR 都跑。
+- 需要模型的冒煙測試（headless 跑固定劇本）CI 不跑，改成發版前在本機手動跑，用使用者現有的訂閱額度，不另外申請 API 金鑰。使用者沒有訂閱的平台就不跑，release 說明寫明「這個平台沒有用 AI 實際跑過」。
+
+### ① v1.0：Claude Code CLI、核心、網頁看板、hook 和 CI 範本、單一執行檔
 
 範圍：
 
-- `core/`：純函式（從 `hooks/` 搬，見 1.4 節）、Node 層、MCP server（stdio＋Streamable HTTP）、`board`、`ledger`、`report`、`pm` 四個工具。
+- `core/`：純函式（從 `hooks/` 搬，見 1.4 節）、Node 層、MCP server（stdio＋Streamable HTTP）、`board`、`ledger`、`report`、`pm` 四個工具。工作項目從這一版起寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`rev`），為 v1.1 的同步做準備。
+- 單一執行檔：GitHub Actions 的建置和 release workflow、`SHA256SUMS`、白話的安裝和放行說明（5.5 節）；npm 套件同時發布。
 - 網頁看板（唯讀，第 4 節）。
 - `init`、`uninstall`：只支援 Claude Code（CLI）；偵測到桌面版 mod 時只提示、不加 MCP 設定（3.7 節）。
 - `hook claude-code <事件>`：Stop、UserPromptSubmit、PostToolUse（TodoWrite、背景指令）寫 actor 紀錄；UserPromptSubmit 同時把開發準則和交付指示放進提示（取代 mod 的 `prompt.compose`，CLI 不用等 PM 在桌面版）。
-- pre-push hook、`skip`、CI 範本。
+- pre-push hook、`skip`（`git pm skip`）、CI 範本。
 - 資料遷移 E1（雙寫）。
 - 修 report 的假成功（核心這邊；mod 那邊在 v1.1 改）。
 - 桌面版 mod：**不改**（E1 期間 mod 照舊）。
 
-先查證再實作的事：MCP 子行程拿不拿得到 Session id（1.5 節）；外掛安裝會不會帶上 `core/`（1.4 節）；mod 在終端機互動模式的面板（v1-cli-check.md 第 4 節沒實測）。
+先查證再實作的事：MCP 子行程拿不拿得到 Session id（1.5 節）；外掛安裝會不會帶上 `core/`（1.4 節）；mod 在終端機互動模式的面板（v1-cli-check.md 第 4 節沒實測）；Node SEA 和 Bun 哪個編得出能正常跑的執行檔（5.5 節）；Windows「智慧型應用程式控制」會不會擋未簽章的執行檔（5.5 節）。
 
 驗證：
 
 | 類別 | 做什麼 | 何時跑 |
 | --- | --- | --- |
-| 單元測試 | 核心的純函式；把現有 `tests/pm.test.ts` 裡對應的案例（交付判斷、QA、看板文字）改成直接呼叫核心，中英文各一 | 每次 push、PR |
-| MCP 協定測試 | 用 MCP SDK 的 client 啟動 `project-pm mcp`（stdio）和 `serve`（HTTP），列工具、呼叫每個工具、檢查 `content` 和 `structuredContent`；不需要模型 | 每次 push、PR；Windows、macOS、Linux |
-| 並行寫入 | 10 個行程各寫 100 次，revision、項目數正確；舊格式雙寫的合併 | 每次 push、PR |
-| 網頁看板 | 375px、1280px、淺色、深色截圖；安全：沒 token 回 401、偽造 Host 回 403、非本機 Origin 打 `/mcp` 回 403、只聽 127.0.0.1 | 每次 push、PR |
-| git hook | bare repo 當遠端的六種情況（6.2 節） | 每次 push、PR；三個作業系統 |
-| CI 範本 | 對 Acme demo 假專案（放假金鑰、舊套件、假禁用詞）跑範本，確認每步都擋、訊息正確 | 每次 push、PR |
-| Claude Code headless | `claude -p --mcp-config <核心設定> --output-format json` 在 Acme demo 上跑固定劇本：新增工作、回報、結案被 QA 擋、記錄 QA 後結案。檢查 JSON 結果和核心的資料檔，不只看 exit code | 需要 API 金鑰，會花錢：手動或每週一次，用便宜的模型，限制花費（第 9 節 D9） |
+| 單元測試 | 核心的純函式；把現有 `tests/pm.test.ts` 裡對應的案例（交付判斷、QA、看板文字）改成直接呼叫核心，中英文各一；新項目有 `uid`、`createdBy`、`rev`，舊項目沒被修改時不補欄位 | 每次 PR（CI） |
+| MCP 協定測試 | 用 MCP SDK 的 client 啟動 `project-pm mcp`（stdio）和 `serve`（HTTP），列工具、呼叫每個工具、檢查 `content` 和 `structuredContent`；不需要模型 | 每次 PR（CI）；Windows、macOS、Linux |
+| 單一執行檔 | 在三個作業系統建置執行檔，用建置出來的檔（不是原始碼）跑一次 MCP 協定測試和 `--version` | 每次 PR（CI）；三個作業系統 |
+| 並行寫入 | 10 個行程各寫 100 次，revision、項目數正確；舊格式雙寫的合併，含新欄位從核心那份補回 | 每次 PR（CI） |
+| 網頁看板 | 375px、1280px、淺色、深色截圖；安全：沒 token 回 401、偽造 Host 回 403、非本機 Origin 打 `/mcp` 回 403、只聽 127.0.0.1 | 每次 PR（CI） |
+| git hook | bare repo 當遠端的六種情況（6.2 節），含 `git pm skip` | 每次 PR（CI）；三個作業系統 |
+| 安裝 | `init` → 檢查 → `uninstall` → 檔案和安裝前完全相同（第 5 節的各種情況）；用建置出來的執行檔跑。`claude mcp add`、`claude mcp list` 不需要模型（是否需要登入，實作時確認；需要的話這一項改成發版前手動） | 每次 PR（CI）；三個作業系統 |
+| CI 範本 | 對 Acme demo 假專案（放假金鑰、舊套件、假禁用詞）跑範本，確認每步都擋、訊息正確 | 每次 PR（CI） |
+| 下載和放行 | 從 release 下載執行檔，照安裝說明在 Windows、macOS 上放行並跑 `init` | 發版前手動一次（CI 模擬不了 SmartScreen、Gatekeeper） |
+| Claude Code 冒煙測試（需要模型） | `claude -p --mcp-config <核心設定> --output-format json` 在 Acme demo 上跑固定劇本：新增工作、回報、結案被 QA 擋、記錄 QA 後結案。檢查 JSON 結果和核心的資料檔，不只看 exit code | 發版前在本機手動跑，用使用者現有的 Claude 訂閱（Claude Code 已登入的帳號），不另外申請 API 金鑰；CI 不跑（D9） |
 | 遷移 | 用舊格式的假資料跑 E1，舊 mod（v0.9.0）同時開著，兩邊都看得到對方寫的 | 發版前手動一次 |
 
 回復：
 
-- 套件：`npm deprecate` 有問題的版本，使用者的 `init` 釘選版本（`project-pm@1.0.x`），改回上一版重跑 `init` 即可。
+- 執行檔：在 GitHub Releases 把有問題的版本改成 pre-release 並在說明加上警告，「最新版」就回到上一版；使用者下載上一版再跑一次 `init`，設定改指回舊版本的檔（5.5 節）。npm：`npm deprecate` 有問題的版本，`init` 寫的是釘選版本（`project-pm@1.0.x`），改回上一版重跑 `init` 即可。
 - 設定：`project-pm uninstall`。
 - 資料：E1 雙寫，舊路徑一直完整；移除核心等於回到 v0.9.0，桌面版完全不受影響。
 
-### ② v1.1：Codex、Copilot、Antigravity
+### ② v1.1：多人協作（主打）、Codex、Copilot、Antigravity
 
-範圍：`init` 支援 Codex（CLI、桌面版）、Copilot（CLI、VS Code）、Antigravity（CLI、桌面）；各自的 `hook <工具> <事件>`；AGENTS.md 大小檢查（Codex 32 KiB）；處理 Copilot 重複執行 Claude 的 hooks。也在這一段做 E2（桌面版 mod 改用核心的資料）。
+範圍：
 
-先查證：報告裡這幾個平台的未確認項目（Codex 桌面版讀 AGENTS.md、Codex IDE 的 hooks、Antigravity 的外掛面板）；各平台 hook 事件 JSON 的欄位（Session id、cwd）；MCP 設定檔的確切路徑和寫法。
+- **多人協作**（D2，第 10 節）：`project-pm sync`、`sync on｜off｜resolve`、`terms upload`；GitHub Issues 的對應和三方合併；公開 repo 的警告和同意；上傳前的禁用詞掃描；看板的同步狀態和「同步衝突」。
+- `init` 支援 Codex（CLI、桌面版）、Copilot（CLI、VS Code）、Antigravity（CLI、桌面）；各自的 `hook <工具> <事件>`；AGENTS.md 大小檢查（Codex 32 KiB）；處理 Copilot 重複執行 Claude 的 hooks。
+- E2（桌面版 mod 改用核心的資料）。
 
-驗證：各 CLI 用 headless 在 CI 跑同一個劇本：`codex exec --json`（CI 要先把工作目錄設成受信任，否則不載入 MCP [X6]）、`copilot -p --output-format=json` [H5]、`agy -p`（輸出 json；不能只看 exit code，要檢查結果裡有沒有被拒絕的工具 [A7]）。每個平台需要各自的帳號或金鑰，花費同 D9。VS Code、桌面版沒有 headless，用手動清單驗證並在 release 說明寫明。
+先查證：GitHub 的寫入 API 支不支援條件式更新、Issues 的 ETag 行為（10.3 節）；報告裡這幾個平台的未確認項目（Codex 桌面版讀 AGENTS.md、Codex IDE 的 hooks、Antigravity 的外掛面板）；各平台 hook 事件 JSON 的欄位（Session id、cwd）；MCP 設定檔的確切路徑和寫法。
 
-回復：每個平台的轉接是獨立的（`init --tool codex`、`uninstall --tool codex`），一個平台出問題只移除那一個，不影響其他；E2 出問題時 mod 退回 E1 版本，舊路徑仍完整。
+驗證：
+
+- 多人協作：照 10.5 節。CI 用假的 GitHub API 和兩個 `PROJECT_PM_HOME` 跑每次 PR；發版前用使用者自己的私人測試 repo 手動跑一輪。都不需要模型。
+- 各平台的 MCP 協定、hook、`init`／`uninstall`：同 v1.0，每次 PR 在 CI 跑，不需要模型。
+- 需要模型的冒煙測試：發版前在本機手動跑同一個劇本，用使用者現有的訂閱額度，CI 不跑（D9）。指令：`codex exec --json`（要先把工作目錄設成受信任，否則不載入 MCP [X6]）、`copilot -p --output-format=json` [H5]、`agy -p`（輸出 json；不能只看 exit code，要檢查結果裡有沒有被拒絕的工具 [A7]）。使用者沒有訂閱的平台不跑，release 說明寫明。VS Code、桌面版沒有 headless，用手動清單驗證並在 release 說明寫明。
+
+回復：每個平台的轉接是獨立的（`init --tool codex`、`uninstall --tool codex`），一個平台出問題只移除那一個，不影響其他；同步出問題時 `project-pm sync off`，本機資料不受影響（10.5 節）；E2 出問題時 mod 退回 E1 版本，舊路徑仍完整。
 
 ### ③ v1.2：Cursor、Devin
 
@@ -623,29 +692,130 @@ Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1
 
 先查證：Cursor CLI 的 hooks 和子代理、Devin CLI `-p` 的輸出格式、兩者擴充的面板能力（報告標未確認）。
 
-驗證：`agent -p --force --output-format json`（Cursor 管理員可以關掉這個模式 [U5]）、`devin -p`（格式查證後再寫檢查）。編輯器手動清單。
+驗證：不需要模型的測試（MCP 協定、hook、`init`／`uninstall`）每次 PR 在 CI 跑。需要模型的冒煙測試發版前在本機手動跑，用使用者現有的訂閱額度，沒有訂閱的平台不跑並在 release 說明寫明（D9）：`agent -p --force --output-format json`（Cursor 管理員可以關掉這個模式 [U5]）、`devin -p`（格式查證後再寫檢查）。編輯器手動清單。
 
 回復：同 ②，各平台獨立；C1 之後要回去需要 `project-pm export --legacy`，所以 C1 要等 ② ③ 都穩定一個版本以上再做。
 
-## 9. 需要使用者決定的取捨
+## 9. 已定案的取捨
 
-| # | 問題 | 選項 | 建議 | 理由 |
+使用者在 2026-11-19 逐項決定。D2、D3、D9 和草案的建議不同，草案的建議寫在最後一欄的「原本的建議」供對照。
+
+| # | 問題 | 結論 | 定案日期 | 理由與影響的章節 |
 | --- | --- | --- | --- | --- |
-| D1 | 交辦清單存在哪 | A 使用者層級 `~/.project-pm/`；B 專案資料夾、不進 git；C 專案資料夾、進 git | A | 個資不外流；同一台電腦的工具都能共用；Vibe Coder 不用管 `.gitignore`（2.1 節） |
-| D2 | v1 要不要支援多人協作 | 不支援；之後同步到 GitHub Issues；把檔案放進 git | v1 不支援，之後評估 GitHub Issues | 檔案進 git 會合併衝突又有個資風險 |
-| D3 | 怎麼發佈 | npm 套件（要 Node）；單一執行檔（Bun 或 Node SEA 編譯）；兩者都有 | ① 先 npm，之後加單一執行檔 | npm 最快能出；但 Claude Code 原生安裝版的使用者可能沒有 Node，`init` 要說明怎麼裝 |
-| D4 | 網頁看板能不能操作 | 唯讀；可結案、封存（要 token＋防 CSRF） | 唯讀 | 只讀就沒有跨站請求的風險；操作仍透過 PM，關卡規則只有一個入口 |
-| D5 | 看板 port | 固定預設（被占用時往後找）；每次隨機 | 固定預設 | 書籤、說明文件都好寫；實際 port 記在 `server.json` |
-| D6 | 程式碼放哪 | 同一個 repo 分 `core/`、`hooks/`；核心另開 repo | 同一個 repo | mod 用相對路徑 import 核心的純函式，一次改動一個 PR、一份 CHANGELOG |
-| D7 | 版號 | 核心和 mod 共用一個版號；分開 | 共用，從 1.0.0 開始 | 遷移階段靠版號判斷（2.4 節），共用最不會錯 |
-| D8 | pre-push 的略過方式 | `project-pm skip "<理由>"`；環境變數；只能 `--no-verify` | `skip` 指令，`--no-verify` 事後在看板標出 | 不分終端機都一樣；理由留在看板上 |
-| D9 | 需要模型的 headless 測試在 CI 怎麼跑 | 每次 PR；每週＋手動；只在發版前手動 | 每週＋手動，用便宜的模型、設花費上限 | 每次 PR 跑會持續花錢；不需要模型的測試（MCP 協定、hook、看板）每次都跑 |
-| D10 | 桌面版 mod 在 v1 之後的角色 | 保留，當轉接層（面板、Session 清單、第 4 層）；逐步淘汰 | 保留 | 桌面版是唯一有第 4 層的形態 |
-| D11 | Gemini CLI | 不支援；支援 | 不支援 | 個人與免費方案已停用 [G0]，目標使用者用不到 |
-| D12 | CI 範本預設開哪些檢查 | 四項全開；只開 secret 和真實資料，測試和套件檢查由使用者選 | 四項全開，偵測不到測試時顯示「略過」而不是失敗 | Vibe Coder 不知道該選哪些；全開但不因為「沒有測試」就擋 |
-| D13 | `init` 預設要不要直接改檔 | 只顯示差異，`--yes` 才改；直接改 | 只顯示差異 | 改的是使用者的 AI 工具設定和專案檔，先讓人看到 |
+| D1 | 交辦清單存在哪 | A：使用者層級 `~/.project-pm/`，不進 git | 2026-11-19 | 照原建議。個資不外流；同一台電腦的工具都能共用；Vibe Coder 不用管 `.gitignore`（2.1 節）。多人共用改走 D2 的 GitHub 同步，不是把檔案放進 git |
+| D2 | 要不要支援多人協作 | **要做，當 v1.1 的主打。** v1.0 不同步，但工作項目先帶齊同步需要的欄位（`uid`、`createdBy`、`updatedBy`、`updatedAt`、`rev`），v1.1 不用遷移資料。v1.1 透過 `gh` 同步到 GitHub Issues（Projects 選填），不架伺服器；預設關閉，公開 repo 要警告並明確同意，上傳前用 `BLOCKED_TERMS` 同一份名單掃描，命中就擋 | 2026-11-19 | 原本的建議：v1 不支援，之後評估 GitHub Issues。改變的原因：使用者要把它當 v1.1 亮點。影響：摘要、1.3、2.1～2.4、3.3、7.3、第 8 節 ②、第 10 節（新增） |
+| D3 | 怎麼發佈 | **主要發布各作業系統的單一執行檔**（Windows、macOS、Linux），用 Node SEA 或 Bun 編譯，在 GitHub Actions 建置；npm 套件保留給開發者。不買程式碼簽章憑證，列為已知限制；`init` 不幫使用者裝 Node、不改系統 | 2026-11-19 | 原本的建議：先 npm、之後加單一執行檔。改變的原因：使用者不希望 Vibe Coder 另外安裝執行環境。代價：每個檔約 50～100 MB；沒有簽章時 Windows 會跳 SmartScreen、macOS 會擋，安裝說明要用白話教怎麼放行（5.5 節）。影響：摘要、1.2、2.2、5.2、5.4、5.5、6.2、第 8 節 |
+| D4 | 網頁看板能不能操作 | 唯讀 | 2026-11-19 | 照原建議。只讀就沒有跨站請求的風險；操作仍透過 PM，關卡規則只有一個入口（4.2 節） |
+| D5 | 看板 port | 固定預設，被占用時往後找 | 2026-11-19 | 照原建議。書籤、說明文件都好寫；實際 port 記在 `server.json`（4.3 節） |
+| D6 | 程式碼放哪 | 同一個 repo，分 `core/`、`hooks/` | 2026-11-19 | 照原建議。mod 用相對路徑 import 核心的純函式，一次改動一個 PR、一份 CHANGELOG（1.4 節） |
+| D7 | 版號 | 核心和 mod 共用一個版號，從 1.0.0 開始 | 2026-11-19 | 照原建議。遷移階段靠版號判斷（2.4 節），共用最不會錯 |
+| D8 | pre-push 的略過方式 | `skip` 指令；`--no-verify` 事後在看板標出 | 2026-11-19 | 照原建議。不分終端機都一樣；理由留在看板上。因為 D3 不再假設有 Node，指令的寫法從 `npx project-pm skip` 改成 `init` 設定的 `git pm skip`（6.2 節） |
+| D9 | 需要模型的測試怎麼跑 | **不花錢。** CI 不跑需要 AI 模型的測試。不需要模型的測試（MCP 協定、hook、看板、安裝）每次 PR 都跑，用 GitHub Actions 的免費額度。需要模型的冒煙測試改成發版前在本機手動跑，用使用者現有的訂閱額度，不另外申請 API 金鑰 | 2026-11-19 | 原本的建議：每週＋手動，用便宜的模型、設花費上限。改變的原因：使用者不花錢。影響：摘要、第 8 節各版的驗證、10.5 節的驗證 |
+| D10 | 桌面版 mod 在 v1 之後的角色 | 保留，當轉接層（面板、Session 清單、第 4 層） | 2026-11-19 | 照原建議。桌面版是唯一有第 4 層的形態 |
+| D11 | Gemini CLI | 不支援 | 2026-11-19 | 照原建議。個人與免費方案已停用 [G0]，目標使用者用不到 |
+| D12 | CI 範本預設開哪些檢查 | 四項全開，偵測不到測試時顯示「略過」而不是失敗 | 2026-11-19 | 照原建議。Vibe Coder 不知道該選哪些；全開但不因為「沒有測試」就擋（6.3 節） |
+| D13 | `init` 預設要不要直接改檔 | 只顯示差異，`--yes` 才改 | 2026-11-19 | 照原建議。改的是使用者的 AI 工具設定和專案檔，先讓人看到（5.1 節） |
 
-## 10. 來源
+### 9.1 寫入決定時發現、還要使用者決定的事
+
+這些不推翻上面的結論，但會影響 v1.0、v1.1 的實際範圍：
+
+| # | 問題 | 為什麼會出現 | 可能的做法 |
+| --- | --- | --- | --- |
+| Q1 | Windows「智慧型應用程式控制」擋下未簽章的執行檔時怎麼辦 | D3 不買簽章。開著這個功能的 Windows 11 可能直接擋、沒有放行按鈕（實作時實測），這時只剩 npm 版本，又要裝 Node | 接受，寫進已知限制；或查有沒有給開源專案的免費簽章服務（例如 SignPath 的開源方案，實作時查證條件） |
+| Q2 | 使用者沒有訂閱的平台怎麼做冒煙測試 | D9 只用現有訂閱。Codex、Copilot、Antigravity、Cursor、Devin 若沒有訂閱，那個平台就沒有用 AI 實際跑過 | 接受，在 release 說明和 README 的平台表註明「未實測」；或只用各平台的免費方案能跑到的部分 |
+| Q3 | macOS 的下載和放行步驟由誰實機走一次 | 5.5 節的放行步驟 CI 測不到，需要一台 Mac | 有 Mac 就發版前手動走；沒有的話，macOS 版在 release 說明標「放行步驟未實機驗證」 |
+| Q4 | v1.1 的範圍是否太大 | v1.1 同時有多人協作、三個平台（含桌面版和 VS Code）、E2 | 照現在的分法；或多人協作和 E2 先出（v1.1），三個平台延到下一版 |
+
+## 10. 多人協作（v1.1）
+
+D2 定案：多人協作是 v1.1 的主打。v1.0 不同步，但資料結構先準備好，v1.1 打開同步時不用遷移資料。
+
+目標情境：兩三個人（或同一個人的兩台電腦）做同一個 GitHub repo，各自用自己的 AI 工具和 PM，看到同一份交辦清單和 QA 紀錄；誰建的、誰改的、誰驗收的都看得出來。
+
+### 10.1 v1.0 先帶的欄位
+
+都是選填的新欄位，遵守 2.3 節「只擴充」：舊欄位不改型別、不改意思；舊檔沒有就當沒有；寫回時不幫舊項目補欄位。
+
+| 欄位 | 型別 | 意思 | 什麼時候寫 |
+| --- | --- | --- | --- |
+| `uid` | string | 工作項目的穩定唯一 id，用 UUID v7（前段是時間、後段是亂數），不同電腦同時新增也不會撞號。現有的數字 `id` 和 `T-03` 代號照舊，只是「這台電腦上的短代號」 | v1.0 起新增的項目，建立時寫。舊項目在 v1.1 第一次同步時才補（同步前只有一台電腦有它，不會撞號） |
+| `createdBy` | `Author` | 建立者 | 建立時 |
+| `updatedBy` | `Author` | 最後修改者 | 每次修改 |
+| `updatedAt` | number | 修改時間（原有欄位，意思不變） | 每次修改 |
+| `rev` | number | 這一項的修改次數，每改一次加 1。v1.1 用它和上次同步時的值比，判斷哪一邊改過 | 每次修改；舊項目第一次被核心修改時從 1 開始 |
+| `QaRecord.byPerson` | string | 驗收者是哪個人（`by` 仍是 Session 或 Agent id） | 記錄 QA 時 |
+
+```ts
+type Author = {
+  actor: string     // Session 或 Agent 的 id（1.5 節），只在這台電腦有意義
+  person?: string   // 哪個人：GitHub 帳號（gh 有登入時取 `gh api user` 的 login，快取在記憶體）；沒登入就不寫
+}
+```
+
+為什麼要分 `actor` 和 `person`：多人協作看的是「哪個人」，但 PM 的關卡（負責人不能驗收自己的工作、Agent 要先合併才能結案）看的是「哪個 Session 或 Agent」。兩個都留，v1.1 才不用回頭猜。
+
+`ProjectFile.revision`（2.3 節）不變，仍是整個檔的寫入次數，給看板判斷要不要重畫；`rev` 是單一項目的，給同步判斷衝突。
+
+### 10.2 v1.1 的同步方式
+
+- **對象**：專案 git 的 `origin` 所在的 GitHub repo（`gh repo view` 取得）。工作項目同步成 Issues；GitHub Projects 只當選填的顯示看板，資料以 Issues 為準（用 Projects 要多一個 `project` 權限，使用者自己 `gh auth refresh -s project`）。
+- **認證**：沿用 `gh` 的登入，核心不存任何 token，不架伺服器，不需要使用者額外申請任何東西。`gh` 沒登入時同步不啟動，看板寫明原因和 `gh auth login` 的說明。
+- **時機**：`project-pm sync` 手動跑一次；開啟同步後，`board`、`ledger` 被呼叫時若距離上次同步超過 60 秒就在背景同步（不違反 3.1 節「10 秒內回」，先回本機資料）。讀取用 ETag 條件式請求，沒變的回 304，不吃 GitHub 的 API 額度。
+- **本機仍是主要的**：離線、`gh` 出錯、GitHub 掛掉時一切照舊，只是看板的同步欄寫「上次同步：…前，失敗原因：…」，下次再補。
+- **同步狀態**：`~/.project-pm/sync/<專案名>-<hash>.json`，記每個 `uid` 對到哪個 Issue、上次同步時兩邊的內容（三方合併的基準）、ETag。
+- **不同步的**：PM 是誰（`pmId`）、Session 和 Agent 的紀錄、回報的詳細檔、看板設定。這些只在本機有意義，而且最常夾帶細節。每個人有自己的 PM。
+
+對應關係：
+
+| project-pm | GitHub | 說明 |
+| --- | --- | --- |
+| 工作項目 | 一個 Issue，加 label `project-pm` | GitHub 上手動開、加了這個 label 的 Issue 也會變成工作項目 |
+| `text` | Issue 標題（第一行）＋內文 | |
+| `criteria`、`note`、`commits` | 內文的「驗收條件」「備註」「相關 commit」段落 | |
+| `status` | `open` → 開啟；`done` → 關閉（completed）；`dropped` → 關閉（not planned） | |
+| 負責人 `owner` | Assignee：負責人的 `person` | Session 或 Agent 的 id 不上傳；別人的看板顯示「@帳號 的 Session」 |
+| QA 紀錄 | 一則 Issue 留言（固定格式：結果、驗收者的帳號、commit、說明），另加 label `qa:pass`、`qa:fail` 或 `qa:skipped` 顯示最新結果 | 留言只增不改，所以 QA 的歷史在 GitHub 上完整留著；本機的 `qa` 仍是最新一筆 |
+| `uid`、`rev` | 內文最後的隱藏標記 `<!-- project-pm:v1 uid=… rev=… -->` | 讓兩台電腦認得同一項 |
+| `createdBy`、`updatedBy` 的 `person` | Issue 作者、最後編輯者（GitHub 自己記） | `actor` 不上傳 |
+| 代號 | Issue 編號 `#12` | 同步過的項目在每台電腦都顯示 `#12`，對話裡說「#12」大家指的是同一項；還沒同步的照舊顯示 `T-05`。`ledger` 的 `id` 兩種都收 |
+
+pre-push 關卡（6.2 節）在多人時照樣成立：QA 紀錄的 `sha` 和項目的 `commits` 會同步，所以 A 驗收過的 commit，B push 時也認得。
+
+### 10.3 衝突怎麼處理
+
+用三方比較：本機現在的內容、GitHub 現在的內容、上次同步時的內容（同步狀態檔裡的基準）。
+
+| 情況 | 處理 |
+| --- | --- |
+| 只有一邊改過（比 `rev` 和 Issue 的 `updated_at`） | 用改過的那一邊 |
+| 兩邊都改，但改的是不同欄位 | 逐欄合併，兩邊的修改都留下，`rev` 加 1 後寫回兩邊 |
+| 兩邊把同一個欄位改成不同的值 | **不自動選**。兩邊都不覆蓋，這一項標成「同步衝突」列進看板的需要處理，並排顯示兩個版本。使用者或 PM 用 `ledger update` 寫入要的版本（`rev` 加 1，下次同步就以它為準），或用 `project-pm sync resolve <代號> --keep local｜github` |
+| QA 紀錄 | 留言只增不改，兩邊的都留下；本機的 `qa` 取時間最新的一筆。若上次同步後兩邊記了**不同的結果**，列為衝突，衝突解決前結案關卡當成「還沒通過」 |
+| `commits` | 取聯集 |
+| 有人在 GitHub 網頁上直接關掉 Issue | 照 GitHub 的狀態改成 `done` 或 `dropped`（GitHub 是共用的事實，不能假裝沒發生）；如果沒有通過的 QA 紀錄，看板列出「在 GitHub 上直接關閉，沒有驗收紀錄」 |
+| Issue 被刪除或轉到別的 repo | 本機不刪，標「GitHub 上已不存在」列進需要處理，由使用者決定 |
+| 寫入時剛好有人也在寫 | GitHub 的寫入 API 不支援條件式更新（實作時查證），所以「寫之前重讀、寫完再讀一次比 `rev` 標記」；不一致就當成兩邊都改，回到上面的規則 |
+
+### 10.4 隱私
+
+同步會把交辦文字送到 GitHub。即使之後改掉，Issue 的編輯紀錄仍看得到，所以防線要在上傳之前。
+
+- **預設關閉**。只能在終端機用 `project-pm sync on` 開啟，MCP 工具不提供開啟的功能，AI 不能自己決定上傳。開啟時用白話列出會上傳什麼、不會上傳什麼、上傳到哪個 repo。
+- **公開 repo**：開啟前用 `gh repo view --json visibility` 檢查。是公開的就先警告「這個 repo 是公開的，交辦清單和驗收紀錄會被任何人看到」，要使用者輸入 repo 名稱確認，`--yes` 不能略過這一步。之後每次同步都再檢查一次：repo 從私人變成公開時，暫停同步、重新取得同意。
+- **上傳前掃描**：用和 CI 的 `BLOCKED_TERMS` 同一套名單、同一套比對方式（qa.md 第 7 節：一行一個詞、不分大小寫、固定字串比對）掃描每一個要上傳的欄位（標題、內文、QA 說明）。命中的項目整項不上傳，看板寫「#12 的備註含有你列為不能公開的詞（詞本身不顯示），沒有同步。請改寫後再同步。」；其他沒命中的項目照常同步。
+- **名單只有一份**：GitHub 的 secret 寫進去後讀不回來，所以名單的正本放在本機 `~/.project-pm/blocked-terms.txt`（不進 git，只有本人可讀，和 `server.json` 同樣的權限設定）。`project-pm terms upload` 用 `gh secret set BLOCKED_TERMS` 把它寫成 repo 的 secret，CI 和同步才會用同一份。名單是空的時，開啟同步會提醒「還沒設定不能公開的詞，掃描不會擋任何東西」，要再確認一次。
+
+### 10.5 影響、驗證、回復
+
+- 影響：使用者的交辦內容會出現在 GitHub 上（只在開啟後）；會用掉 `gh` 的 API 額度（條件式請求不計）。v1.0 只多寫幾個欄位，沒有可見變化。
+- 驗證（都不需要 AI 模型，照 D9 不花錢）：
+  - 每次 PR 在 CI 跑：三方合併的每一種情況（上表）、名單掃描（命中不上傳、不印出詞本身）、公開 repo 的確認流程。GitHub API 用假的伺服器（錄好的回應），不碰真的 repo。
+  - 每次 PR 在 CI 跑：兩個 `PROJECT_PM_HOME` 模擬兩台電腦，同時新增、同時修改同一項，確認 `uid` 不撞、衝突有列出、沒有遺失的修改。
+  - 發版前手動一次：用使用者自己的 GitHub 帳號開一個私人的測試 repo，兩台電腦（或兩個 `PROJECT_PM_HOME`）用 Acme demo 的假資料跑一輪；再把它切成公開，確認同步暫停。GitHub 免費帳號就能做。
+- 回復：`project-pm sync off` 停止同步，本機資料完整不受影響；GitHub 上已經建立的 Issue 不會自動刪除（避免誤刪別人的資料），要刪由使用者自己在 GitHub 上處理。同步程式有問題時退回 v1.0，v1.0 本來就帶著這些欄位，不需要轉換資料。
+
+## 11. 來源
 
 跨平台查證報告的代號（完整清單見該報告）：
 
@@ -689,3 +859,5 @@ Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1
 - [M1] MCP 規格 2025-11-25，Transports 章節：https://modelcontextprotocol.io/specification/2025-11-25/basic/transports 。2026-11-19 查閱，內容：Streamable HTTP 取代 HTTP+SSE；安全警告要求驗證 `Origin`（不合法回 403）、本機執行時只綁 127.0.0.1、應驗證所有連線；伺服器可以對 GET 回 405 表示不提供 SSE 串流。實測的 Claude Code 2.1.326 協商的版本也是 2025-11-25（v1-cli-check.md 第 3 節的 debug log）。
 
 沒有另外查證、寫在文件裡要實作時再確認的：gitleaks 官方 action 對組織帳號的授權要求、osv-scanner 的授權與 action 版本、各平台 ② ③ 的設定檔確切路徑。
+
+2026-11-19 定案時加入、同樣還沒查證的（都標了「實作時確認」）：Node SEA 和 Bun 支援的目標平台、檔案大小、macOS ad-hoc 簽章的做法；Windows SmartScreen 和「智慧型應用程式控制」對未簽章執行檔的實際行為；macOS 放行步驟在各版本的寫法；GitHub Actions 對公開 repo 標準 runner 的免費範圍；`claude mcp add`／`list` 是否需要登入；GitHub Issues API 的條件式寫入和 ETag 行為。
