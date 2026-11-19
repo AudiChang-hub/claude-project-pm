@@ -111,7 +111,10 @@ for (const lang of LANGS) {
     test('nothing in the whole workflow but the private-words job reads BLOCKED_TERMS, the top-level env included (T-37 QA2 3)', () => {
       const { 'private-words': words, ...otherJobs } = flow.jobs
       assert.match(JSON.stringify(words), /secrets\.BLOCKED_TERMS/)
-      assert.doesNotMatch(JSON.stringify({ ...flow, jobs: otherJobs }), /secrets\s*(\.\s*BLOCKED_TERMS|\[\s*'BLOCKED_TERMS'\s*\])/)
+      // No mention of secrets at all, in any case, outside that job: secrets["BLOCKED_TERMS"], toJSON(secrets) and
+      // secrets: inherit hand the words over as surely as secrets.BLOCKED_TERMS does (T-37 QA3 2).
+      const rest = JSON.stringify({ ...flow, jobs: otherJobs })
+      assert.doesNotMatch(rest, /secrets/i, rest.match(/.{0,40}secrets.{0,40}/i)?.[0])
     })
 
     test('finds npm, pnpm, yarn and pytest, and no tests where there are none', () => {
