@@ -6,8 +6,10 @@ import type { ElementConstructor, EngineInterface, RenderInputOf, RenderSurface,
 
 import type { AgentRecord, AgentState, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Step, Track } from '../types'
 import { agentName } from './agents'
-import { STATUS, agentTime, ago, caveatOf, clip, groupProjects, isActive, isDeliveredAgent, isDeliveredStatus, itemCode, liveTracks, openSteps, projectKey, qaShown, qaText, settledAt, shownAgents, statusOf } from './sessions'
-import type { Project, QaShown, Status } from './sessions'
+import { STATUS, agentTime, ago, caveatOf, clip, groupProjects, isActive, isDeliveredAgent, isDeliveredStatus, itemCode, liveTracks, openSteps, projectKey, settledAt, shownAgents, statusOf } from './sessions'
+import { qaShown, qaText } from './qa'
+import type { QaShown } from './qa'
+import type { Project, Status } from './sessions'
 import { archive, claim, dismissBand, refresh, startPmSession } from './actions'
 import { t } from './messages'
 

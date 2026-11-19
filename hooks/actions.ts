@@ -40,8 +40,6 @@ import {
   ledgerRow,
   ledgerText,
   liveTracks,
-  qaBlocker,
-  qaOfInput,
   quoteOf,
   settledAt,
   openSteps,
@@ -55,6 +53,7 @@ import {
   statusOf,
   undeliveredOf,
 } from './sessions'
+import { qaUpdate } from './qa'
 import type { CiRun, Project, Status } from './sessions'
 import { t } from './messages'
 
@@ -1340,14 +1339,13 @@ export async function ledger($: EngineInterface, input: Record<string, unknown>)
     if (!item) return t('ledger.notFound', { id: String(input.id) })
     const status = str(input.status)
     const owner = input.owner === undefined ? item.owner : str(input.owner) || null
-    // A QA verdict that cannot be recorded changes nothing: the answer says what it lacks.
-    const verdict = qaOfInput(input, owner, self.id ?? 'pm', now, itemCode(id))
-    if (verdict && 'error' in verdict) return `${verdict.error}\n${ledgerRow(item)}`
-    const qa = verdict?.qa ?? item.qa
-    if (status === 'done' && item.status !== 'done' && !(input.force === true && str(input.note)?.trim())) {
-      // QA first: it asks neither GitHub nor git.
-      const unchecked = qaBlocker(qa, owner, itemCode(id))
-      if (unchecked) return `${unchecked}\n${ledgerRow(item)}`
+    const isClosing = status === 'done' && item.status !== 'done' && !(input.force === true && str(input.note)?.trim())
+    // The QA core (qa.ts) decides first: a verdict it cannot record, or a close it does not allow, changes nothing.
+    const checked = qaUpdate(item, input, owner, self.id ?? 'pm', now, isClosing)
+    if ('refusal' in checked) return `${checked.refusal}\n${ledgerRow(item)}`
+    const qa = checked.qa
+    if (isClosing) {
+      // Then the owner, as this desktop reads it (GitHub and git included).
       const blocker = owner ? await ownerBlocker($, owner) : null
       if (blocker) return `${t('ledger.refused', { code: itemCode(id), blocker })}\n${ledgerRow(item)}`
     }

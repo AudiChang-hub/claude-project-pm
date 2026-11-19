@@ -1,9 +1,10 @@
 // Reading sessions into a project's board: who is working, who waits on you,
 // who stopped with steps left, and what the PM was asked to keep track of.
 
-import type { AgentRecord, AgentState, BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, PushCheck, QaRecord, Report, ReportStatus, Session, Step, Track } from '../types'
+import type { AgentRecord, AgentState, BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, PushCheck, Report, ReportStatus, Session, Step, Track } from '../types'
 import { agentName, isSettledAgent } from './agents'
 import { t } from './messages'
+import { qaAttention, qaShown, qaText } from './qa'
 
 export type Status = 'running' | 'asking' | 'failed' | 'open' | 'unreleased' | 'ci' | 'waiting' | 'done' | 'stale'
 
@@ -969,7 +970,7 @@ export function ledgerRow(item: LedgerItem, isWhole = false): string {
   return t('ledger.row', { code: itemCode(item.id), id: item.id, status: item.status, text, owner: item.owner ?? t('ledger.unassigned'), qa, criteria, note })
 }
 
-// ── QA: the verdict a work item needs before it closes (docs/design/qa.md) ──
+// ── QA (the core is qa.ts): what counts, on this desktop's board, as an owner that has delivered ──
 
 /** An owner session's statuses that mean its work is handed over, so its QA is due. */
 const DELIVERED: readonly Status[] = ['done', 'unreleased', 'ci']
@@ -980,52 +981,6 @@ export function isDeliveredStatus(status: Status): boolean {
 
 export function isDeliveredAgent(state: AgentState): boolean {
   return state === 'done' || state === 'verify'
-}
-
-/** What an item shows of its QA: its verdict; else, while it is open and its owner has delivered, awaiting. */
-export type QaShown = QaRecord['result'] | 'awaiting'
-
-export function qaShown(item: LedgerItem, isOwnerDelivered: boolean): QaShown | null {
-  if (item.qa) return item.qa.result
-
-  return item.status === 'open' && isOwnerDelivered ? 'awaiting' : null
-}
-
-/** An item's QA in words: passed or failed and by whom, skipped and why, or awaiting. */
-export function qaText(item: LedgerItem, shown: QaShown, isWhole = false): string {
-  if (shown === 'awaiting' || !item.qa) return t('qa.awaiting')
-  if (shown === 'skipped') return t('qa.skipped', { note: isWhole ? item.qa.note : clip(item.qa.note, ITEM_NOTE) })
-
-  return t(shown === 'pass' ? 'qa.pass' : 'qa.fail', { by: item.qa.by })
-}
-
-/**
- * The QA verdict a ledger update asks to record, or why it cannot be (the update then changes nothing); null when it
- * records none. Pass and fail name who checked; skip gives its reason and is the PM's own word unless it names
- * someone. Whoever checked is never the item's owner.
- */
-export function qaOfInput(input: Record<string, unknown>, owner: string | null, self: string, now: number, code: string): { qa: QaRecord } | { error: string } | null {
-  if (input.qa === undefined) return null
-  const verdict = input.qa
-  if (verdict !== 'pass' && verdict !== 'fail' && verdict !== 'skip') return { error: t('ledger.qaBad') }
-  const by = typeof input.qa_by === 'string' ? input.qa_by.trim() : ''
-  const note = typeof input.qa_note === 'string' ? input.qa_note.trim() : ''
-  if (verdict === 'skip' && !note) return { error: t('ledger.qaNeedsNote') }
-  if (verdict !== 'skip' && !by) return { error: t('ledger.qaNeedsBy') }
-  const who = by || self
-  if (owner && who === owner) return { error: t('ledger.qaByOwner', { code, owner }) }
-
-  return { qa: { result: verdict === 'skip' ? 'skipped' : verdict, by: who, at: now, note } }
-}
-
-/** Why an item's QA keeps it from closing, or null when it has passed (or was skipped for a reason) by someone not its owner. */
-export function qaBlocker(qa: QaRecord | undefined, owner: string | null, code: string): string | null {
-  if (!qa) return t('ledger.qaNone', { code })
-  if (owner && qa.by === owner) return t('ledger.qaByOwnerClose', { code, by: qa.by })
-  if (qa.result === 'fail') return t('ledger.qaFailed', { code, note: qa.note || t('qa.noNote') })
-  if (qa.result === 'skipped' && !qa.note.trim()) return t('ledger.qaNeedsNote')
-
-  return null
 }
 
 /** The ledger's open items, or every item with `isIncludingDone`, a line each; and how many are left out. */
@@ -1275,11 +1230,7 @@ export function boardText(input: BoardInput): string {
     return !!one && isDeliveredStatus(statusOf(one, tracks[id], words[id], now, ci[id], push[id], settled(id)))
   }
   const qaOf = (item: LedgerItem) => qaShown(item, isDelivered(item.owner))
-  for (const item of openLedger) {
-    const qa = qaOf(item)
-    if (qa === 'awaiting') attention.push(t('board.attention.qaAwaiting', { code: itemCode(item.id), text: clip(item.text, ITEM_TEXT), owner: ownerText(item.owner) }))
-    if (qa === 'fail') attention.push(t('board.attention.qaFailed', { code: itemCode(item.id), text: clip(item.text, ITEM_TEXT), note: clip(item.qa?.note || t('qa.noNote'), QUOTE), by: item.qa?.by ?? '' }))
-  }
+  attention.push(...qaAttention(openLedger, isDelivered, ownerText))
   lines.push('', t('board.section.attention'), attention.length ? attention.join('\n') : t('board.none'))
 
   lines.push('', t('board.section.items'))

@@ -46,7 +46,8 @@ import {
   updateOf,
 } from './actions'
 import { MAX_CHARS, WRITING_TOOLS, asksForGuidelines, guidelinesPath, isSameFile, readGuidelines } from './guidelines'
-import { READ_ONLY_TYPES, briefOf, isQaDescription, itemOf } from './agents'
+import { READ_ONLY_TYPES, briefOf, itemOf } from './agents'
+import { isQaDescription } from './qa'
 import { getLang, resolveLang, setLang, systemLocale, t } from './messages'
 import { reloadIfUpdated } from './update'
 import { renderBand, renderPane } from './view'

@@ -2,10 +2,11 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isDeliveredAgent, isDeliveredStatus, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, qaBlocker, qaShown, reportOf, reportWords, statusOf, undeliveredOf } from '../hooks/sessions'
+import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isDeliveredAgent, isDeliveredStatus, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, statusOf, undeliveredOf } from '../hooks/sessions'
 import type { Status } from '../hooks/sessions'
 import { closesBoard } from '../hooks/actions'
-import { commitOfLine, isQaDescription, isSettledAgent, itemOf, noticesOf, settledAgentState, stateOf } from '../hooks/agents'
+import { isQaDescription, qaAttention, qaBlocker, qaShown, qaUpdate } from '../hooks/qa'
+import { commitOfLine, isSettledAgent, itemOf, noticesOf, settledAgentState, stateOf } from '../hooks/agents'
 import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hooks/messages'
 import type { Lang, MessageKey } from '../hooks/messages'
 import { installOf, isReplaced } from '../hooks/update'
@@ -2663,4 +2664,36 @@ test('a QA agent gets the checklist, in English', { options: { language: 'en' } 
 test('a QA description leads with the item and QA', () => {
   expect(['T-12 QA', ' t-3 qa of export', 'T-12 QA: diff abc'].map(isQaDescription)).toEqual([true, true, true])
   expect(['T-12 QAX', 'T-13 QA-free lookup', 'QA T-12', 'T-12 fix QA', 'T-12'].map(isQaDescription)).toEqual([false, false, false, false, false])
+})
+
+test('the QA core decides on plain data, with no engine: an update, a close and the attention lines, in both languages', () => {
+  const was = getLang()
+  try {
+    for (const lang of ['zh-TW', 'en'] as const) {
+      setLang(lang)
+      const item = { id: 7, text: 'Export', owner: 'local_dev', status: 'open' as const, note: '', createdAt: NOW, updatedAt: NOW }
+      // Recording only: the verdict it keeps; a bad one is refused; closing without one is refused.
+      expect(qaUpdate(item, { qa: 'fail', qa_by: 'agent:q', qa_note: 'no test' }, 'local_dev', 'pm', NOW, false)).toEqual({ qa: { result: 'fail', by: 'agent:q', at: NOW, note: 'no test' } })
+      expect(qaUpdate(item, {}, 'local_dev', 'pm', NOW, false)).toEqual({ qa: undefined })
+      expect('refusal' in qaUpdate(item, { qa: 'pass', qa_by: 'local_dev' }, 'local_dev', 'pm', NOW, false)).toBe(true)
+      expect('refusal' in qaUpdate(item, {}, 'local_dev', 'pm', NOW, true)).toBe(true)
+      // Closing: a pass by someone else goes through; the verdict it had counts too, unless its checker is now the owner.
+      const passed = { ...item, qa: { result: 'pass' as const, by: 'agent:q', at: NOW, note: '' } }
+      expect(qaUpdate(passed, {}, 'local_dev', 'pm', NOW, true)).toEqual({ qa: passed.qa })
+      expect('refusal' in qaUpdate(passed, {}, 'agent:q', 'pm', NOW, true)).toBe(true)
+      // A skip is the caller's own word.
+      expect(qaUpdate(item, { qa: 'skip', qa_note: 'docs' }, 'local_dev', 'pm', NOW, true)).toEqual({ qa: { result: 'skipped', by: 'pm', at: NOW, note: 'docs' } })
+      // Attention: awaiting once the host says the owner delivered, failed whatever it says; closed items never.
+      const failed = { ...item, id: 8, qa: { result: 'fail' as const, by: 'agent:q', at: NOW, note: 'no test' } }
+      const lines = qaAttention([item, failed, { ...item, id: 9, status: 'done' as const }], owner => owner === 'local_dev', owner => `<${owner}>`)
+      expect(lines.length).toBe(2)
+      expect(lines[0]).toContain('T-07')
+      expect(lines[0]).toContain('<local_dev>')
+      expect(lines[1]).toContain('T-08')
+      expect(lines[1]).toContain('no test')
+      expect(qaAttention([item], () => false, String)).toEqual([])
+    }
+  } finally {
+    setLang(was)
+  }
 })

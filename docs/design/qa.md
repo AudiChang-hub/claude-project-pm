@@ -112,7 +112,32 @@ PM 開的 Agent，description 符合 `^T-\d+ QA`（不分大小寫）時，mod �
 
 使用者要在 GitHub 的 Settings → Secrets and variables → Actions 新增 `BLOCKED_TERMS`。
 
-## 8. 不在這次範圍
+## 8. 可移植的核心與 Desktop 專屬的部分
+
+長期目標是讓這套品管也能用在 Claude Code CLI、Codex、Antigravity、VS Code 等其他 AI 開發工具，所以 QA 的判斷寫成不依賴 Claude Desktop 或 Claude Code 引擎（`$`）的純函式，集中在 `hooks/qa.ts`。現在還不拆成獨立套件。
+
+| 可移植的核心 | 位置 | 依賴 |
+| --- | --- | --- |
+| 工作項目的 QA 欄位（`criteria`、`QaRecord`） | `types/index.d.ts` | 只有型別 |
+| 記錄驗收的驗證（`qaOfInput`）、結案關卡（`qaBlocker`）、一次 update 的 QA 判斷（`qaUpdate`） | `hooks/qa.ts` | `messages.ts` |
+| 看板的待 QA／QA 不通過（`qaShown`、`qaText`、`qaAttention`） | `hooks/qa.ts` | `messages.ts` |
+| QA Agent 的辨認（`isQaDescription`）和範本（`qaBrief`） | `hooks/qa.ts` | `messages.ts` |
+| 所有文字（中英文） | `hooks/messages.ts` | 無，純資料 |
+
+`hooks/qa.ts` 只 import 型別和 `messages.ts`，輸入輸出都是一般資料：工作項目、工具參數、時間。「負責人是否已交付」由宿主判斷後傳入（`qaShown` 的布林值、`qaAttention` 的 `isDelivered`），核心不知道 Session 或 Agent 長什麼樣子。測試裡有一個不經過引擎、直接呼叫核心的測試。
+
+| Desktop 專屬的接線層 | 位置 | 做什麼 |
+| --- | --- | --- |
+| ledger 工具 | `hooks/actions.ts` | 註冊工具、讀寫紀錄檔，呼叫 `qaUpdate`，通過後再跑負責人關卡（問 GitHub、git） |
+| 已交付的定義 | `hooks/sessions.ts`（`isDeliveredStatus`、`isDeliveredAgent`） | 用 Desktop 的 Session 狀態和 Agent 紀錄判斷 |
+| 看板 | `hooks/sessions.ts`（`boardText`） | 把 `qaAttention` 的結果放進「需要處理」，工作項目列加上 `qaText` |
+| 面板 | `hooks/view.tsx` | 顯示計數和每項的 QA 狀態與顏色 |
+| 範本附加 | `hooks/register.tsx`（`agent.spawn`）、`hooks/agents.ts`（`briefOf`） | 用 `isQaDescription` 判斷，把 `qaBrief` 的文字接在 Agent 的 prompt 後面 |
+| CI 掃描 | `.github/workflows/ci.yml` | 跟宿主無關，任何 repo 都能用 |
+
+移植到其他工具時，要另寫的是：工作項目存在哪裡、怎麼判斷負責人已交付、怎麼把範本交給驗收的 Agent（或其他工具的子代理）。
+
+## 9. 不在這次範圍
 
 - README 和 overview 圖（T-32）。
 - QA Agent 的回報不會自動寫進 ledger：由 PM 讀了之後記錄，避免一行摘要被誤判。
