@@ -1,13 +1,210 @@
-# project-pm:start v1 (Project PM's QA workflow: docs/design/v1-core.md 6.3; delete this file to remove it)
+# project-pm:start v1 (Project PM's QA workflow, docs/design/v1-core.md 6.3. Delete this file to remove it.)
+# Four checks on every pull request and every push to main: the automated tests, passwords and keys (gitleaks),
+# words that must stay private (the BLOCKED_TERMS secret), and package security (osv-scanner). Each one that fails
+# marks the lines it found and adds a row in plain words to the run's summary. It reads the code and nothing else.
 name: Project PM QA
+
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, master]
+  workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
   qa:
+    name: {{pm:ci.name}}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Whether the BLOCKED_TERMS secret is set: a step's `if` cannot read secrets, only this.
+      HAS_BLOCKED_TERMS: ${{ secrets.BLOCKED_TERMS != '' }}
+      PASS: {{pm:ci.pass}}
+      FAIL: {{pm:ci.fail}}
+      SKIP: {{pm:ci.skip}}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history: a key deleted later is still in it.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Summary
+        env:
+          TITLE: {{pm:ci.summaryTitle}}
+          HEAD: {{pm:ci.summaryHead}}
+        run: |
+          printf '%s\n\n%s\n| --- | --- | --- | --- | --- |\n' "$TITLE" "$HEAD" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── 1. Automated tests: npm, pnpm or yarn when package.json has a test script; pytest for a Python project ──
+      - name: Find the tests
+        id: find
+        run: |
+          kind=none
+          if [ -f package.json ] && node -e 'const s=(require("./package.json").scripts||{}).test||""; process.exit(s && !/no test specified/.test(s) ? 0 : 1)'; then
+            if [ -f pnpm-lock.yaml ]; then kind=pnpm; elif [ -f yarn.lock ]; then kind=yarn; else kind=npm; fi
+          elif [ -f pyproject.toml ] || [ -f pytest.ini ] || [ -d tests ] || [ -f setup.py ]; then
+            kind=pytest
+          fi
+          echo "Tests: $kind"
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
+      - if: steps.find.outputs.kind == 'npm' || steps.find.outputs.kind == 'pnpm' || steps.find.outputs.kind == 'yarn'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+      - if: steps.find.outputs.kind == 'pytest'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.x'
+      - name: {{pm:ci.tests.step}}
+        env:
+          KIND: ${{ steps.find.outputs.kind }}
+          STEP: {{pm:ci.tests.step}}
+          PASSED: {{pm:ci.tests.passed}}
+          FAILED: {{pm:ci.tests.failed}}
+          NONE: {{pm:ci.tests.none}}
+          WHY: {{pm:ci.tests.why}}
+          FIX: {{pm:ci.tests.fix}}
+          FIX_NONE: {{pm:ci.tests.fixNone}}
+        run: |
+          row() { printf '| %s | %s | %s | %s | %s |\n' "$STEP" "$1" "$2" "$WHY" "$3" >> "$GITHUB_STEP_SUMMARY"; }
+          # Not -e: a failing test run is reported in words, not cut short.
+          set +e
+          case "$KIND" in
+            npm) if [ -f package-lock.json ]; then npm ci; else npm install; fi && npm test ;;
+            pnpm) corepack enable && pnpm install --frozen-lockfile && pnpm test ;;
+            yarn) corepack enable && yarn install && yarn test ;;
+            pytest)
+              python -m pip install --upgrade pip pytest
+              if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
+              if [ -f pyproject.toml ] || [ -f setup.py ]; then python -m pip install -e . || true; fi
+              python -m pytest ;;
+            *) echo "$NONE"; row "$SKIP" "$NONE" "$FIX_NONE"; exit 0 ;;
+          esac
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=$STEP::$FAILED $FIX"
+            row "$FAIL" "$FAILED" "$FIX"
+            exit 1
+          fi
+          row "$PASS" "$PASSED" "-"
+
+      # ── 2. Passwords and keys: the gitleaks command line (MIT), checked against its published checksum ──
+      - name: {{pm:ci.secrets.step}}
+        if: ${{ !cancelled() }}
+        env:
+          VERSION: 8.30.1
+          SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          STEP: {{pm:ci.secrets.step}}
+          PASSED: {{pm:ci.secrets.passed}}
+          FAILED: {{pm:ci.secrets.failed}}
+          HIT: {{pm:ci.secrets.hit}}
+          WHY: {{pm:ci.secrets.why}}
+          FIX: {{pm:ci.secrets.fix}}
+        run: |
+          row() { printf '| %s | %s | %s | %s | %s |\n' "$STEP" "$1" "$2" "$WHY" "$3" >> "$GITHUB_STEP_SUMMARY"; }
+          tool="$RUNNER_TEMP/gitleaks"
+          curl -sSfL -o "$tool.tar.gz" "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          echo "$SHA256  $tool.tar.gz" | sha256sum -c -
+          mkdir -p "$tool" && tar -xzf "$tool.tar.gz" -C "$tool" gitleaks
+          report="$RUNNER_TEMP/gitleaks.json"
+          # --redact: the log never shows what was found, only where.
+          if "$tool/gitleaks" git --redact --no-banner --exit-code 2 --report-format json --report-path "$report" .; then
+            row "$PASS" "$PASSED" "-"
+            exit 0
+          fi
+          if [ ! -s "$report" ]; then exit 1; fi
+          jq -r '.[] | "\(.File)\t\(.StartLine)\t\(.Commit[0:7])"' "$report" | sort -u | while IFS=$'\t' read -r file line commit; do
+            echo "::error file=$file,line=$line,title=$STEP::$HIT ($commit) $FIX"
+          done
+          row "$FAIL" "$FAILED" "$FIX"
+          exit 1
+
+      # ── 3. Words that must stay private: the repository secret BLOCKED_TERMS, one per line; never printed ──
+      - name: {{pm:ci.terms.step}}
+        if: ${{ !cancelled() }}
+        env:
+          BLOCKED_TERMS: ${{ secrets.BLOCKED_TERMS }}
+          STEP: {{pm:ci.terms.step}}
+          PASSED: {{pm:ci.terms.passed}}
+          FAILED: {{pm:ci.terms.failed}}
+          HIT: {{pm:ci.terms.hit}}
+          NONE: {{pm:ci.terms.none}}
+          WHY: {{pm:ci.terms.why}}
+          FIX: {{pm:ci.terms.fix}}
+        run: |
+          row() { printf '| %s | %s | %s | %s | %s |\n' "$STEP" "$1" "$2" "$WHY" "$3" >> "$GITHUB_STEP_SUMMARY"; }
+          terms="$RUNNER_TEMP/blocked-terms"
+          # Trimmed, without blank lines: an empty pattern would match every line.
+          printf '%s\n' "${BLOCKED_TERMS:-}" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' > "$terms"
+          if [ ! -s "$terms" ]; then
+            rm -f "$terms"
+            echo "$NONE"
+            row "$SKIP" "$NONE" "-"
+            exit 0
+          fi
+          hits="$(git grep -n -I -i -F -f "$terms" | cut -d: -f1,2 || true)"
+          rm -f "$terms"
+          if [ -z "$hits" ]; then
+            row "$PASS" "$PASSED" "-"
+            exit 0
+          fi
+          count=$(printf '%s\n' "$hits" | wc -l | tr -d ' ')
+          printf '%s\n' "$hits" | while IFS=: read -r file line; do
+            echo "::error file=$file,line=$line,title=$STEP::$HIT"
+          done
+          row "$FAIL" "$(printf "$FAILED" "$count")" "$FIX"
+          exit 1
+
+      # ── 4. Package security: osv-scanner (Apache-2.0) reads the lockfiles; only high risk (CVSS 7 or more) fails ──
+      - name: {{pm:ci.deps.step}}
+        if: ${{ !cancelled() }}
+        env:
+          VERSION: 2.7.1
+          SHA256: fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8
+          STEP: {{pm:ci.deps.step}}
+          PASSED: {{pm:ci.deps.passed}}
+          FAILED: {{pm:ci.deps.failed}}
+          HIT: {{pm:ci.deps.hit}}
+          LOW: {{pm:ci.deps.low}}
+          NONE: {{pm:ci.deps.none}}
+          WHY: {{pm:ci.deps.why}}
+          FIX: {{pm:ci.deps.fix}}
+        run: |
+          row() { printf '| %s | %s | %s | %s | %s |\n' "$STEP" "$1" "$2" "$WHY" "$3" >> "$GITHUB_STEP_SUMMARY"; }
+          tool="$RUNNER_TEMP/osv-scanner"
+          curl -sSfL -o "$tool" "https://github.com/google/osv-scanner/releases/download/v${VERSION}/osv-scanner_linux_amd64"
+          echo "$SHA256  $tool" | sha256sum -c -
+          chmod +x "$tool"
+          report="$RUNNER_TEMP/osv.json"
+          "$tool" scan source --recursive --format json . > "$report" && code=0 || code=$?
+          # 128: no package list to read.
+          if [ "$code" -eq 128 ] || [ ! -s "$report" ]; then
+            echo "$NONE"
+            row "$SKIP" "$NONE" "-"
+            exit 0
+          fi
+          found="$RUNNER_TEMP/osv.tsv"
+          jq -r '.results[]?.packages[]? | . as $p | .groups[]? | [$p.package.name, $p.package.version, ((.max_severity // "") | tostring), (.ids | join(", "))] | @tsv' "$report" > "$found"
+          high=0
+          low=""
+          lows=0
+          while IFS=$'\t' read -r name version severity ids; do
+            if awk -v s="$severity" 'BEGIN { exit !(s != "" && s + 0 >= 7) }'; then
+              high=$((high + 1))
+              echo "::error title=$STEP::$(printf "$HIT" "$name" "$version" "$ids")"
+            else
+              lows=$((lows + 1))
+              low="$low $name $version ($ids);"
+            fi
+          done < "$found"
+          note="-"
+          if [ "$lows" -gt 0 ]; then note="$(printf "$LOW" "$lows" "$low")"; echo "$note"; fi
+          if [ "$high" -gt 0 ]; then
+            row "$FAIL" "$FAILED" "$FIX $note"
+            exit 1
+          fi
+          row "$PASS" "$PASSED" "$note"
+# project-pm:end

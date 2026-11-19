@@ -14,7 +14,7 @@ import { ct } from './messages'
 import { remoteTips } from './prepush'
 import type { ProjectRef } from './project'
 import { paths, readJsonFile, writeAtomic } from './store'
-import { CI_TEMPLATE } from './templates'
+import { ciTemplate } from './templates'
 import { REPORT_TOOL } from './tools'
 import { VERSION } from './version'
 
@@ -217,7 +217,7 @@ export async function planInstall(ref: ProjectRef, ie: InstallEnv, options: { ci
     const workflow = join(ref.path, '.github', 'workflows', 'project-pm-qa.yml')
     const now = await textOf(workflow)
     if (now !== null && !now.includes(SH_START)) notes.push(ct('init.ciTaken', { file: workflow }))
-    else changes.push({ kind: 'whole', file: workflow, text: CI_TEMPLATE })
+    else changes.push({ kind: 'whole', file: workflow, text: ciTemplate() })
   }
 
   return { changes, notes }
