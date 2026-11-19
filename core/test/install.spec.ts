@@ -9,7 +9,7 @@ import { join, relative } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
 import type { InstallEnv } from '../src/install'
-import { AGENTS_LIMIT, END, SECTION_LIMIT, START, agentsSection, init, readLog, shCommand, skillText, uninstall, withBlock, withoutBlock } from '../src/install'
+import { AGENTS_LIMIT, END, binPath, mcpLauncher, SECTION_LIMIT, START, agentsSection, init, readLog, shCommand, skillText, uninstall, withBlock, withoutBlock } from '../src/install'
 import { ct } from '../src/messages'
 import type { ProjectRef } from '../src/project'
 import { resolveProject } from '../src/project'
@@ -222,6 +222,21 @@ for (const lang of LANGS) {
       assert.deepEqual((await readLog(w.env)).entries.map(e => e.kind).sort(), ['hooks', 'mcp', 'text', 'whole'])
     })
 
+    test('the single executable is copied into ~/.project-pm/bin, every setting points at the copy, and uninstall takes it out', async () => {
+      const exe = join(w.root, 'Downloads', 'project-pm.exe')
+      write(exe, 'MZ acme stand-in for the program')
+      // Written with forward slashes, as a person may set it on Windows.
+      const env = { ...w.env, PROJECT_PM_HOME: w.env.PROJECT_PM_HOME!.replace(/\\/g, '/') }
+      const out = await init(ref, ie({ env, exe }), { yes: true, ci: false }, say)
+      const copy = binPath(env)
+      assert.equal(readFileSync(copy, 'utf8'), 'MZ acme stand-in for the program')
+      assert.deepEqual(out.applied.find(d => d.kind === 'mcp')?.command, [copy, 'mcp'])
+      assert.equal(git(w.repo, 'config', '--local', '--get', 'alias.pm'), `!${shCommand([copy])}`)
+      await uninstall(ref, ie({ env, exe }), { yes: true, hooksOnly: false }, say)
+      assert.ok(!existsSync(copy))
+      assert.ok(!existsSync(join(copy, '..')))
+    })
+
     test('uninstall without --yes only lists', async () => {
       await init(ref, ie(), { yes: true, ci: false }, say)
       const after = snapshot(w.home, w.repo)
@@ -249,5 +264,13 @@ describe('the pieces of a section', () => {
     assert.equal(shCommand(['/usr/local/bin/project-pm']), '/usr/local/bin/project-pm')
     assert.equal(shCommand(['npx', '-y', 'project-pm@1.0.0']), 'npx -y project-pm@1.0.0')
     assert.equal(shCommand(['/opt/a$b']), '"/opt/a\\$b"')
+  })
+})
+
+describe('how Claude Code starts the server from npm', () => {
+  test('npx goes through cmd /c on Windows only; the single executable as it is', () => {
+    assert.deepEqual(mcpLauncher(['npx', '-y', 'project-pm@1.0.0'], 'win32'), ['cmd', '/c', 'npx', '-y', 'project-pm@1.0.0'])
+    assert.deepEqual(mcpLauncher(['npx', '-y', 'project-pm@1.0.0'], 'linux'), ['npx', '-y', 'project-pm@1.0.0'])
+    assert.deepEqual(mcpLauncher(['C:\Acme\project-pm-1.0.0.exe'], 'win32'), ['C:\Acme\project-pm-1.0.0.exe'])
   })
 })

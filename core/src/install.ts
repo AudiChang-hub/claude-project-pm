@@ -7,7 +7,7 @@
  */
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, rmdir, unlink } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 
 import type { Run } from './host'
 import { ct } from './messages'
@@ -167,6 +167,14 @@ export function isModInstalled(ie: Pick<InstallEnv, 'env' | 'home'>): boolean {
   }
 }
 
+/**
+ * How Claude Code starts the MCP server: as `self`, except npx on Windows, which is a .cmd file that Claude Code
+ * starts only through `cmd /c` (git's sh, which runs the hooks and the alias, finds npx as it is).
+ */
+export function mcpLauncher(self: string[], platform: NodeJS.Platform = process.platform): string[] {
+  return platform === 'win32' && self[0] === 'npx' ? ['cmd', '/c', ...self] : self
+}
+
 export function binPath(env: NodeJS.ProcessEnv): string {
   return join(paths(env).bin, `project-pm-${VERSION}${process.platform === 'win32' ? '.exe' : ''}`)
 }
@@ -189,7 +197,7 @@ export async function planInstall(ref: ProjectRef, ie: InstallEnv, options: { ci
     if (hasClaude) {
       const existing = await ie.run(['claude', 'mcp', 'get', 'project-pm'], ref.path, 20_000)
       if (existing !== null && !log.entries.some(e => e.kind === 'mcp')) notes.push(ct('init.mcpTaken'))
-      else changes.push({ kind: 'mcp', command: [...self, 'mcp'] })
+      else changes.push({ kind: 'mcp', command: [...mcpLauncher(self), 'mcp'] })
     }
     changes.push({ kind: 'hooks', file: join(claude, 'settings.json'), command })
   }
@@ -419,8 +427,10 @@ export async function undo(done: Done, ie: InstallEnv): Promise<void> {
 
 /** Removes folders that are empty, from `dir` up to (not including) `stop`. */
 async function removeEmptyDirs(dir: string, stop: string) {
-  let at = dir
-  while (at.startsWith(stop) && at !== stop && at.length > stop.length) {
+  // One spelling for both (PROJECT_PM_HOME may be written with forward slashes on Windows).
+  let at = resolve(dir)
+  const end = resolve(stop)
+  while (at.startsWith(end) && at.length > end.length) {
     try {
       if ((await readdir(at)).length) return
       await rmdir(at)
