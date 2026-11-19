@@ -34,17 +34,13 @@ const zhTW = {
   'tool.report.actor': '這個 Session 的 id（選填）。hook 給過 Session id 時帶上，看板才對得起來。',
   'tool.report.item': '這份回報對應的工作項目 id（選填）。有給又帶 commit 時，commit 會記到該項目。',
   'tool.report.title': '這個 Session 在看板上的名稱（選填）。',
-  'hook.delivery': '「{project}」有 PM 在追蹤各 Session 的狀態。完成、暫停或卡住一項工作時，呼叫 project-pm 的 report 工具回報一次（status、一句話的 summary；有 commit 就填 commit，CI 還在跑就填 ci）。完整說明寫進 detail。{actor}',
   'hook.actorHint': '呼叫 report 時，actor 填 {actor}。',
-  'hook.guidelines': '這個專案的開發準則（{file}）：\n{text}',
-  'hook.guidelinesClipped': '（準則超過 {max} 字，已截短；完整內容請讀 {file}）',
-  'hook.guidelinesError': '讀不到開發準則 {file}：{reason}',
   'cli.usage': `用法：project-pm <指令>
 
   mcp                         MCP server（stdio），各 AI 工具的 MCP 設定都寫這個
   serve                       網頁看板和 Streamable HTTP 的 MCP（只綁 127.0.0.1）
   open                        需要時啟動 serve，在瀏覽器打開看板
-  board [--all] [--done]      在終端機印出文字看板
+  board [--all] [--done] [--json] 在終端機印出文字看板（--json：同一份 JSON）
   init [--yes] [--ci]         設定 Claude Code（預設只列出要改的內容）
   uninstall [--yes] [--hooks] 還原 init 改過的每個檔
   hook claude-code <事件>     給 Claude Code 的 hook 呼叫
@@ -85,17 +81,13 @@ const en: Record<CoreKey, string> = {
   'tool.report.actor': 'This session\'s id (optional). Give it when a hook gave you a session id, so the board can match the two.',
   'tool.report.item': 'The work item this report is about (optional). With a commit, the commit is recorded on that item.',
   'tool.report.title': 'This session\'s name on the board (optional).',
-  'hook.delivery': '"{project}" has a PM following each session. When you finish, pause or get stuck on a piece of work, call project-pm\'s report tool once (status, a one-sentence summary; the commit when you committed, ci while CI still runs). Put the full account in detail. {actor}',
   'hook.actorHint': 'When you call report, set actor to {actor}.',
-  'hook.guidelines': 'This project\'s development guidelines ({file}):\n{text}',
-  'hook.guidelinesClipped': '(The guidelines run past {max} characters and were clipped; read {file} for all of them.)',
-  'hook.guidelinesError': 'The development guidelines {file} could not be read: {reason}',
   'cli.usage': `Usage: project-pm <command>
 
   mcp                         MCP server (stdio): every AI tool's MCP settings run this
   serve                       The web board and Streamable HTTP MCP (127.0.0.1 only)
   open                        Start serve when needed and open the board in the browser
-  board [--all] [--done]      Print the text board in the terminal
+  board [--all] [--done] [--json] Print the text board in the terminal (--json: the same as JSON)
   init [--yes] [--ci]         Set up Claude Code (by default only lists what would change)
   uninstall [--yes] [--hooks] Undo every file init changed
   hook claude-code <event>    Called by Claude Code's hooks

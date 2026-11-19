@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { setLang } from '../../hooks/messages'
 import type { Lang } from '../../hooks/messages'
@@ -90,4 +91,17 @@ export function world(lang: Lang, { legacy = false } = {}): World {
       rmSync(root, { recursive: true, force: true })
     },
   }
+}
+
+/**
+ * How to start the program: the source through tsx, or the built executable or bundle named by PROJECT_PM_BIN
+ * (the build's tests run the same suites against what ships).
+ */
+export function serverCommand(...args: string[]): { command: string; args: string[] } {
+  const bin = process.env.PROJECT_PM_BIN
+  if (bin) return bin.endsWith('.cjs') || bin.endsWith('.js') ? { command: process.execPath, args: [bin, ...args] } : { command: bin, args }
+  const tsx = import.meta.resolve('tsx')
+  const main = fileURLToPath(new URL('../src/main.ts', import.meta.url))
+
+  return { command: process.execPath, args: ['--import', tsx, main, ...args] }
 }

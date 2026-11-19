@@ -2,5 +2,6 @@
 // core only reaches the mod's pure modules, whose types name the engine's module for its state alone: this stands in.
 declare module 'claude-code' {
   export interface PluginState {}
-  export type EngineInterface = unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export type EngineInterface = any
 }

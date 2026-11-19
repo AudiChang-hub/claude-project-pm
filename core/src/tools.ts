@@ -3,6 +3,9 @@
  * are the mod's (hooks/messages.ts), so the model reads the same board and the same refusals in every tool; each
  * answer also carries the same as JSON (structuredContent).
  */
+import { readdir } from 'node:fs/promises'
+import { join } from 'node:path'
+
 import { t } from '../../hooks/messages'
 import type { MessageKey } from '../../hooks/messages'
 import { isAgentId, isSameId, qaKeptText, qaShown, qaUpdate } from '../../hooks/qa'
@@ -32,6 +35,7 @@ import { GIT_TIMEOUT_MS } from './host'
 import { authorOf, uuidv7 } from './identity'
 import { ct } from './messages'
 import type { ProjectRef } from './project'
+import { projectRefOf } from './project'
 import { StoreError, changeActor, changeProject, loadProject, paths, readJsonFile, writeAtomic } from './store'
 import type { Actor, CoreItem, CoreProject } from './types'
 
@@ -379,12 +383,31 @@ export type BoardJson = {
 }
 
 export async function boardTool(ctx: Ctx, input: Record<string, unknown>): Promise<ToolResult> {
+  if (input.scope === 'all') return boardOfAll(ctx, input.include_done === true)
   const ref = await projectOf(ctx, input)
   if (!ref) return notGit(ctx, input)
   try {
     const { text, json } = await boardOf(ctx, ref, input.include_done === true)
 
     return { text, structured: json as unknown as Record<string, unknown> }
+  } catch (err) {
+    return failed(err)
+  }
+}
+
+/** Every project the core keeps, one board after another. */
+async function boardOfAll(ctx: Ctx, isIncludingDone: boolean): Promise<ToolResult> {
+  try {
+    const dir = join(paths(ctx.env).home, 'projects')
+    const names = (await readdir(dir).catch(() => [] as string[])).filter(name => name.endsWith('.json'))
+    const boards: { text: string; json: BoardJson }[] = []
+    for (const name of names) {
+      const file = await readJsonFile<CoreProject>(join(dir, name)).catch(() => null)
+      if (!file?.path) continue
+      boards.push(await boardOf(ctx, projectRefOf(file.path), isIncludingDone))
+    }
+
+    return { text: boards.length ? boards.map(b => b.text).join('\n\n---\n\n') : t('board.none'), structured: { projects: boards.map(b => b.json) } }
   } catch (err) {
     return failed(err)
   }
@@ -403,6 +426,8 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     sessionsError = err instanceof Error ? err.message : String(err)
     found = { sessions: [] as Session[], everyone: [] as Session[], tracks: {} as Record<string, Track>, actors: [] as Actor[], errors: [] }
   }
+  // The PM is not one of the sessions it follows (the desktop app's list leaves the asking session out too).
+  found = { ...found, sessions: found.sessions.filter(s => s.id !== project.pmId) }
   const now = ctx.now()
   // Git and GitHub for every idle session whose words leave a push or CI: asked in parallel, waited on for a while.
   const ci: Record<string, CiCheck> = {}
