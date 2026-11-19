@@ -55,12 +55,12 @@ export async function runHook(tool: string, event: string, input: HookInput, env
   const base = (old: Actor | null): HookActor => ({ ...(old ?? { id, tool, title: '', cwd, lastSeenAt: now }), id, tool, cwd: old?.cwd ?? cwd, projectKey: ref.key, lastSeenAt: now })
   switch (event) {
     case 'UserPromptSubmit':
-      return promptSubmit(id, ref, input, env, now, base)
+      return promptSubmit(id, ref, input, env, now, base, run)
     case 'PostToolUse':
       await postToolUse(id, input, env, now, base)
       return null
     case 'PreToolUse':
-      return preToolUse(id, ref, input, env)
+      return preToolUse(id, ref, input, env, run)
     case 'Stop':
     case 'SubagentStop':
       if (event === 'Stop') await stop(id, input, env, now, base)
@@ -70,7 +70,7 @@ export async function runHook(tool: string, event: string, input: HookInput, env
   }
 }
 
-async function promptSubmit(id: string, ref: ProjectRef, input: HookInput, env: NodeJS.ProcessEnv, now: number, base: (old: Actor | null) => HookActor): Promise<HookOutput> {
+async function promptSubmit(id: string, ref: ProjectRef, input: HookInput, env: NodeJS.ProcessEnv, now: number, base: (old: Actor | null) => HookActor, run: Run): Promise<HookOutput> {
   const prompt = input.prompt ?? ''
   // A notification or another session's message wakes the turn; it is not the person's instruction.
   const isOwn = !prompt.trimStart().startsWith('<')
@@ -98,7 +98,7 @@ async function promptSubmit(id: string, ref: ProjectRef, input: HookInput, env: 
   const parts: string[] = []
   const isPm = project.pmId === id
   if (!isPm && !project.isDismissed) parts.push(t('role.delivery', { project: ref.name, tool: REPORT_TOOL }), ct('hook.actorHint', { actor: id }))
-  const found = await readGuidelines(ref, env)
+  const found = await readGuidelines(ref, env, run)
   if (found && 'text' in found) {
     parts.push(t('guidelines.section', { file: found.file, project: ref.name }))
     if (isPm) parts.push(t('guidelines.pm'))
@@ -194,14 +194,14 @@ async function stop(id: string, input: HookInput, env: NodeJS.ProcessEnv, now: n
   )
 }
 
-async function preToolUse(id: string, ref: ProjectRef, input: HookInput, env: NodeJS.ProcessEnv): Promise<HookOutput> {
+async function preToolUse(id: string, ref: ProjectRef, input: HookInput, env: NodeJS.ProcessEnv, run: Run): Promise<HookOutput> {
   const field = WRITING_TOOLS[input.tool_name ?? '']
   if (!field) return null
   const target = input.tool_input?.[field]
   if (typeof target !== 'string') return null
   const project = await loadProject(ref, env)
   if (!project.pmId) return null
-  const found = await readGuidelines(ref, env)
+  const found = await readGuidelines(ref, env, run)
   if (!found || !isSameFile(found.file, target.replace(/\\/g, '/'))) return null
   const actor = (await loadActor(id, env).catch(() => null)) as HookActor | null
   if (actor?.askedGuidelinesAt) return null
@@ -212,7 +212,8 @@ async function preToolUse(id: string, ref: ProjectRef, input: HookInput, env: No
 /**
  * The guidelines file a project's .project-pm.json names, or null when it is not a plain path inside the repository.
  * That file is committed with the code, so whoever can commit could aim it at ~/.aws/credentials and have it read
- * into every turn: no absolute path (C:\, C:x, /, \, \\server), no ~, no .. anywhere, and the result inside `repo`.
+ * into every turn: no absolute path (C:\, C:x, /, \, \\server), no ~, no .. anywhere, nothing in .git, and the result
+ * inside `repo`.
  */
 export function projectGuidelinesFile(value: string, repo: string): string | null {
   const path = value.trim().replace(/^["']|["']$/g, '')
@@ -220,7 +221,7 @@ export function projectGuidelinesFile(value: string, repo: string): string | nul
   if (path.split(/[\\/]+/).includes('..')) return null
   const file = resolve(repo, path)
 
-  return isInside(file, repo) ? file : null
+  return isInside(file, repo) && !isInGit(file, repo) ? file : null
 }
 
 function isInside(file: string, folder: string): boolean {
@@ -230,16 +231,41 @@ function isInside(file: string, folder: string): boolean {
 }
 
 /**
- * The development guidelines file: `guidelines` in the project's .project-pm.json (a file inside the repository,
- * where a link leads checked too), else in ~/.project-pm/config.json (the person's own: any path).
+ * Whether `file` is in the repository's .git folder. Windows drops a name's trailing dots and spaces and ignores case,
+ * so ".git." and ".GIT " are .git there too.
  */
-export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = process.env): Promise<{ file: string; text: string; isClipped: boolean } | { file: string; error: string } | null> {
+function isInGit(file: string, repo: string): boolean {
+  const first = relative(resolve(repo), resolve(file)).split(/[\\/]+/)[0] ?? ''
+  const name = process.platform === 'win32' ? first.replace(/[. ]+$/, '').toLowerCase() : first
+
+  return name === '.git'
+}
+
+/** Whether git tracks `file` (in its index): a .env, an ignored file or one never added is not the project's. */
+async function isTracked(file: string, repo: string, run: Run): Promise<boolean> {
+  const rel = relative(resolve(repo), resolve(file)).replace(/\\/g, '/')
+  // Literal: a name with * or : in it is that name, not a pattern matching some other file git tracks.
+  const listed = await run(['git', '--literal-pathspecs', 'ls-files', '--', rel], repo)
+
+  return !!listed && listed.split('\n').some(line => line.trim() === rel)
+}
+
+/**
+ * The development guidelines file: `guidelines` in the project's .project-pm.json (a file git tracks inside the
+ * repository, not in .git, where a link leads checked too), else in ~/.project-pm/config.json (the person's own: any path).
+ */
+export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = process.env, run: Run = hostRun): Promise<{ file: string; text: string; isClipped: boolean } | { file: string; error: string } | null> {
   const fromProject = await readJsonFile<{ guidelines?: unknown }>(join(ref.path, '.project-pm.json')).catch(() => null)
   let file: string | null = null
   if (typeof fromProject?.guidelines === 'string' && fromProject.guidelines.trim()) {
     const named = projectGuidelinesFile(fromProject.guidelines, ref.path)
-    // A link committed in the repository may lead anywhere: where it really goes must be inside too.
-    if (named && isInside(await realpath(named).catch(() => named), await realpath(ref.path).catch(() => ref.path))) file = named
+    if (named) {
+      // A link committed in the repository may lead anywhere: where it really goes must be inside too, and not in .git.
+      const real = await realpath(named).catch(() => named)
+      const repo = await realpath(ref.path).catch(() => ref.path)
+      // Only what the project keeps in git: never a .env or another file the person keeps beside the code.
+      if (isInside(real, repo) && !isInGit(real, repo) && (await isTracked(named, ref.path, run))) file = named
+    }
   }
   if (!file) {
     const fromUser = await readJsonFile<{ guidelines?: unknown }>(join(dataHome(env), 'config.json')).catch(() => null)

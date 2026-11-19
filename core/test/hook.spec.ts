@@ -13,7 +13,7 @@ import type { HookInput } from '../src/hook'
 import { loadActor } from '../src/store'
 import { boardTool, pmTool, reportTool } from '../src/tools'
 import type { World } from './helpers'
-import { LANGS, NOW, hostWith, world } from './helpers'
+import { LANGS, NOW, git, hostWith, world } from './helpers'
 
 const SESSION = '1f0ba5e3-d73c-4a06-ab9f-283b7537d1be'
 const ID = `claude-code:${SESSION}`
@@ -52,6 +52,8 @@ for (const lang of LANGS) {
     test('the guidelines go into every turn of a project with a PM, and their file is locked unless asked about', async () => {
       await pmTool(w.ctx(), { action: 'claim' })
       writeFileSync(join(w.repo, 'GUIDELINES.md'), '1. Tests first.\n')
+      // The project's guidelines must be a file git tracks (T-37 QA2 6).
+      git(w.repo, 'add', 'GUIDELINES.md')
       writeFileSync(join(w.repo, '.project-pm.json'), JSON.stringify({ guidelines: 'GUIDELINES.md' }))
       const out = (await hook('UserPromptSubmit', { prompt: 'Add a coupon field' })) as { hookSpecificOutput: { additionalContext: string } }
       assert.ok(out.hookSpecificOutput.additionalContext.includes('1. Tests first.'))

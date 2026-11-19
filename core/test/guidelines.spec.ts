@@ -12,7 +12,7 @@ import { projectGuidelinesFile, readGuidelines } from '../src/hook'
 import type { ProjectRef } from '../src/project'
 import { resolveProject } from '../src/project'
 import type { World } from './helpers'
-import { world } from './helpers'
+import { git, world } from './helpers'
 
 describe('guidelines named by the project', () => {
   let w: World
@@ -78,7 +78,51 @@ describe('guidelines named by the project', () => {
     assert.ok(!found || !('text' in found) || !found.text.includes('ACME-SECRET'))
   })
 
+  test('a link to a single file outside the repository is refused, even when the link itself is in git (T-37 QA2 6)', async t => {
+    // A file link needs Developer Mode or admin rights on Windows: where this user cannot make one, there is nothing to test.
+    try {
+      symlinkSync(join(w.root, 'acme-secret.txt'), join(w.repo, 'RULES.md'), 'file')
+    } catch {
+      t.skip('this system does not let this user make file links')
+
+      return
+    }
+    git(w.repo, 'add', 'RULES.md')
+    aim('RULES.md')
+    const found = await readGuidelines(ref, w.env)
+    assert.ok(!found || !('text' in found) || !found.text.includes('ACME-SECRET'))
+  })
+
+  test('nothing inside .git is read, however the folder is written (T-37 QA2 6)', async () => {
+    const names = ['.git/config', '.git\\config', '.GIT/config', './.git/config', '.git/hooks/pre-push.sample']
+    if (process.platform === 'win32') names.push('.git./config', '.git /config')
+    for (const name of names) {
+      aim(name)
+      const found = await readGuidelines(ref, w.env)
+      assert.ok(!found || !('text' in found), `${name}: ${found && 'text' in found ? found.text.slice(0, 40) : ''}`)
+    }
+  })
+
+  test('a file git does not track is not read: a .env, an ignored file, a new file not yet added (T-37 QA2 6)', async () => {
+    writeFileSync(join(w.repo, '.env'), 'ACME_API_KEY=ACME-SECRET-TOKEN\n')
+    writeFileSync(join(w.repo, '.gitignore'), 'secrets/\n')
+    mkdirSync(join(w.repo, 'secrets'))
+    writeFileSync(join(w.repo, 'secrets', 'rules.md'), 'ACME-SECRET-TOKEN\n')
+    git(w.repo, 'add', '.gitignore')
+    for (const name of ['.env', 'secrets/rules.md', 'GUIDELINES.md']) {
+      aim(name)
+      const found = await readGuidelines(ref, w.env)
+      assert.ok(!found || !('text' in found), `${name}: ${found && 'text' in found ? found.text.slice(0, 40) : ''}`)
+    }
+    // Once it is in git, the same file is read.
+    git(w.repo, 'add', 'GUIDELINES.md')
+    aim('GUIDELINES.md')
+    const found = await readGuidelines(ref, w.env)
+    assert.ok(found && 'text' in found && found.text.includes('Acme rule 1'))
+  })
+
   test('the project\'s own file is read', async () => {
+    git(w.repo, 'add', 'GUIDELINES.md')
     aim('GUIDELINES.md')
     const found = await readGuidelines(ref, w.env)
     assert.ok(found && 'text' in found && found.text.includes('Acme rule 1'))
