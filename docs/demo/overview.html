@@ -8,10 +8,10 @@
           overview.html?lang=zh-TW   docs/images/overview-zh-TW.png
   Capture: pwsh docs/demo/capture.ps1 (see docs/demo/README.md)
 
-  The four costs are the T-30 quota measurements (CHANGELOG Unreleased, PM rule 10), in
+  The four costs are the T-30 quota measurements (CHANGELOG 0.9.0, PM rule 10), in
   input-equivalent tokens: an open session active in the last hour 18k, a read-only Explore agent 60k,
   a new session 70k, waking a large idle session (a 650k context) 840k. The QA layer is
-  docs/design/qa.md.
+  docs/design/qa.md; the CI real-data scan is left out, as it runs in this repository's own CI only.
 -->
 <html lang="en">
 <head>
@@ -83,11 +83,10 @@
   .qa-gate { width: 100%; background: var(--green-bg); border: 3px solid var(--green); border-radius: 22px; padding: 26px 28px 28px; display: flex; flex-direction: column; gap: 22px; }
   .qa-gate .title { gap: 14px; font-size: 32px; font-weight: 900; }
   .qa-gate .title small { font-size: 20px; font-weight: 500; color: var(--ink-2); margin-left: 6px; }
-  .steps { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr 20px 1fr; align-items: stretch; gap: 10px; }
+  .steps { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: stretch; gap: 12px; }
   .step { background: var(--green-chip); border-radius: 16px; padding: 18px 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
   .step b { font-size: 21px; font-weight: 700; line-height: 1.3; }
   .step p { margin: 0; font-size: 17px; line-height: 1.35; color: var(--ink-2); }
-  .step.ci { background: transparent; border: 2px dashed rgba(94, 224, 168, .55); }
   .arrow { align-self: center; color: var(--green); font: 700 28px/1 "Inter", sans-serif; }
   .costs { display: flex; flex-direction: column; gap: 16px; }
   .costs h2 { margin: 0; font-size: 22px; font-weight: 700; color: var(--ink-2); }
@@ -125,17 +124,16 @@ const COPY = {
     qaTitle: 'QA gate',
     qaSub: 'nothing is done until it passes',
     qa: [
-      ['Acceptance criteria', 'Written with each work item'],
+      ['Acceptance criteria', 'A work item can carry them'],
       ['Independent QA agent', 'Before each push; sees only the diff'],
       ['No pass, no close', 'The ledger refuses to close it'],
-      ['CI blocks real data', 'The list stays in a secret'],
     ],
     costsTitle: 'Quota first · cost per hand-off, input-equivalent tokens',
     stats: [
       ['18k', 'Open session,<br>active in the last hour', 'measured'],
       ['60k', 'Read-only<br>Explore agent', 'measured'],
       ['70k', 'New<br>session', 'measured'],
-      ['840k', 'Waking a large<br>idle session', 'measured'],
+      ['840k', 'Waking a large idle<br>session (650k context)', 'measured'],
     ],
     guards: [
       ['No collisions', 'Each agent in its own worktree'],
@@ -156,17 +154,16 @@ const COPY = {
     qaTitle: 'QA 關卡',
     qaSub: '沒通過就不算完成',
     qa: [
-      ['驗收條件', '登記工作時一起寫'],
+      ['驗收條件', '工作項目可以附上'],
       ['獨立驗收 Agent', 'push 前派出，只看 diff'],
       ['沒通過不能結案', '交辦清單拒絕結案'],
-      ['CI 擋真實資料', '名單只放在 secret'],
     ],
     costsTitle: '額度優先 · 每次派工的成本（等值輸入 tokens）',
     stats: [
       ['1.8 萬', '1 小時內有活動的<br>既有 Session', '實測'],
       ['6 萬', '唯讀的<br>Explore Agent', '實測'],
       ['7 萬', '開一個<br>新 Session', '實測'],
-      ['84 萬', '喚醒閒置的<br>大 Session', '實測'],
+      ['84 萬', '喚醒閒置的大 Session<br>（65 萬上下文）', '實測'],
     ],
     guards: [
       ['各改各的', 'worktree 隔離'],
@@ -194,7 +191,6 @@ const ICON = {
     '<rect x="5" y="4" width="14" height="17" rx="2"></rect><path d="M9 3h6v3H9z"></path><path d="m9 13 2 2 4-4"></path>',
     '<circle cx="11" cy="11" r="6"></circle><path d="m20 20-4.5-4.5"></path>',
     '<rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path>',
-    '<path d="M3 5h18M3 12h18M3 19h18"></path><path d="M14 8l6 8M20 8l-6 8"></path>',
   ],
   stats: [
     '<circle cx="12" cy="12" r="3"></circle><circle cx="12" cy="12" r="8"></circle>',
@@ -235,7 +231,7 @@ document.getElementById('poster').innerHTML = `
     <div class="stem qa"></div>
     <div class="qa-gate">
       <div class="row title">${svg(40, '#5ee0a8', 2, ICON.shield)}${c.qaTitle}<small>${c.qaSub}</small></div>
-      <div class="steps">${c.qa.map(([b, t], i) => `${i === 3 ? '<span></span>' : i ? '<span class="arrow">→</span>' : ''}<div class="step${i === 3 ? ' ci' : ''}">${svg(40, '#5ee0a8', 1.8, ICON.qa[i])}<b>${b}</b><p>${t}</p></div>`).join('')}</div>
+      <div class="steps">${c.qa.map(([b, t], i) => `${i ? '<span class="arrow">→</span>' : ''}<div class="step">${svg(40, '#5ee0a8', 1.8, ICON.qa[i])}<b>${b}</b><p>${t}</p></div>`).join('')}</div>
     </div>
   </div>
 

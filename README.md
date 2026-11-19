@@ -8,7 +8,7 @@
 **Run many Claude Code sessions and agents at once. You talk to one PM, and nothing slips.**
 
 <p align="center">
-  <img src="docs/images/overview.png" alt="Project PM v0.9.0 at a glance: you talk to the PM, which keeps a board and a ledger and hands work to sessions or agents. Both pass a QA gate: acceptance criteria, an independent QA agent before each push, no close without a pass, and CI that blocks real data kept in a secret. Measured cost per hand-off: 18k to 840k input-equivalent tokens. Agents work in their own worktree and never push." width="100%">
+  <img src="docs/images/overview.png" alt="Project PM v0.9.0 at a glance: you talk to the PM, which hands work to sessions or agents; a QA gate (acceptance criteria, an independent QA agent before each push, no close without a pass) and the measured cost of each hand-off." width="100%">
 </p>
 
 ## Why

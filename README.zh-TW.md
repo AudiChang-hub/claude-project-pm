@@ -8,7 +8,7 @@
 **同時開很多個 Claude Code Session 和 Agent，你只跟一個 PM 說話，一件工作也不漏。**
 
 <p align="center">
-  <img src="docs/images/overview-zh-TW.png" alt="Project PM v0.9.0 一頁圖解：你只跟 PM 說話，PM 管看板和交辦清單，把工作交給 Session 或 Agent。兩者都要過 QA 關卡：驗收條件、push 前派獨立驗收 Agent、沒通過不能結案、CI 擋真實資料（名單只放在 secret）。每次派工的實測成本：1.8 萬到 84 萬等值輸入 tokens。Agent 在獨立 worktree 工作，也不會 push。" width="100%">
+  <img src="docs/images/overview-zh-TW.png" alt="Project PM v0.9.0 一頁圖解：你只跟 PM 說話，PM 把工作交給 Session 或 Agent；QA 關卡（驗收條件、push 前派獨立驗收 Agent、沒通過不能結案），以及每次派工的實測成本。" width="100%">
 </p>
 
 ## 解決什麼問題
