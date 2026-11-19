@@ -18,7 +18,7 @@ import { ciTemplate } from '../src/templates'
 import { LANGS, git } from './helpers'
 
 type Step = { name?: string; id?: string; if?: string; uses?: string; run?: string; env?: Record<string, string> }
-type Job = { env?: Record<string, string>; steps: Step[] }
+type Job = { env?: Record<string, string>; needs?: unknown; if?: unknown; steps: Step[] }
 type Workflow = { name: string; on: Record<string, unknown>; permissions: Record<string, string>; jobs: Record<string, Job> }
 
 /** git's own bash on Windows (not WSL's), bash elsewhere. */
@@ -98,6 +98,20 @@ for (const lang of LANGS) {
         if (s.uses) assert.match(s.uses, /^actions\/checkout@/, `${s.uses} in the job that reads BLOCKED_TERMS`)
         assert.doesNotMatch(s.run ?? '', /\b(npm|npx|pnpm|yarn|corepack|pip|pytest|python)\b/, `an install or a test run in the job that reads BLOCKED_TERMS: ${s.name}`)
       }
+    })
+
+    test('the private-words job waits for nothing and has no if of its own, so the scan always runs (T-37 QA2 3)', () => {
+      // With needs or a job-level if, tests that fail or are cancelled would skip the scan.
+      const job = flow.jobs['private-words']
+      assert.ok(job, Object.keys(flow.jobs).join(', '))
+      assert.equal(job.needs, undefined)
+      assert.equal(job.if, undefined)
+    })
+
+    test('nothing in the whole workflow but the private-words job reads BLOCKED_TERMS, the top-level env included (T-37 QA2 3)', () => {
+      const { 'private-words': words, ...otherJobs } = flow.jobs
+      assert.match(JSON.stringify(words), /secrets\.BLOCKED_TERMS/)
+      assert.doesNotMatch(JSON.stringify({ ...flow, jobs: otherJobs }), /secrets\s*(\.\s*BLOCKED_TERMS|\[\s*'BLOCKED_TERMS'\s*\])/)
     })
 
     test('finds npm, pnpm, yarn and pytest, and no tests where there are none', () => {
