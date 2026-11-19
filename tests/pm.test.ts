@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isDeliveredAgent, isDeliveredStatus, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, statusOf, undeliveredOf, usageLimitOf } from '../hooks/sessions'
+import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isDeliveredAgent, isDeliveredStatus, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, limitOf, statusOf, undeliveredOf, usageLimitOf } from '../hooks/sessions'
 import type { Status } from '../hooks/sessions'
 import { closesBoard } from '../hooks/actions'
 import { isQaDescription, qaAttention, qaBlocker, qaBrief, qaShown, qaUpdate } from '../hooks/qa'
@@ -3156,10 +3156,13 @@ async function usageLimitTurns($: Parameters<TestBody>[0], on: On) {
   const later = NOW + 3 * 3_600_000
   expect(statusOf(idle(later), kept(), word, later + 60_000)).toBe('done')
 
-  // An engine that gives the limit's words as the answer: the track alone tells.
+  // The model said something of its own before the limit hit: the error's message after it decides, not the model's words.
   await clock.advance(60_000)
-  await $.turn.complete({ answer: "You've hit your weekly limit · resets Nov 21, 9am (Asia/Taipei)", durationMs: 1, isAborted: false, turnId: 't3', reason: 'error' } as never)
-  expect(statusOf(idle(later + 60_000), kept(), undefined, later + 120_000)).toBe('limit')
+  await $.turn.complete({ answer: '先改完第一個檔案。', durationMs: 1, isAborted: false, turnId: 't3', reason: 'error' } as never)
+  const third = `[user] 繼續\n[assistant] 先改完第一個檔案。\n[assistant] You've hit your weekly limit · resets Nov 21, 9am (Asia/Taipei)\n[result] error (success), 2 turns`
+  const weekly = parseLastWord(third, new Date(later + 60_000).toISOString())
+  expect(limitOf(idle(later + 60_000), kept(), weekly)?.resets).toBe('Nov 21, 9am (Asia/Taipei)')
+  expect(statusOf(idle(later + 60_000), kept(), weekly, later + 120_000)).toBe('limit')
 }
 
 test('a turn a usage limit ended is kept as such, and a later turn ends it (T-38)', ZH, async ($, on) => {
@@ -3211,3 +3214,51 @@ test('the PM is told to pick up a session the usage limit stopped once it resets
     setLang(was)
   }
 })
+
+// ── The model's own words about a limit, in a turn another error ended (T-38 QA follow-up) ──
+
+/** What the model itself said last, naming the weekly and the usage limit in passing. */
+const MODEL_ON_LIMITS = {
+  zh: '我把修改拆小，免得撞到 weekly limit；usage limit 目前還很充足。',
+  en: 'I kept the edits small so we stay under the weekly limit; the usage limit is fine for now.',
+} as const
+const API_500 = 'API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}'
+
+async function limitOnlySaid($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en', which: 'answer' | 'transcript') {
+  const words = LIMIT_WORDS[lang]
+  const said = MODEL_ON_LIMITS[lang]
+  if (which === 'answer') {
+    // The session's own mod: the turn ends in error with the model's last words as its answer, and the error itself,
+    // a failing API, is what the app wrote into the transcript after them.
+    const files: Files = new Map()
+    mock.clock(on, { now: NOW })
+    world(on, 'local_me', files)
+    on('turn.complete', () => ({ text: '' }))
+    await $.session.start(START)
+    await $.turn.complete({ answer: said, durationMs: 1, isAborted: false, turnId: 't1', reason: 'error' } as never)
+    const kept = JSON.parse(files.get(`${DIR}/sessions/local_me.json`)!)
+    const at = new Date(NOW).toISOString()
+    const idle = { id: 'local_me', title: '我', cwd: PROJECT, isRunning: false, lastActivityAt: at, isPinned: false, hasOpenPr: false }
+    const transcript = `[user] 繼續\n[assistant] ${said}\n[assistant] ${API_500}\n[result] error (success), 3 turns`
+    // Read or not yet read, the transcript leaves it no usage limit.
+    expect(statusOf(idle, kept, undefined, NOW + 60_000)).not.toBe('limit')
+    expect(statusOf(idle, kept, parseLastWord(transcript, at), NOW + 60_000)).not.toBe('limit')
+
+    return
+  }
+  // The board: the model's words are the transcript's last before an error the app wrote no words for.
+  const transcript = `[user] 繼續\n[assistant] ${said}\n[result] error (success), 3 turns`
+  const { board } = await limitBoard($, on, transcript, [limitItem(1, 'local_open')])
+  const shown = await board()
+  expect(shown).not.toMatch(words.any)
+  expect(shown).toMatch(words.ended)
+}
+
+for (const [lang, opts] of [['zh', ZH], ['en', { options: { language: 'en' } }]] as const) {
+  test(`the model naming a weekly or usage limit, in a turn another error ended, is no usage limit: its answer (${lang})`, opts, async ($, on) => {
+    await limitOnlySaid($, on, lang, 'answer')
+  })
+  test(`the model naming a weekly or usage limit, in a turn another error ended, is no usage limit: the transcript (${lang})`, opts, async ($, on) => {
+    await limitOnlySaid($, on, lang, 'transcript')
+  })
+}

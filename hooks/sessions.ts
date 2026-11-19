@@ -48,20 +48,33 @@ export function isActive(status: Status): boolean {
 // ── A turn a usage limit ended ──
 
 /**
- * The words of a usage limit (the plan's 5-hour or weekly limit, extra usage run out), not of any error: not a
- * rate limit the engine retries, the context or output limit, an overloaded or failing API.
+ * The message a usage limit ends a turn with (the plan's 5-hour or weekly limit, extra usage run out), by its own
+ * form: its first clause says the limit was hit. You've hit your 5-hour limit, Claude usage limit reached, You're out
+ * of extra usage, 已達用量上限. Not words that only name a limit (stay under the weekly limit, the usage limit is
+ * fine), nor any other error: a rate limit the engine retries, the context or output limit, an overloaded or failing API.
  */
-const USAGE_LIMIT =
-  /\b(?:hit|reached|hitting)\s+(?:your|the)\s+(?:(?!context|token|size|output|length|rate)[\w-]+\s+){0,3}?limit\b|\b(?:5|five)[- ]hour\s+limit\b|\b(?:weekly|daily|monthly|session|usage|plan|opus|sonnet)\s+(?:usage\s+)?limit\b|\bout of (?:extra )?usage\b|用量上限|使用上限|使用量上限|額度(?:已)?(?:用完|用盡|耗盡)/i
+const USAGE_LIMIT = new RegExp(
+  [
+    /^\W*(?:you(?:'ve|’ve| have)?|claude(?:\s+ai)?)\s+(?:hit|reached)\s+(?:your|the)\s+(?:(?!context|token|size|output|length|rate)[\w-]+\s+){0,3}?limit\b/,
+    /^\W*(?:[\w-]+\s+){0,2}?(?:5-hour|five-hour|weekly|daily|monthly|session|usage|plan)\s+(?:usage\s+)?limit\s+(?:reached|exceeded|hit)\b/,
+    /^\W*you(?:'re|’re| are)\s+out of (?:extra\s+)?usage\b/,
+    /^(?:你)?(?:已經?)?(?:達到?|用完|用盡|超過)[^，,。]{0,6}?上限|^(?:你的)?額度(?:已經?)?(?:用完|用盡|耗盡)/,
+  ]
+    .map(r => r.source)
+    .join('|'),
+  'i',
+)
+/** A message's first clause: where a usage limit's message says what happened. */
+const FIRST_CLAUSE = /[.。!！·∙•|\n]/
 /** When the limit resets, as its words give it: resets 3pm (Asia/Taipei), will reset at 3pm, 將於 15:00 重置. */
 const RESETS = /\b(?:resets?|will reset)\s+(?:at\s+|on\s+|in\s+)?([^\n·∙•|]+)|(?:將於|將在|於)\s*([^，。,；;\n]+?)\s*(?:重置|恢復|重新計算)/i
 
 /** A usage limit that ended a turn: its words, and when it resets (null when they do not say). */
 export type UsageLimit = { said: string; resets: string | null }
 
-/** The usage limit the words of an error tell of, or null for any other error. */
+/** The usage limit an error's message tells of, or null for any other error or words that only name a limit. */
 export function usageLimitOf(text: string): UsageLimit | null {
-  if (!USAGE_LIMIT.test(text)) return null
+  if (!USAGE_LIMIT.test(text.trim().split(FIRST_CLAUSE)[0] ?? '')) return null
   const m = RESETS.exec(text)
   const resets = (m?.[1] ?? m?.[2] ?? '').trim().replace(/[.。\s]+$/, '')
 
@@ -69,25 +82,24 @@ export function usageLimitOf(text: string): UsageLimit | null {
 }
 
 /**
- * The usage limit the session's last turn ended on, or null: its track's own word on how that turn ended, then the
- * transcript read at its last activity (an older mod's track says nothing of it, nor does the turn's end give the
- * limit's words). A later turn that ended otherwise, or the session running again, ends it.
+ * The usage limit the session's last turn ended on, or null. Only the error itself counts, never the model's words: the
+ * track says whether the turn ended in error (an older mod's track does not say), and the transcript, read at the
+ * session's last activity, holds the error's message, the last words before its `[result] error`. A later turn that
+ * ended otherwise, or the session running again, ends it.
  */
 export function limitOf(one: Session, track: Track | undefined, word: LastWord | undefined): UsageLimit | null {
   if (one.isRunning || track?.endedInError === false) return null
-  const own = track?.endedInError ? usageLimitOf(track.errorText ?? '') : null
-  if (own) return own
   const isRead = !!word && word.isError === true && !word.error && word.activity === one.lastActivityAt
 
   return isRead ? usageLimitOf(word.said) : null
 }
 
 /**
- * Whether a track leaves how its last turn ended to the transcript: one that ended in error without its words, or
- * one an older mod wrote with nothing said (as a turn a usage limit ended leaves it).
+ * Whether a track leaves how its last turn ended to the transcript: one that ended in error (its answer is the model's
+ * own words, not the error's), or one an older mod wrote with nothing said (as a turn a usage limit ended leaves it).
  */
 export function needsTranscript(track: Track): boolean {
-  if (track.endedInError === false || usageLimitOf(track.errorText ?? '')) return false
+  if (track.endedInError !== undefined) return track.endedInError
 
   return !track.lastAnswer && !track.recap && !track.report && !track.ask
 }
@@ -400,8 +412,7 @@ export function liveTracks(list: Session[], tracks: Record<string, Track>, words
     const word = words[one.id]
     if (!track || !isBehind(one, track) || !word || word.error || !word.said || word.activity !== one.lastActivityAt) continue
     // Its background list missed the notifications those turns got too; how its last turn ended is the transcript's.
-    const ended = word.isError ? { endedInError: true, errorText: word.said } : { endedInError: false, errorText: undefined }
-    live[one.id] = { ...track, recap: null, recapAt: undefined, ask: word.isAsking ? word.said : null, lastAnswer: word.said, background: [], ...ended }
+    live[one.id] = { ...track, recap: null, recapAt: undefined, ask: word.isAsking ? word.said : null, lastAnswer: word.said, background: [], endedInError: !!word.isError }
   }
 
   return live
@@ -1105,9 +1116,10 @@ export function parseLastWord(text: string, activity: string): LastWord {
   const last = entries.filter(e => e.role !== 'result').at(-1)
   const isLast = !!said && last === said
   const isAsking = isLast && /[?？]\s*$/.test(said.body)
-  // The turn ended in error (`[result] error …`) right after these words: they are the error's (a usage limit's).
+  // The turn ended on an API error (`[result] error …`, not error_max_turns and the like) right after these words, where
+  // the app writes the error's message (a usage limit's). Whether they are one, usageLimitOf tells by their form.
   const end = entries.at(-1)
-  const isError = isLast && end?.role === 'result' && /^error/i.test(end.body)
+  const isError = isLast && end?.role === 'result' && /^error\b/i.test(end.body)
 
   return {
     said: said ? clip(said.body, 140) : '',

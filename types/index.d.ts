@@ -61,11 +61,9 @@ export type Track = {
   inbox?: number
   /**
    * Whether the last turn ended on an error (turn.complete's reason `error`: a usage limit, an API error), set at every
-   * turn's end; absent in a track an older mod wrote.
+   * turn's end; absent in a track an older mod wrote. The error's words are in the transcript, not in `lastAnswer`.
    */
   endedInError?: boolean
-  /** That error's words, when the turn's end carried any (its answer); else the transcript holds them. */
-  errorText?: string
 }
 
 /** Where a session's work stands, as it says itself. */
