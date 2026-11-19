@@ -57,7 +57,10 @@ export async function withLock<T>(file: string, fn: () => Promise<T>): Promise<T
       await handle.close()
       break
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw new StoreError(ct('error.cannotWrite', { reason: (err as Error).message }))
+      const code = (err as NodeJS.ErrnoException).code
+      // Windows answers EPERM (or EACCES, EBUSY) while another process is deleting the lock: it is still held.
+      const isHeld = code === 'EEXIST' || code === 'EPERM' || code === 'EACCES' || code === 'EBUSY'
+      if (!isHeld || Date.now() - started > LOCK_WAIT_MS) throw new StoreError(ct('error.cannotWrite', { reason: (err as Error).message }))
       try {
         const age = Date.now() - (await stat(lock)).mtimeMs
         if (age > STALE_LOCK_MS) await unlink(lock).catch(() => {})
