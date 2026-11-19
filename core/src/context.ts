@@ -1,0 +1,39 @@
+/** What every tool call carries: who calls, from where, and the host it runs on (so tests can stand in for git and gh). */
+import type { Facts } from './facts'
+import { newFacts } from './facts'
+import type { Run } from './host'
+import { run as hostRun } from './host'
+import { initLang } from './messages'
+import type { ProjectRef } from './project'
+import { resolveProject } from './project'
+
+export type Ctx = {
+  /** The calling session's actor id (1.5). */
+  actor: string
+  /** Its tool: claude-code, codex, … */
+  tool: string
+  /** The folder the connection works in: a tool's `project` overrides it. */
+  cwd: string
+  env: NodeJS.ProcessEnv
+  run: Run
+  now: () => number
+  facts: Facts
+}
+
+/** What a tool answers: the words for the model, the same as JSON for programs, and whether the core itself failed. */
+export type ToolResult = { text: string; structured: Record<string, unknown>; isError?: boolean }
+
+export function newCtx(part: Partial<Ctx> & { actor: string; tool: string }): Ctx {
+  const run = part.run ?? hostRun
+  const now = part.now ?? Date.now
+  initLang(part.env ?? process.env)
+
+  return { cwd: process.cwd(), env: process.env, facts: newFacts(run, now), ...part, run, now }
+}
+
+/** The project a call is about: its `project` folder, else the connection's. */
+export function projectOf(ctx: Ctx, input: Record<string, unknown>): Promise<ProjectRef | null> {
+  const folder = typeof input.project === 'string' && input.project.trim() ? input.project.trim() : ctx.cwd
+
+  return resolveProject(folder, ctx.run)
+}
