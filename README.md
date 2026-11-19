@@ -22,7 +22,7 @@ Project PM makes one session the project's PM. It keeps a live board of every se
 - **The CLI works too.** One shared core serves the PM's tools over MCP, so Claude Code's command line gets the board, the ledger and the QA gate. It shares one ledger with the desktop app.
 - **QA before the push.** A git pre-push hook holds commits no QA passed; `git pm skip "<reason>"` lets one through on the record.
 - **A CI template for your projects.** `init --ci` adds GitHub Actions: your tests, leaked keys, risky packages and words you keep private.
-- **One program, no Node.js.** A single executable for Windows, macOS and Linux (or npx). `init` lists every change before making it; `uninstall` puts every file back.
+- **One program, no Node.js.** A single executable for Windows, macOS and Linux (an npm version comes later). `init` lists every change before making it; `uninstall` puts every file back.
 - **A web board** in your browser, read only and on your own computer.
 
 v0.9.x (QA gate, quota-first hand-offs): [CHANGELOG](CHANGELOG.md)
@@ -37,10 +37,7 @@ v0.9.x (QA gate, quota-first hand-offs): [CHANGELOG](CHANGELOG.md)
 
 Or **+** next to the prompt box → **Plugins** → **Add marketplace** → `AudiChang-hub/claude-project-pm` → **Add plugin**. Then open a new session in your project and type `/pm`. To keep it updated: `claude` → `/plugin` → **Marketplaces** → `claude-project-pm` → **Enable auto-update**.
 
-**Claude Code CLI**, either way:
-
-- **Program:** download the file for your computer from [Releases](https://github.com/AudiChang-hub/claude-project-pm/releases) and run it with `init` in your project's folder. It changes nothing until you add `--yes`.
-- **npm** (Node.js 20+): `npx -y project-pm@1.0.0 init`
+**Claude Code CLI:** download the file for your computer from [Releases](https://github.com/AudiChang-hub/claude-project-pm/releases) and run it with `init` in your project's folder. It changes nothing until you add `--yes`. An npm version (`npx`) comes in a later release.
 
 Step by step, and what to do when Windows or macOS warns you (those steps are not yet checked on a real download): [core/README.md](core/README.md).
 

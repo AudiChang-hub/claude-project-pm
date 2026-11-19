@@ -22,7 +22,7 @@ Project PM 讓專案裡的一個 Session 擔任 PM。它即時掌握每個 Sessi
 - **CLI 也能用。** 一份共用核心用 MCP 提供 PM 的工具，Claude Code 的命令列也有看板、交辦清單和 QA 關卡，而且和桌面版共用同一份交辦清單。
 - **push 前先驗收。** git 的 pre-push hook 會擋下沒通過 QA 的 commit；`git pm skip "<理由>"` 可以明確放行一次，理由會留下紀錄。
 - **給你的專案用的 CI 範本。** `init --ci` 加上 GitHub Actions：跑你的測試、找外洩的金鑰、有風險的套件和不能公開的詞。
-- **一個程式，不用裝 Node.js。** Windows、macOS、Linux 都有單一執行檔（也可用 npx）。`init` 先列出要改的每個檔，`uninstall` 把每個檔還原。
+- **一個程式，不用裝 Node.js。** Windows、macOS、Linux 都有單一執行檔（npm 版之後提供）。`init` 先列出要改的每個檔，`uninstall` 把每個檔還原。
 - **網頁看板**，在瀏覽器裡看，唯讀，只在你自己的電腦上。
 
 v0.9.x（QA 關卡、額度優先派工）：[CHANGELOG](CHANGELOG.md)
@@ -37,10 +37,7 @@ v0.9.x（QA 關卡、額度優先派工）：[CHANGELOG](CHANGELOG.md)
 
 或點提示框旁的 **+** → **Plugins** → **Add marketplace** → 輸入 `AudiChang-hub/claude-project-pm` → **Add plugin**。接著在專案裡新開一個 Session，輸入 `/pm`。保持更新：`claude` → `/plugin` → **Marketplaces** → `claude-project-pm` → **Enable auto-update**。
 
-**Claude Code CLI**，兩種方式擇一：
-
-- **執行檔：** 從 [Releases](https://github.com/AudiChang-hub/claude-project-pm/releases) 下載你電腦用的檔，在專案資料夾裡加上 `init` 執行。沒加 `--yes` 之前不會改任何東西。
-- **npm**（要有 Node.js 20 以上）：`npx -y project-pm@1.0.0 init`
+**Claude Code CLI：** 從 [Releases](https://github.com/AudiChang-hub/claude-project-pm/releases) 下載你電腦用的檔，在專案資料夾裡加上 `init` 執行。沒加 `--yes` 之前不會改任何東西。npm 版（`npx`）之後的版本才提供。
 
 逐步說明，以及 Windows 或 macOS 跳出警告時怎麼辦（放行步驟還沒實際驗證）：[core/README.zh-TW.md](core/README.zh-TW.md)。
 

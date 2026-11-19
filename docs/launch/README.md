@@ -51,8 +51,13 @@ and v1.0.0 (step 5) are prepared, not released; the posts have not been made.
    `core/package.json` and `.claude-plugin/plugin.json` (D7). Before the tag:
    - Try a build by hand first (Actions → Release → Run workflow): it publishes nothing, and its
      artifacts are the programs to download and allow as a person would (SmartScreen).
-   - Set the `NPM_TOKEN` repository secret, or the npm job is skipped and
-     `npx -y project-pm@1.0.0`, which the READMEs and the release text offer, will not work.
+   - v1.0.0 is not published to npm (decided 2026-11-19): without the `NPM_TOKEN` repository
+     secret, release.yml skips the npm job, and the READMEs and release text say the npm version
+     comes later.
+   - **npm later:** once the owner has made the npm account and set `NPM_TOKEN` (only they can),
+     release a patch (bump both versions, tag `v1.0.1`): the same workflow then publishes it to
+     npm too. Then turn "npm comes later" in the READMEs, `core/README*.md` and the release text
+     back into the `npx` instructions, and Smart App Control's way out (the npm version).
 
    ```bash
    git push origin main
