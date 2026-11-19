@@ -1,13 +1,14 @@
 # Launch kit
 
 Drafts and steps for making the repository public-facing. Each step is a public action, run only
-after the owner has approved it. Steps 1–3 are done (v0.8.0 is the latest release); v0.9.0 (step 4)
+after the owner has approved it. Steps 1–3 are done (v0.9.0 is the latest release); v0.9.1 (step 4)
 is prepared, not released; the posts have not been made.
 
 | File | What it is | Status |
 | --- | --- | --- |
 | [repo-metadata.md](repo-metadata.md) | Repository description, topics and the `gh` command that sets them | Applied 2026-10-19 |
-| [release-v0.9.0.md](release-v0.9.0.md) | Release notes for `v0.9.0`: a QA gate, quota-first hand-offs and a CI real-data scan | Ready, not released |
+| [release-v0.9.1.md](release-v0.9.1.md) | Release notes for `v0.9.1`: sessions a usage limit stopped need attention, and the PM picks them up | Ready, not released |
+| [release-v0.9.0.md](release-v0.9.0.md) | Release notes for `v0.9.0`: a QA gate, quota-first hand-offs and a CI real-data scan | Published 2026-11-19 |
 | [release-v0.8.0.md](release-v0.8.0.md) | Release notes for `v0.8.0`: the PM hands work to agents, and spends far fewer tokens | Published 2026-11-18 |
 | [release-v0.7.1.md](release-v0.7.1.md) | Release notes for `v0.7.1`: released sessions, cherry-picked commits and closed work items | Published 2026-11-16 |
 | [release-v0.7.0.md](release-v0.7.0.md) | Release notes for `v0.7.0`: development guidelines | Published 2026-11-09 |
@@ -25,10 +26,10 @@ is prepared, not released; the posts have not been made.
 
 2. ~~**Description and topics**~~ (see [repo-metadata.md](repo-metadata.md)). Done 2026-10-19.
 
-3. ~~**Tag and release**~~ `v0.3.2` through `v0.8.0` are published; `v0.8.0` is the latest
-   (https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.8.0).
+3. ~~**Tag and release**~~ `v0.3.2` through `v0.9.0` are published; `v0.9.0` is the latest
+   (https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.9.0).
 
-4. **Push and release `v0.9.0`** (QA gate, quota first, CI real-data scan; `.claude-plugin/plugin.json` is already 0.9.0). Push first
+4. **Push and release `v0.9.1`** (sessions a usage limit stopped need attention; `.claude-plugin/plugin.json` is already 0.9.1). Push first
    and wait for CI to pass, then:
 
    ```bash
@@ -36,7 +37,7 @@ is prepared, not released; the posts have not been made.
    ```
 
    ```bash
-   gh release create v0.9.0 --repo AudiChang-hub/claude-project-pm --target main --title "v0.9.0" --notes-file docs/launch/release-v0.9.0.md
+   gh release create v0.9.1 --repo AudiChang-hub/claude-project-pm --target main --title "v0.9.1" --notes-file docs/launch/release-v0.9.1.md
    ```
 
    For later releases: bump `.claude-plugin/plugin.json`, write `docs/launch/release-v<version>.md`,

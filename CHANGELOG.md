@@ -7,6 +7,8 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-19
+
 ### Fixed
 - A session a usage limit stopped midway (its last turn ended in error, with words like "You've hit your 5-hour limit · resets 3pm") showed as *Ended*, so nobody came back to it once the limit reset. The mod never looked at how a turn ended: a turn that ends in error carries no answer, the limit's words are only in the transcript, and with its steps ticked the session read as finished. Each session's mod now keeps whether its last turn ended in error (`turn.complete`'s `reason`), the board reads the transcript's `[result] error` line and the words before it, and a new status, *Usage limit · resumes after <time>* (額度用完・<time> 後可續; *Usage limit* when the words give no time), lists it under *Needs attention*, in the counts and on the pane. Only the error itself counts, never the model's words: the turn must have ended in error, and the error's message (the transcript's last words before `[result] error`) must open by saying a usage limit was hit (You've hit your 5-hour limit, usage limit reached, out of extra usage, 已達用量上限). Any other error (an API failure, a rate limit, the context limit), or a model that only names a limit in passing, does not count. A session running again, or whose later turn ended otherwise, is no longer listed, nor is one whose work items have all been handed to another owner or closed: a work item now keeps the owners it was handed over from (`formerOwners`). A new PM rule (15) has the PM pick such a session up once the limit resets, without being reminded: by the quota rules of rule 10, wake a small, warm one, or start a new session that takes over from the hand-over notes, then make the new session the work item's owner.
 
@@ -170,6 +172,7 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 - A band above the prompt in projects without a PM, offering to start a PM session or make the current one the PM.
 - Notifications to the PM when a session starts waiting on the person or stops with steps left.
 
+[0.9.1]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.9.1
 [0.9.0]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.9.0
 [0.8.0]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.8.0
 [0.7.1]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.7.1
