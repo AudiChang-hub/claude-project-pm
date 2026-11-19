@@ -14,6 +14,8 @@ import { LANGS, git, serverCommand } from './helpers'
 
 const BIN = process.env.PROJECT_PM_BIN
 const hasClaude = spawnSync('claude', ['--version'], { encoding: 'utf8', windowsHide: true, shell: process.platform === 'win32' }).status === 0
+/** On CI (CI=true, as GitHub Actions sets it) Claude Code must be there: a broken install step must fail, not skip the MCP checks. */
+const isCi = /^(true|1)$/i.test(process.env.CI?.trim() ?? '')
 
 /** The files init may touch, with their bytes (and mode off Windows). */
 function snapshot(home: string, repo: string): Record<string, string> {
@@ -69,6 +71,7 @@ for (const lang of LANGS) {
     }
 
     test('--version, then init lists and changes nothing, init --yes --ci sets up, uninstall --yes leaves the same files', { timeout: 300_000 }, () => {
+      if (isCi) assert.ok(hasClaude, 'CI=true, but Claude Code\'s command line (claude) was not found: the MCP setting would go unchecked')
       assert.match(pm('--version').stdout.trim(), /^\d+\.\d+\.\d+$/)
       const before = snapshot(home, repo)
       const dry = pm('init', '--ci')
