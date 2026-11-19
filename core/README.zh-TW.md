@@ -2,9 +2,9 @@
 
 [English](README.md)
 
-給 AI 寫程式用的 PM：一份交辦清單、結案和 push 之前的驗收檢查，以及一張看得到每個 Session 進度的看板。它是一個 MCP server，Claude Code（之後還有其他 AI 寫程式工具）都能用。
+給 AI 寫程式用的 PM：一份交辦清單、結案和 push 之前的驗收檢查，以及一張看得到每個 Session 進度的看板。它是一個 MCP server（MCP 是 AI 工具接上額外工具的標準方式）。
 
-1.0 版會幫你設定 **Claude Code 的命令列版**。不需要 Node.js：下載一個程式，執行一次就好。
+1.0 版只幫你設定、也只實際測過 **Claude Code 的命令列版**。其他支援 MCP 的 AI 工具也許接得上，但都還沒有實際試過。不需要 Node.js：下載一個程式，執行一次就好。
 
 ## 安裝
 
@@ -48,15 +48,17 @@
 
 ## 會改哪些東西
 
-- Claude Code 的 MCP 設定（`claude mcp add --scope user project-pm`），以及 `~/.claude/settings.json` 裡的 hook。
+- Claude Code 的 MCP 設定（`claude mcp add --scope user project-pm`），以及 `~/.claude/settings.json` 裡的 hook（hook 是 Claude Code 在固定時機自動執行的指令，例如你送出訊息時；這幾個是讓看板知道每個 Session 做到哪裡）。
 - 專案 `AGENTS.md` 的一個段落；有 `CLAUDE.md` 時，在它開頭加一行 `@AGENTS.md`。
 - Skill：`~/.claude/skills/project-pm/SKILL.md`。
-- git 的 `pre-push` hook：commit 驗收過才能 push。`git pm skip "<理由>"` 可以明確略過這一次，理由會記在看板上。
+- git 的 `pre-push` hook（每次 `git push` 之前 git 會先執行的檢查）：commit 驗收過才能 push。`git pm skip "<理由>"` 可以明確略過這一次，理由會記在看板上。
 - 選填（`--ci`）：`.github/workflows/project-pm-qa.yml`。
 
 每一項都記在 `~/.project-pm/install-log.json`。
 
 ## 移除
+
+請在專案的資料夾裡執行，也就是當初執行 `init` 的那個資料夾：
 
 ```
 ~/.project-pm/bin/project-pm-1.0.0 uninstall --yes
@@ -76,4 +78,4 @@ npx -y project-pm@1.0.0 init
 
 - 程式沒有程式碼簽章（見上面）。Windows 開著「智慧型應用程式控制」時，請改用 npm 版。
 - Mac 的放行步驟沒有在實機驗證過。Mac 版程式本身有在 GitHub 的 Mac 機器上建置並跑過測試。
-- `init` 只設定 Claude Code 的命令列版，其他 AI 工具在之後的版本支援。
+- 只實際測過 Claude Code 的命令列版。Codex、GitHub Copilot、Antigravity、Cursor、Devin 等其他 AI 工具都還沒有試過，`init` 也不會幫它們設定；之後的版本才會支援。

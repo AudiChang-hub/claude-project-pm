@@ -2,9 +2,9 @@
 
 [中文說明](README.zh-TW.md)
 
-A PM for AI coding sessions: a list of the work you asked for, a QA check before work closes and before it is pushed, and a board of where every session stands. It runs as an MCP server, so Claude Code (and, later, other AI coding tools) can use it.
+A PM for AI coding sessions: a list of the work you asked for, a QA check before work closes and before it is pushed, and a board of where every session stands. It runs as an MCP server (MCP is the standard way AI tools plug in extra tools like this one).
 
-Version 1.0 sets up **Claude Code's command line** for you. It needs no Node.js: you download one program and run it once.
+Version 1.0 sets up and has been tested with **Claude Code's command line only**. Other AI tools that speak MCP may be able to connect to it, but none of them has been tried yet. It needs no Node.js: you download one program and run it once.
 
 ## Install
 
@@ -48,15 +48,17 @@ In a terminal, go to your project's folder (a git repository) and run:
 
 ## What it changes
 
-- Claude Code's MCP setting (`claude mcp add --scope user project-pm`), and its hooks in `~/.claude/settings.json`.
+- Claude Code's MCP setting (`claude mcp add --scope user project-pm`), and its hooks in `~/.claude/settings.json` (a hook is a command Claude Code runs on its own at set moments, such as when you send a message; these ones tell the board where each session stands).
 - A section in your project's `AGENTS.md`, and `@AGENTS.md` at the top of `CLAUDE.md` if you have one.
 - The skill `~/.claude/skills/project-pm/SKILL.md`.
-- A git `pre-push` hook: a push waits until its commits are checked. `git pm skip "<reason>"` lets a push through on purpose; the reason shows on the board.
+- A git `pre-push` hook (a check git runs before every `git push`): a push waits until its commits are checked. `git pm skip "<reason>"` lets a push through on purpose; the reason shows on the board.
 - Optional (`--ci`): `.github/workflows/project-pm-qa.yml`.
 
 Every change is recorded in `~/.project-pm/install-log.json`.
 
 ## Uninstall
+
+Run it in your project's folder, the same one where you ran `init`:
 
 ```
 ~/.project-pm/bin/project-pm-1.0.0 uninstall --yes
@@ -76,4 +78,4 @@ The settings it writes start the server with `npx -y project-pm@1.0.0`.
 
 - The programs are not code-signed (see above). With Windows Smart App Control on, use the npm version.
 - The Mac steps to allow the program have not been checked on a real Mac. The Mac programs themselves are built and tested on GitHub's Mac machines.
-- `init` sets up Claude Code's command line only. Other AI tools come in later versions.
+- Only Claude Code's command line has been tested. Codex, GitHub Copilot, Antigravity, Cursor, Devin and other AI tools have not been tried at all, and `init` does not set them up; that comes in later versions.
