@@ -335,7 +335,7 @@ describe('deleting the running program once it ends (T-37 QA2 2)', () => {
     const bin = paths(w.env).bin
     mkdirSync(bin, { recursive: true })
     const file = join(bin, 'project-pm-1.0.0.exe')
-    copyFileSync(join(process.env.SystemRoot ?? 'C:\Windows', 'System32', 'PING.EXE'), file)
+    copyFileSync(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'PING.EXE'), file)
     running = spawn(file, ['-n', String(seconds + 1), '127.0.0.1'], { stdio: 'ignore', windowsHide: true })
 
     return { bin, file, ended: new Promise(resolve => running!.on('exit', resolve)) }
