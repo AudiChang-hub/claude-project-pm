@@ -1,7 +1,10 @@
 name: Core
 
-# The cross-platform core (core/, docs/design/v1-core.md): its tests on Windows, macOS and Linux on every pull
-# request. No AI model and no login are needed (D9). The plugin's own checks stay in ci.yml.
+# The cross-platform core (core/, docs/design/v1-core.md): on every pull request, on Windows, macOS and Linux, its
+# tests from the source, then the built program (the single executable) through the MCP protocol, real pushes past
+# the pre-push hook, and init / uninstall in an Acme repository with Claude Code's command line (design 8, ①). On
+# Linux, every step of the QA workflow template runs on an Acme demo project. No AI model and no login (D9). The
+# plugin's own checks stay in ci.yml.
 on:
   pull_request:
   push:
@@ -18,9 +21,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
+    env:
+      # The Claude Code version init is checked with; claude mcp add / get / remove need no login.
+      CLAUDE_CODE_VERSION: 2.1.326
     defaults:
       run:
+        shell: bash
         working-directory: core
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -28,9 +35,24 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 24
       - run: npm ci
       - name: Typecheck
         run: npm run typecheck
-      - name: Test
+      - name: Test the source
         run: npm test
+      - name: Build the bundle and the single executable
+        run: npm run build && npm run sea
+      - name: Install Claude Code's command line
+        run: npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+      - name: Test the built program
+        run: |
+          exe="$PWD/dist/project-pm"; [ -f "$exe.exe" ] && exe="$exe.exe"
+          "$exe" --version
+          PROJECT_PM_BIN="$exe" node --import tsx --test test/mcp.spec.ts test/prepush.spec.ts test/binary.spec.ts
+          PROJECT_PM_BIN="$PWD/dist/project-pm.cjs" node --import tsx --test test/binary.spec.ts
+      - name: Run the QA workflow template on the Acme demo
+        if: runner.os == 'Linux'
+        env:
+          PROJECT_PM_TEMPLATE_LIVE: '1'
+        run: node --import tsx --test test/ci-template-live.spec.ts
