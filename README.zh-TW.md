@@ -8,7 +8,7 @@
 **同時開很多個 Claude Code Session 和 Agent，你只跟一個 PM 說話，一件工作也不漏。**
 
 <p align="center">
-  <img src="docs/images/overview-zh-TW.png" alt="Project PM v0.8.0 一頁圖解：你只跟 PM 說話，PM 管看板和交辦清單，把工作交給 Session（要記憶、會追問、push 和 CI）或 Agent（做完就走、大量讀取、背景執行）。清單更新縮小 97%，看板輸出縮短最多 49%。Agent 在獨立 worktree 工作，PM 合併後才算完成，只能讀清單，也不會 push。" width="100%">
+  <img src="docs/images/overview-zh-TW.png" alt="Project PM v0.9.0 一頁圖解：你只跟 PM 說話，PM 管看板和交辦清單，把工作交給 Session 或 Agent。兩者都要過 QA 關卡：驗收條件、push 前派獨立驗收 Agent、沒通過不能結案、CI 擋真實資料（名單只放在 secret）。每次派工的實測成本（等值輸入 tokens）：1 小時內有活動的既有 Session 1.8 萬、唯讀 Agent 6 萬、新 Session 7 萬、喚醒閒置的大 Session 84 萬。Agent 在獨立 worktree 工作，也不會 push。" width="100%">
 </p>
 
 ## 解決什麼問題
@@ -33,23 +33,22 @@ Project PM 讓專案裡的一個 Session 擔任 PM。它即時掌握每個 Sessi
 3. 直接跟 PM 說話：「有沒有漏掉的工作？」「找出沒有頁面描述的頁面。」「哪些 Session 在等我回覆？」
 4. 保持更新。第三方 Plugin，Claude Code 不會自己更新：在終端機執行 `claude` → `/plugin` → **Marketplaces** → `claude-project-pm` → **Enable auto-update**，或手動執行 `claude plugin update project-pm@claude-project-pm`。
 
-## v0.8.0 亮點
+## v0.9.0 亮點
 
-- **PM 可以派工給 Agent。** 做完就結束的小事，交給背景 Agent，你照樣跟 PM 說話。之後還會追問、要 push、等 CI 或發布的工作，仍然交給 Session。看板上 Agent 和 Session 並列（Session 是 ●，Agent 是 ◆），看得到狀態、耗時和 token 用量。
-- **大幅省 token。** 交辦清單每次更新只回傳改到的那一項（實際清單從 10,354 字降到 278 字），看板縮短 37–49%，完整說明寫進詳細檔，在卡片上按「詳細」就能打開。
-- **預設就安全。**
-  - 會改檔案的 Agent 在自己的 git worktree 工作，不會動到你的工作目錄；不是 git repo 的專案，PM 不能開這種 Agent。
-  - 它的 commit 要等 PM 合併進你的分支才算完成。
-  - Agent 只能讀交辦清單、不能修改，也不會 push 或發布。
+- **QA 關卡。** 每個工作項目都有驗收條件。程式變更 push 前，PM 會派一個獨立的驗收 Agent，只給它 diff 和驗收條件；沒有 QA 通過（或附理由的略過），交辦清單不讓結案，驗收者也不能是負責人。看板會列出待 QA 和 QA 不通過的項目。
+- **額度優先派工。** 既有 Session 要 1 小時內有活動、還沒做很多輪，PM 才交給它（約 1.8 萬等值輸入 tokens）。喚醒閒置的大 Session 約要 84 萬，所以小事改開新 Session（7 萬）或 Agent（唯讀約 6 萬）。
+- **CI 擋真實資料。** CI 會用 repo secret `BLOCKED_TERMS`（一行一個詞）掃描所有追蹤的檔案，只印出檔名和行號，不印出詞本身。到 **Settings → Secrets and variables → Actions** 新增這個 secret 才會啟用；沒設定時這一步會略過。
 
-[發布說明](https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.8.0) · [CHANGELOG](CHANGELOG.md) · [Agent 怎麼運作](docs/design/agents.md)
+v0.8.0 加入了 Agent：在獨立 worktree 背景工作、PM 驗收合併後才算完成，交辦清單和看板的輸出也大幅縮短（[發布說明](https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.8.0)）。
+
+[CHANGELOG](CHANGELOG.md) · [QA 怎麼運作](docs/design/qa.md) · [Agent 怎麼運作](docs/design/agents.md)
 
 ## PM 幫你守住什麼
 
 - **等你回覆的排最前面**，附上原本的問題。
 - **CI 要 GitHub 說通過才算**：PM 用 `gh` 查實際結果。
 - **沒上線就不算完成**：有沒有 commit、push 由 git 判斷，有沒有發布看 Session 的回報。
-- **沒做完的工作不能結案**，除非你明確同意。
+- **沒做完、沒驗收的工作不能結案**，除非你明確同意。
 
 <details>
 <summary><b>看看板長什麼樣</b>（示範資料）</summary>

@@ -1,14 +1,17 @@
 <!doctype html>
 <!--
-  The v0.8.0 one-page overview at the top of the READMEs, as a static page to capture.
-  Rebuilt from the design canvas "Project PM v0.8.0 一頁圖解"; layout and colors as designed.
+  The v0.9.0 one-page overview at the top of the READMEs, as a static page to capture.
+  Built on the v0.8.0 design canvas "Project PM v0.8.0 一頁圖解", with the QA layer (v0.9.0) added
+  below the sessions and agents.
 
   Views:  overview.html?lang=en      docs/images/overview.png
           overview.html?lang=zh-TW   docs/images/overview-zh-TW.png
   Capture: pwsh docs/demo/capture.ps1 (see docs/demo/README.md)
 
-  Every figure is from CHANGELOG [0.8.0] or docs/design/agents.md, except the 37 s run, which is
-  one measured hand-off (2026-11-18, the agent that wrote commit 6f99311).
+  The four costs are the T-30 quota measurements (CHANGELOG Unreleased, PM rule 10), in
+  input-equivalent tokens: an open session active in the last hour 18k, a read-only Explore agent 60k,
+  a new session 70k, waking a large idle session (a 650k context) 840k. The QA layer is
+  docs/design/qa.md.
 -->
 <html lang="en">
 <head>
@@ -23,6 +26,7 @@
     --bg: #0e1322; --panel: #182038; --line: #3a4565; --ink: #eef1f8; --ink-2: #b7bfd3; --ink-3: #8e97ae;
     --blue: #6aa8ff; --blue-bg: #142443; --blue-chip: #1e3460;
     --gold: #ffd84a; --gold-bg: #2a2610; --gold-chip: #3d3712;
+    --green: #5ee0a8; --green-bg: #0f2a22; --green-chip: #164034; --red: #ff8f7a;
     --sans: "Inter", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
     --num: "Space Grotesk", var(--sans);
   }
@@ -70,6 +74,26 @@
   .agent .chips > span { background: var(--gold-chip); }
   .note { justify-content: center; gap: 12px; font-size: 22px; color: var(--ink-2); }
 
+  /* The QA layer: both kinds of work meet at one gate before anything counts as done. */
+  .merge { display: flex; width: 760px; height: 22px; }
+  .merge i { flex: 1; }
+  .merge i:first-child { border-bottom: 4px solid var(--blue); border-left: 4px solid var(--blue); border-bottom-left-radius: 18px; }
+  .merge i:last-child { border-bottom: 4px solid var(--gold); border-right: 4px solid var(--gold); border-bottom-right-radius: 18px; }
+  .stem.qa { background: var(--green); height: 30px; }
+  .qa-gate { width: 100%; background: var(--green-bg); border: 3px solid var(--green); border-radius: 22px; padding: 26px 28px 28px; display: flex; flex-direction: column; gap: 22px; }
+  .qa-gate .title { gap: 14px; font-size: 32px; font-weight: 900; }
+  .qa-gate .title small { font-size: 20px; font-weight: 500; color: var(--ink-2); margin-left: 6px; }
+  .steps { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr 20px 1fr; align-items: stretch; gap: 10px; }
+  .step { background: var(--green-chip); border-radius: 16px; padding: 18px 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+  .step b { font-size: 21px; font-weight: 700; line-height: 1.3; }
+  .step p { margin: 0; font-size: 17px; line-height: 1.35; color: var(--ink-2); }
+  .step.ci { background: transparent; border: 2px dashed rgba(94, 224, 168, .55); }
+  .arrow { align-self: center; color: var(--green); font: 700 28px/1 "Inter", sans-serif; }
+  .costs { display: flex; flex-direction: column; gap: 16px; }
+  .costs h2 { margin: 0; font-size: 22px; font-weight: 700; color: var(--ink-2); }
+  .stat.hot b { color: var(--red); }
+  .stat.hot .tag { color: var(--red); border-color: rgba(255, 143, 122, .45); }
+
   .four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
   .stat { background: var(--panel); border-radius: 20px; padding: 26px 22px; display: flex; flex-direction: column; gap: 10px; }
   .stat b { font: 700 52px/1 var(--num); color: var(--gold); letter-spacing: -.01em; }
@@ -98,11 +122,20 @@ const COPY = {
     agent: ['One-off', 'Read-heavy', 'Background'],
     noteSession: 'One-line report + detail file',
     noteAgent: 'Own worktree → PM review → merge',
+    qaTitle: 'QA gate',
+    qaSub: 'nothing is done until it passes',
+    qa: [
+      ['Acceptance criteria', 'Written with each work item'],
+      ['Independent QA agent', 'Before each push; sees only the diff'],
+      ['No pass, no close', 'The ledger refuses to close it'],
+      ['CI blocks real data', 'The list stays in a secret'],
+    ],
+    costsTitle: 'Quota first · cost per hand-off, input-equivalent tokens',
     stats: [
-      ['−97%', 'Ledger updates<br>10,354 → 278 chars'],
-      ['−49%', 'Board output<br>37–49% shorter'],
-      ['37 s', 'A small task, from<br>hand-off to report', 'measured'],
-      ['17 s', 'A redirect reaches<br>a running agent', 'measured'],
+      ['18k', 'Open session,<br>active in the last hour', 'measured'],
+      ['60k', 'Read-only<br>Explore agent', 'measured'],
+      ['70k', 'New<br>session', 'measured'],
+      ['840k', 'Waking a large<br>idle session', 'measured'],
     ],
     guards: [
       ['No collisions', 'Each agent in its own worktree'],
@@ -110,7 +143,7 @@ const COPY = {
       ['Ledger locked', 'Agents can only read it'],
       ['No pushing', 'Agents never push or release'],
     ],
-    foot: 'Small task → an open session　·　Long work → a session　·　One-off → an agent',
+    foot: 'Active in the last hour → that session　·　Else → a new session or an agent',
   },
   'zh-TW': {
     title: '你只跟 PM 說話',
@@ -120,11 +153,20 @@ const COPY = {
     agent: ['做完就走', '大量讀取', '背景執行'],
     noteSession: '一行回報＋詳細檔',
     noteAgent: '獨立 worktree → PM 驗收 → 合併',
+    qaTitle: 'QA 關卡',
+    qaSub: '沒通過就不算完成',
+    qa: [
+      ['驗收條件', '登記工作時一起寫'],
+      ['獨立驗收 Agent', 'push 前派出，只看 diff'],
+      ['沒通過不能結案', '交辦清單拒絕結案'],
+      ['CI 擋真實資料', '名單只放在 secret'],
+    ],
+    costsTitle: '額度優先 · 每次派工的成本（等值輸入 tokens）',
     stats: [
-      ['−97%', '清單更新<br>10,354 → 278 字'],
-      ['−49%', '看板輸出<br>縮短 37–49%'],
-      ['37 s', '小事交給 Agent<br>派工到回報', '實測'],
-      ['17 s', '中途改方向<br>不用重派', '實測'],
+      ['1.8 萬', '1 小時內有活動的<br>既有 Session', '實測'],
+      ['6 萬', '唯讀的<br>Explore Agent', '實測'],
+      ['7 萬', '開一個<br>新 Session', '實測'],
+      ['84 萬', '喚醒閒置的<br>大 Session', '實測'],
     ],
     guards: [
       ['各改各的', 'worktree 隔離'],
@@ -132,7 +174,7 @@ const COPY = {
       ['清單鎖定', 'Agent 只能讀'],
       ['公開等你', 'Agent 不 push、不發布'],
     ],
-    foot: '小事 → 已開著的 Session　·　長期工作 → Session　·　做完就走 → Agent',
+    foot: '1 小時內有活動 → 交給它　·　否則 → 開新 Session 或 Agent',
   },
 }
 const lang = new URLSearchParams(location.search).get('lang') === 'zh-TW' ? 'zh-TW' : 'en'
@@ -147,11 +189,18 @@ const ICON = {
   clipboard: '<rect x="5" y="4" width="14" height="17" rx="2"></rect><path d="M9 3h6v3H9z"></path><path d="M9 11h6M9 15h4"></path>',
   up: '<path d="M12 19V5M5 12l7-7 7 7"></path>',
   branch: '<path d="M6 3v12"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path>',
+  shield: '<path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"></path><path d="m8.5 12 2.5 2.5 4.5-5"></path>',
+  qa: [
+    '<rect x="5" y="4" width="14" height="17" rx="2"></rect><path d="M9 3h6v3H9z"></path><path d="m9 13 2 2 4-4"></path>',
+    '<circle cx="11" cy="11" r="6"></circle><path d="m20 20-4.5-4.5"></path>',
+    '<rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path>',
+    '<path d="M3 5h18M3 12h18M3 19h18"></path><path d="M14 8l6 8M20 8l-6 8"></path>',
+  ],
   stats: [
-    '<path d="M8 6h13M8 12h13M8 18h13"></path><path d="M3 6h.01M3 12h.01M3 18h.01"></path>',
-    '<rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 10h18M9 10v10"></path>',
-    '<circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l2.5 2.5M9 2h6"></path>',
-    '<path d="M3 12h6l3-7 3 14 3-7h3"></path>',
+    '<circle cx="12" cy="12" r="3"></circle><circle cx="12" cy="12" r="8"></circle>',
+    '<path d="M12 4 20 12 12 20 4 12z"></path>',
+    '<circle cx="12" cy="12" r="8"></circle><path d="M12 8v8M8 12h8"></path>',
+    '<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"></path><circle cx="12" cy="12" r="3.5"></circle>',
   ],
   guards: [
     '<rect x="3" y="3" width="8" height="8" rx="1.5"></rect><rect x="13" y="13" width="8" height="8" rx="1.5"></rect><path d="M11 7h4a2 2 0 0 1 2 2v4"></path>',
@@ -163,7 +212,7 @@ const ICON = {
 document.getElementById('poster').innerHTML = `
   <div class="row head">
     <div>
-      <div class="eyebrow">PROJECT PM · v0.8.0</div>
+      <div class="eyebrow">PROJECT PM · v0.9.0</div>
       <h1>${c.title}</h1>
     </div>
     <div class="row legend"><span><i class="dot"></i>Session</span><span><i class="diamond"></i>Agent</span></div>
@@ -182,9 +231,18 @@ document.getElementById('poster').innerHTML = `
       <div class="row note">${svg(34, '#6aa8ff', 2, ICON.up)}${c.noteSession}</div>
       <div class="row note">${svg(34, '#ffd84a', 2, ICON.branch)}${c.noteAgent}</div>
     </div>
+    <div class="merge" style="margin-top:14px"><i></i><i></i></div>
+    <div class="stem qa"></div>
+    <div class="qa-gate">
+      <div class="row title">${svg(40, '#5ee0a8', 2, ICON.shield)}${c.qaTitle}<small>${c.qaSub}</small></div>
+      <div class="steps">${c.qa.map(([b, t], i) => `${i === 3 ? '<span></span>' : i ? '<span class="arrow">→</span>' : ''}<div class="step${i === 3 ? ' ci' : ''}">${svg(40, '#5ee0a8', 1.8, ICON.qa[i])}<b>${b}</b><p>${t}</p></div>`).join('')}</div>
+    </div>
   </div>
 
-  <div class="four">${c.stats.map(([n, t, tag], i) => `<div class="stat"><div class="top">${svg(44, '#ffd84a', 1.8, ICON.stats[i])}${tag ? `<span class="tag">${tag}</span>` : ''}</div><b>${n}</b><p>${t}</p></div>`).join('')}</div>
+  <div class="costs">
+    <h2>${dot(c.costsTitle)}</h2>
+    <div class="four">${c.stats.map(([n, t, tag], i) => `<div class="stat${i === 3 ? ' hot' : ''}"><div class="top">${svg(44, i === 3 ? '#ff8f7a' : '#ffd84a', 1.8, ICON.stats[i])}${tag ? `<span class="tag">${tag}</span>` : ''}</div><b>${n}</b><p>${t}</p></div>`).join('')}</div>
+  </div>
 
   <div class="four">${c.guards.map(([b, t], i) => `<div class="guard">${svg(48, '#eef1f8', 1.8, ICON.guards[i])}<b>${b}</b><p>${t}</p></div>`).join('')}</div>
 

@@ -13,8 +13,8 @@ $demo = 'file:///' + ($root -replace '\\', '/') + '/docs/demo'
 # Shots are transparent outside their rounded corners, so GitHub's light or dark page shows through;
 # docs/demo/README.md crops them to their content.
 $shots = @(
-  @{ Name = 'overview.png'; Page = 'overview.html'; Query = 'lang=en'; Size = '1200,1700'; Transparent = $true },
-  @{ Name = 'overview-zh-TW.png'; Page = 'overview.html'; Query = 'lang=zh-TW'; Size = '1200,1700'; Transparent = $true },
+  @{ Name = 'overview.png'; Page = 'overview.html'; Query = 'lang=en'; Size = '1200,2200'; Transparent = $true },
+  @{ Name = 'overview-zh-TW.png'; Page = 'overview.html'; Query = 'lang=zh-TW'; Size = '1200,2200'; Transparent = $true },
   @{ Name = 'board-light.png'; Page = 'board.html'; Query = 'lang=en&theme=light'; Size = '504,2200'; Transparent = $true },
   @{ Name = 'board-dark.png'; Page = 'board.html'; Query = 'lang=en&theme=dark'; Size = '504,2200'; Transparent = $true },
   @{ Name = 'board-light-zh-TW.png'; Page = 'board.html'; Query = 'lang=zh-TW&theme=light'; Size = '504,2200'; Transparent = $true },

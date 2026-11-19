@@ -8,7 +8,7 @@
 **Run many Claude Code sessions and agents at once. You talk to one PM, and nothing slips.**
 
 <p align="center">
-  <img src="docs/images/overview.png" alt="Project PM v0.8.0 at a glance: you talk to the PM, which keeps a board and a ledger and hands work to sessions (for follow-ups, push and CI) or to agents (one-off, read-heavy, in the background). Ledger updates are 97% smaller, the board is up to 49% shorter. Agents work in their own worktree, count as done only once the PM merges them, can only read the ledger, and never push." width="100%">
+  <img src="docs/images/overview.png" alt="Project PM v0.9.0 at a glance: you talk to the PM, which keeps a board and a ledger and hands work to sessions or agents. Both pass a QA gate: acceptance criteria, an independent QA agent before each push, no close without a pass, and CI that blocks real data kept in a secret. Measured cost per hand-off in input-equivalent tokens: 18k for an open session active in the last hour, 60k for a read-only agent, 70k for a new session, 840k to wake a large idle one. Agents work in their own worktree and never push." width="100%">
 </p>
 
 ## Why
@@ -33,23 +33,22 @@ Needs the Claude Code desktop app (Code tab).
 3. Talk to the PM: *"Is anything slipping?"*, *"Find the pages with no meta description."*, *"Which sessions are waiting on me?"*
 4. Keep it updated. Claude Code doesn't update third-party plugins on its own: in a terminal, run `claude` → `/plugin` → **Marketplaces** → `claude-project-pm` → **Enable auto-update**, or update by hand with `claude plugin update project-pm@claude-project-pm`.
 
-## New in v0.8.0
+## New in v0.9.0
 
-- **The PM hands work to agents.** A small, self-contained job runs as a background agent while you keep talking to the PM. Work you'll follow up on, or that pushes, waits on CI or releases, still goes to a session. Agents sit on the board next to sessions (◆ where sessions have ●) with their state, time and token cost.
-- **Far fewer tokens.** A ledger change answers with just that item (10,354 → 278 characters on a real ledger), the board is 37–49% shorter, and full write-ups go to a detail file you open with **Detail** on a card.
-- **Safe by default.**
-  - An agent that may change files works in its own git worktree, never in your checkout. Outside a git repository, the PM can't start one.
-  - Its commit counts as done only once the PM has merged it into your branch.
-  - Agents can read the ledger but not change it, and never push or release.
+- **QA gate.** Each work item carries acceptance criteria. Before a code change is pushed, the PM sends an independent QA agent that sees only the diff and the criteria, and the ledger won't close an item without a QA pass (or a skip with its reason). Whoever checks it is never its owner. The board lists what awaits QA and what failed it.
+- **Quota-first hand-offs.** The PM reuses an open session only if it was active in the last hour and hasn't run many turns (about 18k input-equivalent tokens). Waking a large idle one costs about 840k, so a small thing goes to a new session (70k) or an agent (60k read-only) instead.
+- **CI blocks real data.** CI scans every tracked file for the terms in your `BLOCKED_TERMS` repo secret (one per line) and prints only the file and line, never the term. Add the secret under **Settings → Secrets and variables → Actions** to turn it on; without it the step is skipped.
 
-[Release notes](https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.8.0) · [CHANGELOG](CHANGELOG.md) · [How agents work](docs/design/agents.md)
+v0.8.0 brought agents: background work in its own worktree, merged only after the PM reviews it, with far shorter ledger and board output ([release notes](https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.8.0)).
+
+[CHANGELOG](CHANGELOG.md) · [How QA works](docs/design/qa.md) · [How agents work](docs/design/agents.md)
 
 ## What the PM guards
 
 - **Waiting on you comes first**, with the question quoted.
 - **CI isn't done until GitHub says so**: the PM checks the run with `gh`.
 - **Not shipped isn't done**: git decides what is committed and pushed, and a session's report says what is released.
-- **The ledger won't close unfinished work** unless you say so.
+- **The ledger won't close unfinished or unchecked work** unless you say so.
 
 <details>
 <summary><b>See the board</b> (demo data)</summary>
