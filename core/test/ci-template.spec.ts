@@ -135,17 +135,17 @@ for (const lang of LANGS) {
     })
 
     test('a private word is held and located, and never printed', () => {
-      const dir = project({ 'README.md': '# Acme Shop\n', 'notes/customers.md': 'Acme customers\nCall GLOBEX Corp on Monday\n' })
-      const out = runStep(step(ct('ci.terms.step')), dir, { BLOCKED_TERMS: '  Globex Corp \r\n\r\nInitech\n' })
+      const dir = project({ 'README.md': '# Acme Shop\n', 'notes/customers.md': 'Acme customers\nCall ACME VIP CLIENT on Monday\n' })
+      const out = runStep(step(ct('ci.terms.step')), dir, { BLOCKED_TERMS: '  Acme VIP Client \r\n\r\nAcme Partner Zeta\n' })
       assert.equal(out.code, 1)
       assert.ok(out.stdout.includes(`::error file=notes/customers.md,line=2,title=${ct('ci.terms.step')}::${ct('ci.terms.hit')}`), out.stdout)
       assert.ok(out.summary.includes(ct('ci.terms.failed').replace('%s', '1')), out.summary)
-      for (const said of [out.stdout, out.stderr, out.summary]) assert.ok(!/globex|initech/i.test(said))
+      for (const said of [out.stdout, out.stderr, out.summary]) assert.ok(!/acme vip client|acme partner zeta/i.test(said))
     })
 
     test('no private word, or no list: the step passes or says it was skipped', () => {
       const dir = project({ 'README.md': '# Acme Shop\n' })
-      const clean = runStep(step(ct('ci.terms.step')), dir, { BLOCKED_TERMS: 'Globex Corp\n' })
+      const clean = runStep(step(ct('ci.terms.step')), dir, { BLOCKED_TERMS: 'Acme VIP Client\n' })
       assert.equal(clean.code, 0, clean.stderr)
       assert.ok(clean.summary.includes(ct('ci.terms.passed')))
       const unset = runStep(step(ct('ci.terms.step')), dir, { BLOCKED_TERMS: '' })
