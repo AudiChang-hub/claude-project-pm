@@ -314,7 +314,7 @@ describe('how Claude Code starts the server from npm', () => {
   test('npx goes through cmd /c on Windows only; the single executable as it is', () => {
     assert.deepEqual(mcpLauncher(['npx', '-y', 'project-pm@1.0.0'], 'win32'), ['cmd', '/c', 'npx', '-y', 'project-pm@1.0.0'])
     assert.deepEqual(mcpLauncher(['npx', '-y', 'project-pm@1.0.0'], 'linux'), ['npx', '-y', 'project-pm@1.0.0'])
-    assert.deepEqual(mcpLauncher(['C:\Acme\project-pm-1.0.0.exe'], 'win32'), ['C:\Acme\project-pm-1.0.0.exe'])
+    assert.deepEqual(mcpLauncher(['C:\\Acme\\project-pm-1.0.0.exe'], 'win32'), ['C:\\Acme\\project-pm-1.0.0.exe'])
   })
 })
 

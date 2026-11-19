@@ -26,6 +26,37 @@ describe('guidelines named by the project', () => {
   afterEach(() => w.done())
   const aim = (guidelines: string) => writeFileSync(join(w.repo, '.project-pm.json'), JSON.stringify({ guidelines }))
 
+  /**
+   * A file link. Only Windows may refuse one (it needs Developer Mode or admin rights there): then there is nothing to
+   * test. Linux and macOS always can, so there a failure to make one fails the test instead of skipping it.
+   */
+  const fileLink = (target: string, link: string, t: { skip: (why: string) => void }): boolean => {
+    try {
+      symlinkSync(target, link, 'file')
+
+      return true
+    } catch (err) {
+      if (process.platform !== 'win32') throw err
+      t.skip('this Windows user cannot make file links (no Developer Mode); Linux and macOS CI run it')
+
+      return false
+    }
+  }
+
+  /** A folder link: a junction on Windows (no admin rights needed), a symbolic link elsewhere; only Windows may refuse one. */
+  const folderLink = (target: string, link: string, t: { skip: (why: string) => void }): boolean => {
+    try {
+      symlinkSync(target, link, 'junction')
+
+      return true
+    } catch (err) {
+      if (process.platform !== 'win32') throw err
+      t.skip('this Windows user cannot make links here; Linux and macOS CI run it')
+
+      return false
+    }
+  }
+
   test('a path outside the repository is refused, written the Windows way or the POSIX way', () => {
     for (const path of [
       '../acme-secret.txt',
@@ -66,34 +97,11 @@ describe('guidelines named by the project', () => {
     // A folder link: a junction on Windows (no admin rights needed), a symbolic link elsewhere.
     mkdirSync(join(w.root, 'acme-private'))
     writeFileSync(join(w.root, 'acme-private', 'rules.md'), 'ACME-SECRET-TOKEN\n')
-    try {
-      symlinkSync(join(w.root, 'acme-private'), join(w.repo, 'docs'), 'junction')
-    } catch {
-      t.skip('this system does not let this user make links')
-
-      return
-    }
+    if (!folderLink(join(w.root, 'acme-private'), join(w.repo, 'docs'), t)) return
     aim('docs/rules.md')
     const found = await readGuidelines(ref, w.env)
     assert.ok(!found || !('text' in found) || !found.text.includes('ACME-SECRET'))
   })
-
-  /**
-   * A file link. Only Windows may refuse one (it needs Developer Mode or admin rights there): then there is nothing to
-   * test. Linux and macOS always can, so there a failure to make one fails the test instead of skipping it.
-   */
-  const fileLink = (target: string, link: string, t: { skip: (why: string) => void }): boolean => {
-    try {
-      symlinkSync(target, link, 'file')
-
-      return true
-    } catch (err) {
-      if (process.platform !== 'win32') throw err
-      t.skip('this Windows user cannot make file links (no Developer Mode); Linux and macOS CI run it')
-
-      return false
-    }
-  }
 
   test('a link to a single file outside the repository is refused, even when the link itself is in git (T-37 QA2 6)', async t => {
     if (!fileLink(join(w.root, 'acme-secret.txt'), join(w.repo, 'RULES.md'), t)) return
@@ -114,19 +122,25 @@ describe('guidelines named by the project', () => {
     assert.ok(!found || !('text' in found), found && 'text' in found ? found.text : '')
   })
 
+  test('a chain of committed links to an untracked file is refused: RULES.md -> a.md -> .env (T-37 QA4 2)', async t => {
+    writeFileSync(join(w.repo, '.env'), 'ACME_API_KEY=ACME-SECRET-TOKEN\n')
+    if (!fileLink('.env', join(w.repo, 'a.md'), t)) return
+    if (!fileLink('a.md', join(w.repo, 'RULES.md'), t)) return
+    git(w.repo, 'add', 'RULES.md', 'a.md')
+    git(w.repo, 'commit', '-q', '-m', 'Acme rules')
+    assert.equal(git(w.repo, 'ls-files', '--', '.env'), '')
+    aim('RULES.md')
+    const found = await readGuidelines(ref, w.env)
+    assert.ok(!found || !('text' in found), found && 'text' in found ? found.text : '')
+  })
+
   test('a tracked name whose real file, through a folder link, is one git does not track is refused (T-37 QA3 1)', async t => {
     // The same hole on any system: a folder link (a junction on Windows) to an ignored folder, and an index entry for the
     // name, as a commit would leave it. The name is tracked; the file read through it is not.
     writeFileSync(join(w.repo, '.gitignore'), 'private/\n')
     mkdirSync(join(w.repo, 'private'))
     writeFileSync(join(w.repo, 'private', 'rules.md'), 'ACME-SECRET-TOKEN\n')
-    try {
-      symlinkSync(join(w.repo, 'private'), join(w.repo, 'docs'), 'junction')
-    } catch {
-      t.skip('this system does not let this user make links')
-
-      return
-    }
+    if (!folderLink(join(w.repo, 'private'), join(w.repo, 'docs'), t)) return
     const blob = git(w.repo, 'hash-object', '-w', join(w.repo, 'private', 'rules.md'))
     git(w.repo, 'update-index', '--add', '--cacheinfo', `100644,${blob},docs/rules.md`)
     assert.equal(git(w.repo, 'ls-files', '--', 'docs/rules.md'), 'docs/rules.md')
