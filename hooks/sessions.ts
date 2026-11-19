@@ -50,22 +50,27 @@ export function isActive(status: Status): boolean {
 /**
  * The message a usage limit ends a turn with (the plan's 5-hour or weekly limit, extra usage run out), by its own
  * form: its first clause says the limit was hit. You've hit your 5-hour limit, Claude usage limit reached, You're out
- * of extra usage, 已達用量上限. Not words that only name a limit (stay under the weekly limit, the usage limit is
- * fine), nor any other error: a rate limit the engine retries, the context or output limit, an overloaded or failing API.
+ * of extra usage, 已達用量上限, 額度已用完: at the very start, before it only punctuation and spaces (never words: 為了避免
+ * usage limit exceeded is the model's). Not words that only name a limit (stay under the weekly limit, 已達到上限的檔案),
+ * nor another limit (the context, output or rate limit, a file limit, 上下文長度上限, 速率上限), nor any other error.
  */
+const LEAD = String.raw`^[\s\p{P}\p{S}]*`
+/** Only a usage limit's own words may stand between "hit your" and "limit": 5-hour, weekly, usage (not maximum file). */
+const KIND = String.raw`(?:5-hour|five-hour|weekly|daily|monthly|session|usage|plan|opus|sonnet)`
+/** Chinese: the usage or quota (用量, 使用量, 額度) must be named; the context and the rate never may. */
+const NOT_OTHER_ZH = String.raw`(?![^，,。；;]*(?:上下文|context|速率|rate))`
 const USAGE_LIMIT = new RegExp(
   [
-    /^\W*(?:you(?:'ve|’ve| have)?|claude(?:\s+ai)?)\s+(?:hit|reached)\s+(?:your|the)\s+(?:(?!context|token|size|output|length|rate)[\w-]+\s+){0,3}?limit\b/,
-    /^\W*(?:[\w-]+\s+){0,2}?(?:5-hour|five-hour|weekly|daily|monthly|session|usage|plan)\s+(?:usage\s+)?limit\s+(?:reached|exceeded|hit)\b/,
-    /^\W*you(?:'re|’re| are)\s+out of (?:extra\s+)?usage\b/,
-    /^(?:你)?(?:已經?)?(?:達到?|用完|用盡|超過)[^，,。]{0,6}?上限|^(?:你的)?額度(?:已經?)?(?:用完|用盡|耗盡)/,
-  ]
-    .map(r => r.source)
-    .join('|'),
-  'i',
+    String.raw`${LEAD}(?:you(?:'ve|’ve| have)?|claude(?:\s+ai)?)\s+(?:hit|reached)\s+(?:your|the)\s+(?:${KIND}\s+){0,2}limit\b`,
+    String.raw`${LEAD}(?:claude\s+(?:ai\s+)?)?(?:opus\s+|sonnet\s+)?(?:5-hour|five-hour|weekly|daily|monthly|session|usage|plan)\s+(?:usage\s+)?limit\s+(?:reached|exceeded|hit)\b`,
+    String.raw`${LEAD}you(?:'re|’re| are)\s+out of (?:extra\s+)?usage\b`,
+    String.raw`${LEAD}${NOT_OTHER_ZH}(?:你)?(?:已經?)?(?:達到?|用完|用盡|超過)了?(?:你的|本週|每週|每日|五小時|5\s?小時)?的?(?:用量|使用量|額度)(?:上限|限制)`,
+    String.raw`${LEAD}${NOT_OTHER_ZH}(?:你的)?(?:本週|每週|每日|五小時|5\s?小時)?的?(?:用量|使用量|額度)(?:已經?)?(?:(?:達到?|超過)了?(?:上限|限制)|用完|用盡|耗盡)`,
+  ].join('|'),
+  'iu',
 )
-/** A message's first clause: where a usage limit's message says what happened. */
-const FIRST_CLAUSE = /[.。!！·∙•|\n]/
+/** A message's first clause, cut at a comma or semicolon too: where a usage limit's message says what happened. */
+const FIRST_CLAUSE = /[.。!！·∙•|\n，,；;]/
 /** When the limit resets, as its words give it: resets 3pm (Asia/Taipei), will reset at 3pm, 將於 15:00 重置. */
 const RESETS = /\b(?:resets?|will reset)\s+(?:at\s+|on\s+|in\s+)?([^\n·∙•|]+)|(?:將於|將在|於)\s*([^，。,；;\n]+?)\s*(?:重置|恢復|重新計算)/i
 

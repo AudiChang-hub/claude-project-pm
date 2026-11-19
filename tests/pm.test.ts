@@ -3262,3 +3262,68 @@ for (const [lang, opts] of [['zh', ZH], ['en', { options: { language: 'en' } }]]
     await limitOnlySaid($, on, lang, 'transcript')
   })
 }
+
+// ── Chinese words that only name a limit, or another limit, are no usage limit (T-38 second QA) ──
+
+/**
+ * Last words before `[result] error` that are not a usage limit's message: the model's own words with a limit in
+ * them, in Chinese or with an English limit phrase inside a Chinese sentence, and Chinese errors of another limit.
+ */
+const NOT_USAGE_LIMIT_ZH = [
+  // The model's words: an English limit phrase after a Chinese lead.
+  '為了避免 usage limit exceeded，我把修改拆小',
+  '如果 you have hit your weekly limit 就等重置',
+  // The context limit and a rate limit, in Chinese.
+  '已達到上下文長度上限，請 /compact',
+  '超過速率上限，30 秒後重試',
+  // The model's words: a limit of something else.
+  '已達到上限的檔案我先跳過',
+] as const
+
+test('Chinese words that only name a limit, or another limit, are no usage limit; the usage limit itself still is (T-38)', () => {
+  expect(NOT_USAGE_LIMIT_ZH.filter(text => usageLimitOf(text) !== null)).toEqual([])
+  // An English limit of something else, in the form a usage limit's message takes.
+  expect(usageLimitOf('You have reached the maximum file limit')).toBe(null)
+  // The usage limit's own messages, Chinese and English, still are.
+  expect(usageLimitOf('已達用量上限，將於 15:00 重置。')?.resets).toBe('15:00')
+  expect(usageLimitOf('額度已用完，將於 15:00 恢復')?.resets).toBe('15:00')
+  expect(usageLimitOf('已達到使用量上限')).toEqual({ said: '已達到使用量上限', resets: null })
+  expect(usageLimitOf(HIT_LIMIT)?.resets).toBe('3pm (Asia/Taipei)')
+})
+
+for (const [lang, opts] of [['zh', ZH], ['en', { options: { language: 'en' } }]] as const) {
+  for (const said of NOT_USAGE_LIMIT_ZH) {
+    test(`"${said}" before an error is no usage limit on the board (${lang})`, opts, async ($, on) => {
+      const words = LIMIT_WORDS[lang]
+      const transcript = `[user] 繼續\n[assistant] ${said}\n[result] error (success), 3 turns`
+      const shown = await (await limitBoard($, on, transcript, [limitItem(1, 'local_open')])).board()
+      expect(shown).not.toMatch(words.any)
+      expect(shown).toMatch(words.ended)
+    })
+  }
+}
+
+test('a turn that ran out of turns is no usage limit, whatever its last words (T-38)', () => {
+  const at = new Date(NOW).toISOString()
+  const word = parseLastWord(`[user] 繼續\n[assistant] ${HIT_LIMIT}\n[result] error_max_turns (success), 30 turns`, at)
+  expect(word.isError).toBeUndefined()
+  const idle = { id: 'local_open', title: '商品列表頁', cwd: PROJECT, isRunning: false, lastActivityAt: at, isPinned: false, hasOpenPr: false }
+  expect(statusOf(idle, undefined, word, NOW + 60_000)).not.toBe('limit')
+})
+
+test('a work item keeps the owners it was handed over from, each once (T-38)', ZH, async ($, on) => {
+  const { files, ledger } = await limitBoard($, on, limitTranscript(HIT_LIMIT), [limitItem(1, 'local_open')])
+  const former = () => JSON.parse(files.get(PROJECT_FILE)!).ledger[0].formerOwners
+  // An update that keeps the owner records none.
+  await ledger({ action: 'update', id: 1, note: '進行中' })
+  expect(former()).toBeUndefined()
+  // A → B: A is recorded.
+  await ledger({ action: 'update', id: 1, owner: 'local_ask' })
+  expect(former()).toEqual(['local_open'])
+  // B → A: B is added, A is not recorded again.
+  await ledger({ action: 'update', id: 1, owner: 'local_open' })
+  expect(former()).toEqual(['local_open', 'local_ask'])
+  // A → B again: A moves to the end, still once.
+  await ledger({ action: 'update', id: 1, owner: 'local_ask' })
+  expect(former()).toEqual(['local_ask', 'local_open'])
+})
