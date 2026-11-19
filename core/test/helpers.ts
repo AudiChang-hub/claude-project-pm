@@ -2,7 +2,7 @@
  * A fake world for the core's tests: a home folder in the system's temp folder (the core's data and the mod's both
  * live under it), and the Acme demo shop as a git repository. Nothing touches the real ~/.project-pm or ~/.claude.
  */
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -43,7 +43,9 @@ export type World = {
 
 /** A fresh world: `lang` is the language the tools answer in. With `legacy`, the mod's folder exists (it is installed). */
 export function world(lang: Lang, { legacy = false } = {}): World {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'pm-core-')))
+  // The folder as git and the program spell it: the native realpath expands Windows' 8.3 names (C:\Users\RUNNER~1 on
+  // GitHub's runners), which the JavaScript one keeps.
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'pm-core-')))
   const home = join(root, 'home')
   const repo = join(root, 'acme-shop')
   mkdirSync(home, { recursive: true })
@@ -145,4 +147,13 @@ export function fakeClaude(home: string, rest: Run = hostWith(), { installed = t
 
     return null
   }
+}
+
+/** Windows' 8.3 short name for an existing path (C:\Users\RUNNER~1\…), or null where there is none or off Windows. */
+export function shortPath(path: string): string | null {
+  if (process.platform !== 'win32') return null
+  const out = spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"for %I in ("${path}") do @echo %~sI"`], { encoding: 'utf8', windowsHide: true, windowsVerbatimArguments: true })
+  const short = out.status === 0 ? out.stdout.trim() : ''
+
+  return short && !short.includes('"') ? short : null
 }

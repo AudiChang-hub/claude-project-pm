@@ -3,7 +3,7 @@
  * 2026-11-19; the folders swapped for the Acme demo's): what each writes to the session's record, and what it says.
  */
 import assert from 'node:assert/strict'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
@@ -13,7 +13,7 @@ import type { HookInput } from '../src/hook'
 import { loadActor } from '../src/store'
 import { boardTool, pmTool, reportTool } from '../src/tools'
 import type { World } from './helpers'
-import { LANGS, NOW, git, hostWith, world } from './helpers'
+import { LANGS, NOW, git, hostWith, shortPath, world } from './helpers'
 
 const SESSION = '1f0ba5e3-d73c-4a06-ab9f-283b7537d1be'
 const ID = `claude-code:${SESSION}`
@@ -64,6 +64,37 @@ for (const lang of LANGS) {
       await hook('UserPromptSubmit', { prompt: lang === 'en' ? 'Please update the guidelines: add rule 2' : '請改準則，加一條' })
       assert.equal(await hook('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: file } }), null)
       assert.equal(await hook('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: join(w.repo, 'coupon.js') } }), null)
+    })
+
+    test('the guidelines file is locked however its path is written: through a folder link, by its 8.3 name (T-37 Windows CI)', async t => {
+      await pmTool(w.ctx(), { action: 'claim' })
+      const name = 'Acme Development Guidelines.md'
+      writeFileSync(join(w.repo, name), '1. Tests first.\n')
+      git(w.repo, 'add', name)
+      writeFileSync(join(w.repo, '.project-pm.json'), JSON.stringify({ guidelines: name }))
+      const spellings: string[] = []
+      // The same folder through a link: a junction on Windows, a symbolic link elsewhere.
+      const alias = join(w.root, 'acme-alias')
+      try {
+        symlinkSync(w.repo, alias, 'junction')
+        spellings.push(join(alias, name))
+      } catch (err) {
+        if (process.platform !== 'win32') throw err
+      }
+      // Windows' short name for the same file, where the volume keeps 8.3 names (GitHub's runners do).
+      if (process.platform === 'win32') {
+        const short = shortPath(join(w.repo, name))
+        if (short && short !== join(w.repo, name)) spellings.push(short)
+      }
+      if (!spellings.length) return t.skip('this system offers no second spelling of the same file')
+      for (const file of spellings) {
+        const denied = (await hook('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: file } })) as { hookSpecificOutput?: { permissionDecision: string } } | null
+        assert.equal(denied?.hookSpecificOutput?.permissionDecision, 'deny', file)
+      }
+      // A file of the same name elsewhere is not the guidelines file.
+      mkdirSync(join(w.root, 'elsewhere'))
+      writeFileSync(join(w.root, 'elsewhere', name), 'other\n')
+      assert.equal(await hook('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: join(w.root, 'elsewhere', name) } }), null)
     })
 
     test('TaskCreate and TaskUpdate (Claude Code 2.1.326) and TodoWrite keep the task list', async () => {

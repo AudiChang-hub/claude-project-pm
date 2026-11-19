@@ -8,7 +8,7 @@
  */
 import { readFile, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import { MAX_CHARS, WRITING_TOOLS, asksForGuidelines, guidelinesPath, isSameFile } from '../../hooks/guidelines'
 import { t } from '../../hooks/messages'
@@ -202,11 +202,27 @@ async function preToolUse(id: string, ref: ProjectRef, input: HookInput, env: No
   const project = await loadProject(ref, env)
   if (!project.pmId) return null
   const found = await readGuidelines(ref, env, run)
-  if (!found || !isSameFile(found.file, target.replace(/\\/g, '/'))) return null
+  if (!found || !(await isGuidelinesFile(found.file, target, input.cwd || ref.cwd))) return null
   const actor = (await loadActor(id, env).catch(() => null)) as HookActor | null
   if (actor?.askedGuidelinesAt) return null
 
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: t('guidelines.locked', { file: found.file }) } }
+}
+
+/**
+ * Whether a tool's target is the guidelines file: written the same way, or the same file on disk however it is written
+ * (an 8.3 short name such as C:\Users\RUNNER~1, a folder link, a subst drive, a path relative to the session's folder).
+ * Git gives the repository's folder in one spelling and a tool may use another, so names alone let the lock be passed.
+ */
+async function isGuidelinesFile(guidelines: string, target: string, cwd: string): Promise<boolean> {
+  if (isSameFile(guidelines, target.replace(/\\/g, '/'))) return true
+  const where = resolve(cwd, target)
+  if (isSameFile(guidelines, where.replace(/\\/g, '/'))) return true
+  // Where each really is: a file not there yet is where its folder really is.
+  const real = async (path: string) => realpath(path).catch(() => realpath(dirname(path)).then(folder => join(folder, basename(path))).catch(() => null))
+  const [a, b] = await Promise.all([real(guidelines), real(where)])
+
+  return !!a && !!b && isSameFile(a, b)
 }
 
 /**
