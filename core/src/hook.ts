@@ -6,9 +6,9 @@
  * the guidelines file from being edited unless the person asked about the guidelines this turn. A hook never fails
  * the tool's turn: whatever goes wrong, it exits 0 and says nothing.
  */
-import { readFile } from 'node:fs/promises'
+import { readFile, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import { MAX_CHARS, WRITING_TOOLS, asksForGuidelines, guidelinesPath, isSameFile } from '../../hooks/guidelines'
 import { t } from '../../hooks/messages'
@@ -209,15 +209,45 @@ async function preToolUse(id: string, ref: ProjectRef, input: HookInput, env: No
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: t('guidelines.locked', { file: found.file }) } }
 }
 
-/** The development guidelines file: `guidelines` in the project's .project-pm.json, else in ~/.project-pm/config.json. */
+/**
+ * The guidelines file a project's .project-pm.json names, or null when it is not a plain path inside the repository.
+ * That file is committed with the code, so whoever can commit could aim it at ~/.aws/credentials and have it read
+ * into every turn: no absolute path (C:\, C:x, /, \, \\server), no ~, no .. anywhere, and the result inside `repo`.
+ */
+export function projectGuidelinesFile(value: string, repo: string): string | null {
+  const path = value.trim().replace(/^["']|["']$/g, '')
+  if (!path || path.startsWith('~') || /^[a-z]:/i.test(path) || /^[\\/]/.test(path) || isAbsolute(path)) return null
+  if (path.split(/[\\/]+/).includes('..')) return null
+  const file = resolve(repo, path)
+
+  return isInside(file, repo) ? file : null
+}
+
+function isInside(file: string, folder: string): boolean {
+  const rel = relative(resolve(folder), resolve(file))
+
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+/**
+ * The development guidelines file: `guidelines` in the project's .project-pm.json (a file inside the repository,
+ * where a link leads checked too), else in ~/.project-pm/config.json (the person's own: any path).
+ */
 export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = process.env): Promise<{ file: string; text: string; isClipped: boolean } | { file: string; error: string } | null> {
   const fromProject = await readJsonFile<{ guidelines?: unknown }>(join(ref.path, '.project-pm.json')).catch(() => null)
-  const fromUser = await readJsonFile<{ guidelines?: unknown }>(join(dataHome(env), 'config.json')).catch(() => null)
-  const path = typeof fromProject?.guidelines === 'string' ? fromProject.guidelines : typeof fromUser?.guidelines === 'string' ? fromUser.guidelines : ''
-  if (!path.trim()) return null
-  const file = guidelinesPath(path, homedir().replace(/\\/g, '/'), ref.path.replace(/\\/g, '/'))
+  let file: string | null = null
+  if (typeof fromProject?.guidelines === 'string' && fromProject.guidelines.trim()) {
+    const named = projectGuidelinesFile(fromProject.guidelines, ref.path)
+    // A link committed in the repository may lead anywhere: where it really goes must be inside too.
+    if (named && isInside(await realpath(named).catch(() => named), await realpath(ref.path).catch(() => ref.path))) file = named
+  }
+  if (!file) {
+    const fromUser = await readJsonFile<{ guidelines?: unknown }>(join(dataHome(env), 'config.json')).catch(() => null)
+    if (typeof fromUser?.guidelines === 'string' && fromUser.guidelines.trim()) file = guidelinesPath(fromUser.guidelines, homedir().replace(/\\/g, '/'), ref.path.replace(/\\/g, '/'))
+  }
+  if (!file) return null
   try {
-    const text = (await readFile(file, 'utf8')).replace(/^﻿/, '').trim()
+    const text = (await readFile(file, 'utf8')).replace(/^\uFEFF/, '').trim()
     if (!text) return { file, error: 'empty' }
 
     return text.length <= MAX_CHARS ? { file, text, isClipped: false } : { file, text: text.slice(0, MAX_CHARS), isClipped: true }
@@ -240,3 +270,4 @@ export async function hookMain(tool: string, event: string): Promise<number> {
 
   return 0
 }
+
