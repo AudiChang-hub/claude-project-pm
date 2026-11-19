@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Project PM</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to the board</a>
+    <header class="top">
+      <div class="top__inner">
+        <div class="brand" aria-hidden="true"><span class="brand__mark"></span>Project PM</div>
+        <div class="top__tools">
+          <label class="picker" hidden>
+            <span class="visually-hidden" data-t="project"></span>
+            <select id="project"></select>
+          </label>
+          <button type="button" class="theme" id="theme" aria-live="polite"></button>
+        </div>
+      </div>
+    </header>
+    <main id="main" class="page" tabindex="-1">
+      <section id="state" class="state" hidden aria-live="polite"></section>
+      <div id="board" hidden>
+        <section class="hero" aria-labelledby="name">
+          <p class="hero__eyebrow" id="path"></p>
+          <h1 class="hero__name" id="name"></h1>
+          <div class="hero__meta">
+            <div class="progress" id="progress" role="img"></div>
+            <p class="live" id="live"><span class="live__dot" aria-hidden="true"></span><span id="live-text"></span></p>
+          </div>
+          <p class="hero__pm" id="pm"></p>
+        </section>
+        <div class="grid">
+          <div class="grid__main">
+            <section class="block" aria-labelledby="attention-h">
+              <h2 class="block__title" id="attention-h"><span data-t="attention"></span><span class="count" id="attention-n"></span></h2>
+              <ul class="attention" id="attention"></ul>
+            </section>
+            <section class="block" aria-labelledby="items-h">
+              <div class="block__head">
+                <h2 class="block__title" id="items-h"><span data-t="items"></span><span class="count" id="items-n"></span></h2>
+                <label class="toggle"><input type="checkbox" id="done" /><span data-t="showDone"></span></label>
+              </div>
+              <ol class="items" id="items"></ol>
+            </section>
+          </div>
+          <aside class="grid__side">
+            <section class="block" aria-labelledby="sessions-h">
+              <h2 class="block__title" id="sessions-h"><span data-t="sessions"></span><span class="count" id="sessions-n"></span></h2>
+              <ul class="sessions" id="sessions"></ul>
+            </section>
+            <section class="block" id="agents-block" hidden aria-labelledby="agents-h">
+              <h2 class="block__title" id="agents-h"><span data-t="agents"></span></h2>
+              <ul class="sessions" id="agents"></ul>
+            </section>
+            <p class="readonly" data-t="readonly"></p>
+          </aside>
+        </div>
+      </div>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

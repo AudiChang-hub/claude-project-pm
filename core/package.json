@@ -17,9 +17,10 @@
   },
   "scripts": {
     "test": "node --import tsx --test \"test/*.spec.ts\"",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node scripts/web-assets.mjs && tsc --noEmit",
     "build": "node scripts/build.mjs",
-    "sea": "node scripts/sea.mjs"
+    "sea": "node scripts/sea.mjs",
+    "pretest": "node scripts/web-assets.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

@@ -6,3 +6,4 @@
 Thumbs.db
 core/node_modules/
 core/dist/
+core/src/web/assets.generated.ts
