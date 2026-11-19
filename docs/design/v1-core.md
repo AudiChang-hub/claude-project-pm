@@ -1,6 +1,6 @@
 # 設計：v1.0 跨平台核心 pm-core（T-34）
 
-狀態：已定案（2026-11-19）。使用者對第 9 節 D1～D13 的決定已寫進全文；寫入時發現的新問題列在 9.1 節，不影響已定案的結論。這份文件不改任何現有程式。
+狀態：已定案（2026-11-19）。使用者對第 9 節 D1～D13 的決定已寫進全文；寫入時發現的 Q1～Q4 也已定案（9.1 節）。這份文件不改任何現有程式。
 
 背景：使用者選定 A 案，核心做成 MCP server，各平台用轉接層接上。目標使用者是不熟軟體工程的 Vibe Coder，要讓他們做出的軟體在品質、測試、安全上有一定水準，而且不限 Claude 桌面版。
 
@@ -22,8 +22,8 @@
 | 多人協作 | v1.0 不同步，但工作項目先帶 `uid`、建立者、修改者、`rev`；v1.1 用 `gh` 同步到 GitHub Issues，預設關閉，上傳前掃描禁用詞（第 10 節） |
 | 舊資料 | 先擴充、後收斂：核心讀新舊兩處，過渡期同時寫回舊檔，桌面版 mod 不用同時改 |
 | 硬關卡在哪 | 在 git 和 CI，不在 AI 工具的 hook：pre-push 沒有 QA 通過就擋（可明確略過並留下紀錄），CI 跑測試、secret 掃描、真實資料掃描、套件安全檢查 |
-| 測試花費 | 不花錢：CI 只跑不需要 AI 模型的測試；需要模型的冒煙測試在發版前用使用者現有的訂閱在本機手動跑（D9） |
-| 分版 | ① v1.0：Claude Code CLI＋核心＋網頁看板＋hook 和 CI 範本＋單一執行檔；② v1.1：多人協作（主打）＋Codex、Copilot、Antigravity；③ v1.2：Cursor、Devin |
+| 測試花費 | 不花錢：CI 只跑不需要 AI 模型的測試；需要模型的冒煙測試在發版前用使用者的 Claude 訂閱在本機手動跑，只跑 Claude Code（D9、Q2） |
+| 分版 | ① v1.0：Claude Code CLI＋核心＋網頁看板＋hook 和 CI 範本＋單一執行檔；② v1.1：多人協作（主打）＋E2（桌面版 mod 改用核心）；③ v1.2：Codex、Copilot、Antigravity；④ v1.3：Cursor、Devin（③ ④ 未用 AI 實測，Q2） |
 
 ## 1. 架構
 
@@ -192,7 +192,7 @@ mod 現在就用相對路徑 import（`./qa`），所以 import `../core/...` �
 - **Session**：
   - stdio：大多數工具每個 Session 啟動一個 MCP 行程，核心在行程啟動時產生一個 actor id（`<工具>:<短亂數>`），整個連線都用它。
   - Streamable HTTP：用 `Mcp-Session-Id`。
-  - hook：Claude Code 的 hook 事件 JSON 帶 `session_id`、`cwd` [C3]，其他平台的 hook 也多半帶類似欄位（② ③ 開工時逐一查證）。hook 寫的回報用 `<工具>:<session_id>`。
+  - hook：Claude Code 的 hook 事件 JSON 帶 `session_id`、`cwd` [C3]，其他平台的 hook 也多半帶類似欄位（③ ④ 開工時逐一查證）。hook 寫的回報用 `<工具>:<session_id>`。
   - 問題：stdio 行程的 actor id 和 hook 的 `session_id` 對不起來。有兩個辦法，① 要先查證：(a) 工具啟動 MCP 行程時是否有環境變數帶 Session id（這次在 Claude Code 的 Bash 環境裡看到 `CLAUDE_CODE_SESSION_ID`，MCP 子行程有沒有還沒驗證）；(b) 沒有的話，`report` 工具接受選填的 `actor` 參數，AGENTS.md 段落請 AI 帶上 hook 給的 id。兩個都做不到時，看板把同一個資料夾、時間相近的兩個 actor 當成同一個 Session 顯示，並標「可能重複」。
 - **桌面版**：mod 繼續用 `get_session` 的 `local_…` id，並在呼叫核心時帶上，所以舊資料的負責人欄位不用改。
 - **PM**：專案檔記 `pmId`。PM 是「這個專案現在誰當 PM」，不是權限。核心不靠 PM 身分擋任何操作；「Agent 只能讀 ledger」這類限制由知道誰是 Agent 的轉接層執行（現在就是 `register.tsx:414` 在做）。
@@ -287,7 +287,7 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 | --- | --- | --- | --- |
 | E1（v1.0） | 讀：新路徑優先，沒有就讀舊路徑。寫：新路徑，**同時寫回舊路徑的 `projects/*.json`**（只寫舊格式有的欄位以外照抄，多的欄位舊 mod 會忽略） | 不改，照舊讀寫舊路徑 | 可以：舊路徑一直是完整的，移除核心就回到 v0.9 |
 | E2（v1.1） | 同 E1 | 改成透過核心的純函式讀寫新路徑，也照樣寫回舊路徑 | 可以：舊路徑仍完整 |
-| C1（v1.3 以後，所有使用中的 mod 都已更新） | 停止寫回舊路徑；仍會讀舊路徑（給沒遷移到的專案） | 只讀寫新路徑 | 要回去得先把新路徑複製回舊路徑（`project-pm export --legacy`） |
+| C1（v1.4 以後，所有使用中的 mod 都已更新） | 停止寫回舊路徑；仍會讀舊路徑（給沒遷移到的專案） | 只讀寫新路徑 | 要回去得先把新路徑複製回舊路徑（`project-pm export --legacy`） |
 | C2（再下一版） | 不再讀舊路徑；第一次啟動時若發現舊檔還有沒搬的專案，搬過去並在看板提示一次 | 同 C1 | 同 C1 |
 
 細節：
@@ -431,7 +431,7 @@ add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`
 
 ### 5.2 寫什麼
 
-| 項目 | Claude Code（① 版） | 其他工具（② ③ 版，開工時查證確切路徑） |
+| 項目 | Claude Code（① 版） | 其他工具（③ ④ 版，開工時查證確切路徑） |
 | --- | --- | --- |
 | MCP 設定 | `claude mcp add --scope user project-pm -- <執行檔的絕對路徑> mcp`（用官方指令，不直接改 JSON）[C1]。執行檔路徑是 `~/.project-pm/bin/project-pm-<版本>`，等於釘選版本；用 npm 安裝的開發者寫 `npx -y project-pm@<版本> mcp` | Codex：`~/.codex/config.toml` 的 `[mcp_servers.project-pm]` [X1]；Copilot CLI、Antigravity、Cursor、Devin 各自的設定檔 [H1][A1][U1][W1] |
 | 指示 | 專案的 `AGENTS.md` 段落；若專案有 `CLAUDE.md` 且沒有 `@AGENTS.md`，在 `CLAUDE.md` 開頭加一行 `@AGENTS.md`（Claude Code 有 CLAUDE.md 時不讀 AGENTS.md [C2]） | 同一份 `AGENTS.md` 段落；Antigravity 的 `.agents/rules` 要 frontmatter，Cursor 的 rules 要 `.mdc` [A2][U2]，只有在該工具不讀 AGENTS.md 時才另寫 |
@@ -469,8 +469,8 @@ add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`
 
 | 系統 | 使用者會看到 | 說明要教的 |
 | --- | --- | --- |
-| Windows | 瀏覽器下載時可能說「不常下載」；從檔案總管點兩下時，SmartScreen 跳出「Windows 已保護您的電腦」 | 下載時選「保留」；SmartScreen 視窗按「其他資訊」→「仍要執行」。從終端機執行不一定會跳，兩種情況都寫。開著「智慧型應用程式控制」（Smart App Control）的電腦可能直接擋下、沒有放行按鈕，實作時實測；真的擋下時，只能改用 npm 版本（要先裝 Node，和 D3 的目標相反，見 9.1 節 Q1） |
-| macOS | 「無法打開，因為 Apple 無法檢查是否包含惡意軟體」 | 系統設定 →「隱私權與安全性」→ 最下面的「仍要打開」；或在終端機執行 `xattr -d com.apple.quarantine <檔案>`，並用一句話說明這行在做什麼 |
+| Windows | 瀏覽器下載時可能說「不常下載」；從檔案總管點兩下時，SmartScreen 跳出「Windows 已保護您的電腦」 | 下載時選「保留」；SmartScreen 視窗按「其他資訊」→「仍要執行」。從終端機執行不一定會跳，兩種情況都寫。開著「智慧型應用程式控制」（Smart App Control）的電腦可能直接擋下、沒有放行按鈕。這列為已知限制，不申請簽章（9.1 節 Q1）；README 和 release 說明寫明：遇到這種情況改用 npm 版，要先裝 Node |
+| macOS | 「無法打開，因為 Apple 無法檢查是否包含惡意軟體」 | 系統設定 →「隱私權與安全性」→ 最下面的「仍要打開」；或在終端機執行 `xattr -d com.apple.quarantine <檔案>`，並用一句話說明這行在做什麼。這些步驟沒有在實機驗證過（沒有 Mac，9.1 節 Q3），release 說明照實標註 |
 | Linux | 沒有警告，但下載的檔案不能執行 | `chmod +x <檔案>` |
 
 說明的原則：先講為什麼會警告（我們沒有付費買簽章，不代表程式有問題），再講怎麼確認檔案是真的（只從官方 Releases 頁下載、可以比對 SHA256），最後才是放行步驟。不叫使用者關掉防毒或系統的安全功能。
@@ -478,7 +478,7 @@ add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`
 影響、驗證、回復：
 
 - 影響：改使用者的 AI 工具設定和專案的 AGENTS.md、CLAUDE.md、git hook、`.git/config` 的 alias `pm`；在 `~/.project-pm/bin/` 放一個執行檔。
-- 驗證：每個工具的 `init` → 檢查 → `uninstall` → 比對檔案和安裝前完全相同（含沒有 CLAUDE.md、已有 `@AGENTS.md`、已有別的 pre-push hook、已有別的 git alias `pm` 等情況）。用建置出來的單一執行檔跑，不是用原始碼跑。放行步驟（SmartScreen、Gatekeeper）在 CI 測不到，發版前在實機照安裝說明走一次。
+- 驗證：每個工具的 `init` → 檢查 → `uninstall` → 比對檔案和安裝前完全相同（含沒有 CLAUDE.md、已有 `@AGENTS.md`、已有別的 pre-push hook、已有別的 git alias `pm` 等情況）。用建置出來的單一執行檔跑，不是用原始碼跑。放行步驟在 CI 測不到：Windows（SmartScreen）發版前在實機照安裝說明走一次；macOS（Gatekeeper）沒有實機，不驗證，release 說明標「放行步驟未在實機驗證」（Q3）。
 - 回復：`project-pm uninstall`，依 `install-log.json` 還原；紀錄壞掉時，每個寫入都有標記，可以手動刪。
 
 ## 6. 品管關卡
@@ -565,7 +565,7 @@ add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`
 | --- | --- | --- | --- | --- | --- |
 | Claude Code | 桌面版 | 現有 mod（轉接層）＋核心的資料；E1 期間 mod 自己提供工具 | 4 | mod 面板 | 唯一有 Session 清單 API 的形態 |
 | Claude Code | CLI | 核心 MCP（stdio）＋`@AGENTS.md`＋Skill＋使用者層級 hooks；裝了 mod 的話，mod 的 hook 也能用（實測 Agent 派工、`tool.call` 在 CLI 會跑） | 3（第 4 層部分：核心的 actors 清單，沒有封存、開 Session） | 網頁看板；終端機面板未實測 | `-p` 模式不顯示面板 [C5] |
-| Codex | 桌面版（ChatGPT 桌面 App）＋IDE 擴充 | 核心 MCP（和 CLI 共用 `config.toml`）＋AGENTS.md＋Skill；桌面版的「設定 > Hooks」 | 2（桌面版的 hook 能用就是 3） | 網頁看板 | 桌面版讀 AGENTS.md、IDE 的 hooks 都未確認 [X2][X3]；② 開工時查 |
+| Codex | 桌面版（ChatGPT 桌面 App）＋IDE 擴充 | 核心 MCP（和 CLI 共用 `config.toml`）＋AGENTS.md＋Skill；桌面版的「設定 > Hooks」 | 2（桌面版的 hook 能用就是 3） | 網頁看板 | 桌面版讀 AGENTS.md、IDE 的 hooks 都未確認 [X2][X3]；③ 開工時查 |
 | Codex | CLI | 核心 MCP＋AGENTS.md＋Skill＋hooks（command 處理方式） | 3 | 網頁看板 | MCP 工具預設 60 秒逾時；`exec` 只載入受信任專案的 MCP [X1][X6]；Stop 只能叫它繼續 |
 | Antigravity | 桌面（App、IDE） | 核心 MCP＋AGENTS.md＋Skill＋hooks（6 個事件，只有 command） | 3 | 網頁看板 | 外掛沒有 UI 元件 [A6] |
 | Antigravity | CLI（`agy`） | 同上 | 3 | 網頁看板 | `-p` 遇到需要核准的工具會拒絕但 exit 0，CI 要檢查輸出內容 [A7] |
@@ -575,26 +575,26 @@ add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`
 | Cursor | 編輯器 | 核心 MCP＋AGENTS.md＋Skill＋hooks（18 個事件） | 3 | 網頁看板；可裝 Open VSX 擴充，面板能力未驗證 [U7] | stop 擋不了 [U3] |
 | Cursor | CLI（`agent`） | 核心 MCP（共用 `mcp.json`）＋AGENTS.md | 2（hooks 確認後是 3） | 網頁看板 | 只確認 workspaceOpen 會在 CLI 跑 [U3]；`-p` 沒有 `--force` 會拒絕 [U5] |
 | Devin（原 Windsurf） | 桌面 | 核心 MCP＋AGENTS.md＋Skill＋`.devin/hooks.v1.json` | 3 | 網頁看板 | Restricted Mode 下 hooks 不執行 [W1] |
-| Devin | CLI | 同桌面版（同一套 harness）[W1] | 3 | 網頁看板 | `-p` 的輸出格式未確認 [W6]；③ 開工時查 |
+| Devin | CLI | 同桌面版（同一套 harness）[W1] | 3 | 網頁看板 | `-p` 的輸出格式未確認 [W6]；④ 開工時查 |
 
 所有形態的硬關卡都一樣：pre-push＋CI（第 6 節）。
 
 ### 7.3 配備表（資料來源）
 
-給 README 的「支援平台」表用。列是功能，欄是平台；每格寫「v0.9.0 現況 → 目標（在哪一版達成）」。版本對應第 8 節：v1.0 是 ①，v1.1 是 ②（多人協作，以及遷移 E2：桌面版 mod 改用核心），v1.2 是 ③。
+給 README 的「支援平台」表用。列是功能，欄是平台；每格寫「v0.9.0 現況 → 目標（在哪一版達成）」。版本對應第 8 節（Q4 定案）：v1.0 是 ①，v1.1 是 ②（多人協作，以及遷移 E2：桌面版 mod 改用核心），v1.2 是 ③（Codex、Copilot、Antigravity），v1.3 是 ④（Cursor、Devin）。
 
-圖例：✅ 可用、◐ 部分、🗓 規劃中、— 不支援。「目標」都是計畫，各版做完、驗證過才能改成 ✅ 放進 README。
+圖例：✅ 可用、◐ 部分、🗓 規劃中、— 不支援。「目標」都是計畫，各版做完、驗證過才能改成 ✅ 放進 README。標了 ⁽ˡ⁾ 的五欄只會驗證到不需要模型的部分，放進 README 時寫「✅ 未實測」或「◐ 未實測」，不能只寫 ✅（Q2）。
 
-| 功能 | Claude Code 桌面版 | Claude Code CLI | Codex | Copilot | Antigravity | Cursor | Devin |
+| 功能 | Claude Code 桌面版 | Claude Code CLI | Codex ⁽ˡ⁾ | Copilot ⁽ˡ⁾ | Antigravity ⁽ˡ⁾ | Cursor ⁽ˡ⁾ | Devin ⁽ˡ⁾ |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 看板面板 | ✅ → ✅ | — 〔實測 `-p`；互動模式讀程式〕 → ✅ v1.0 ⁽ᵃ⁾ | — → ✅ v1.1 ⁽ᵃ⁾ | — → ✅ v1.1 ⁽ᵃ⁾ | — → ✅ v1.1 ⁽ᵃ⁾ | — → ✅ v1.2 ⁽ᵃ⁾ | — → ✅ v1.2 ⁽ᵃ⁾ |
-| 文字看板 | ✅ → ✅ | — 〔實測〕 → ✅ v1.0 | — → ✅ v1.1 | — → ✅ v1.1 | — → ✅ v1.1 | — → ✅ v1.2 | — → ✅ v1.2 |
-| 交辦清單 | ✅ → ✅ | — 〔實測〕 ⁽ᵇ⁾ → ✅ v1.0 | — → ✅ v1.1 | — → ✅ v1.1 | — → ✅ v1.1 | — → ✅ v1.2 | — → ✅ v1.2 |
-| QA 關卡 | ✅ → ✅ | — 〔實測〕 ⁽ᵇ⁾ → ✅ v1.0 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.1 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.1 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.1 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.2 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.2 |
-| 交付判斷（git 和 CI） | ✅ → ✅ | — 〔讀程式〕 → ✅ v1.0 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.1 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.1 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.1 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.2 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.2 |
-| 即時追蹤 Session | ✅ → ✅ | — 〔實測＋讀程式〕 → ◐ v1.0 ⁽ᵉ⁾ | — → ◐ v1.1 ⁽ᵉ⁾⁽¹⁾ | — → ◐ v1.1 ⁽ᵉ⁾⁽²⁾ | — → ◐ v1.1 ⁽ᵉ⁾ | — → ◐ v1.2 ⁽ᵉ⁾⁽³⁾ | — → ◐ v1.2 ⁽ᵉ⁾ |
-| Agent 派工 | ✅ → ✅ | — 〔實測〕 ⁽ᶠ⁾ → ◐ v1.0 → ✅ v1.1 | — → ◐ v1.1 ⁽ᵍ⁾ | — → ◐ v1.1 ⁽ᵍ⁾ | — → ◐ v1.1 ⁽ᵍ⁾ | — → ◐ v1.2 ⁽ᵍ⁾ | — → ◐ v1.2 ⁽ᵍ⁾ |
-| 開發準則 | ✅ → ✅ | ◐ 〔讀程式，未實測〕 ⁽ʰ⁾ → ✅ v1.0 | — → ◐ v1.1 ⁽ⁱ⁾ | — → ◐ v1.1 ⁽ⁱ⁾ | — → ◐ v1.1 ⁽ⁱ⁾ | — → ◐ v1.2 ⁽ⁱ⁾ | — → ◐ v1.2 ⁽ⁱ⁾ |
+| 看板面板 | ✅ → ✅ | — 〔實測 `-p`；互動模式讀程式〕 → ✅ v1.0 ⁽ᵃ⁾ | — → ✅ v1.2 ⁽ᵃ⁾ | — → ✅ v1.2 ⁽ᵃ⁾ | — → ✅ v1.2 ⁽ᵃ⁾ | — → ✅ v1.3 ⁽ᵃ⁾ | — → ✅ v1.3 ⁽ᵃ⁾ |
+| 文字看板 | ✅ → ✅ | — 〔實測〕 → ✅ v1.0 | — → ✅ v1.2 | — → ✅ v1.2 | — → ✅ v1.2 | — → ✅ v1.3 | — → ✅ v1.3 |
+| 交辦清單 | ✅ → ✅ | — 〔實測〕 ⁽ᵇ⁾ → ✅ v1.0 | — → ✅ v1.2 | — → ✅ v1.2 | — → ✅ v1.2 | — → ✅ v1.3 | — → ✅ v1.3 |
+| QA 關卡 | ✅ → ✅ | — 〔實測〕 ⁽ᵇ⁾ → ✅ v1.0 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.2 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.2 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.2 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.3 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.3 |
+| 交付判斷（git 和 CI） | ✅ → ✅ | — 〔讀程式〕 → ✅ v1.0 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.2 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.2 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.2 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.3 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.3 |
+| 即時追蹤 Session | ✅ → ✅ | — 〔實測＋讀程式〕 → ◐ v1.0 ⁽ᵉ⁾ | — → ◐ v1.2 ⁽ᵉ⁾⁽¹⁾ | — → ◐ v1.2 ⁽ᵉ⁾⁽²⁾ | — → ◐ v1.2 ⁽ᵉ⁾ | — → ◐ v1.3 ⁽ᵉ⁾⁽³⁾ | — → ◐ v1.3 ⁽ᵉ⁾ |
+| Agent 派工 | ✅ → ✅ | — 〔實測〕 ⁽ᶠ⁾ → ◐ v1.0 → ✅ v1.1 | — → ◐ v1.2 ⁽ᵍ⁾ | — → ◐ v1.2 ⁽ᵍ⁾ | — → ◐ v1.2 ⁽ᵍ⁾ | — → ◐ v1.3 ⁽ᵍ⁾ | — → ◐ v1.3 ⁽ᵍ⁾ |
+| 開發準則 | ✅ → ✅ | ◐ 〔讀程式，未實測〕 ⁽ʰ⁾ → ✅ v1.0 | — → ◐ v1.2 ⁽ⁱ⁾ | — → ◐ v1.2 ⁽ⁱ⁾ | — → ◐ v1.2 ⁽ⁱ⁾ | — → ◐ v1.3 ⁽ⁱ⁾ | — → ◐ v1.3 ⁽ⁱ⁾ |
 | CI 真實資料掃描 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 |
 | 多人協作 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 |
 
@@ -612,7 +612,8 @@ Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1
 - ⁽ʰ⁾ 讀程式：準則由 `prompt.compose` 放進提示，不需要 Session id，所以「PM 在桌面版、這個 Session 在 CLI」時 CLI 會拿到準則（實測確認同一條路徑的交付指示有放進 CLI 的提示）；但 CLI 自己當不了 PM。改準則檔的擋法（`tool.call`）也不需要 id。這次的測試沒設定準則檔，所以沒實際驗證。v1.0 改由使用者層級的 UserPromptSubmit hook 每輪放進提示，不再依賴 PM 在桌面版。
 - ⁽ⁱ⁾ 「部分」：AGENTS.md 段落指向準則檔，靠 AI 自己去讀（第 2 層）；「沒問過不能改準則檔」靠各平台的 PreToolUse 類 hook。能不能像 Claude Code 一樣每輪自動放進提示，看各平台有沒有對應的 hook 事件，該版開工時查證。
 - ⁽ʲ⁾ v0.9.0 只有本 repo 自己的 CI 有這一步（qa.md 第 7 節），使用者的專案沒有。v1.0 的 CI 範本（第 6.3 節）是 GitHub Actions，和用哪個 AI 工具無關，所以所有欄同時變成 ✅。
-- ⁽ᵏ⁾ v0.9.0 只有單機的交辦清單。v1.1 的同步做在核心、透過 `gh` 和 GitHub Issues（第 10 節），和用哪個 AI 工具無關，所以所有欄同時是 v1.1。Cursor、Devin 的轉接要到 v1.2，在那之前這兩欄的同步結果只能從網頁看板和 `project-pm board` 看到，工具裡的交辦清單要等 v1.2。v1.0 已經開始寫同步需要的欄位（10.1 節），但還不能同步，所以 v1.0 不算部分支援。
+- ⁽ᵏ⁾ v0.9.0 只有單機的交辦清單。v1.1 的同步做在核心、透過 `gh` 和 GitHub Issues（第 10 節），和用哪個 AI 工具無關，所以所有欄同時是 v1.1。Codex、Copilot、Antigravity 的轉接要到 v1.2，Cursor、Devin 要到 v1.3；在那之前，這幾欄的同步結果只能從網頁看板和 `project-pm board` 看到，工具裡的交辦清單要等各自的版本。v1.0 已經開始寫同步需要的欄位（10.1 節），但還不能同步，所以 v1.0 不算部分支援。
+- ⁽ˡ⁾ 未實測（Q2 定案）：使用者除了 Claude 之外沒有其他平台的訂閱或帳號，這五個平台不會用 AI 實際跑。驗證只到不需要模型的部分：MCP 協定、`init` 寫出的設定檔、hook（用錄好的事件 JSON），以及 `init`／`uninstall` 還原（第 8 節 ③ ④）。例外是和 AI 工具無關的兩列（CI 真實資料掃描、多人協作），它們在 CI 和 Claude Code 上驗證過就算數。
 
 註腳（同一平台的桌面版和 CLI 有差異）：
 
@@ -628,14 +629,21 @@ Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1
 測試不花錢（D9）：
 
 - CI（GitHub Actions，公開 repo 的免費額度）只跑不需要 AI 模型的測試：單元、MCP 協定、hook、看板、安裝、同步（用假的 GitHub API）。每次 PR 都跑。
-- 需要模型的冒煙測試（headless 跑固定劇本）CI 不跑，改成發版前在本機手動跑，用使用者現有的訂閱額度，不另外申請 API 金鑰。使用者沒有訂閱的平台就不跑，release 說明寫明「這個平台沒有用 AI 實際跑過」。
+- 需要模型的冒煙測試（headless 跑固定劇本）CI 不跑，改成發版前在本機手動跑，用使用者現有的訂閱額度，不另外申請 API 金鑰。
+- 使用者只有 Claude 的訂閱（Q2 定案），所以只有 Claude Code 會用 AI 實際跑。Codex、Copilot、Antigravity、Cursor、Devin 只驗證到不需要模型的部分（MCP 協定、設定檔、hook、`init`／`uninstall`），配備表和 release 說明標「未實測」。
+
+release 說明固定要寫的已知限制（Q1、Q3 定案）：
+
+- 執行檔沒有程式碼簽章。Windows 開著「智慧型應用程式控制」時可能直接擋下、沒有放行按鈕；遇到這種情況改用 npm 版，要先裝 Node（README 的安裝說明也寫）。
+- macOS 版：「放行步驟未在實機驗證」（沒有 Mac）。執行檔本身在 CI 的 macOS runner 上跑過測試。
+- v1.2 起：哪些平台「未實測」，以及實際驗證到哪裡（MCP 協定、設定檔、hook）。
 
 ### ① v1.0：Claude Code CLI、核心、網頁看板、hook 和 CI 範本、單一執行檔
 
 範圍：
 
 - `core/`：純函式（從 `hooks/` 搬，見 1.4 節）、Node 層、MCP server（stdio＋Streamable HTTP）、`board`、`ledger`、`report`、`pm` 四個工具。工作項目從這一版起寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`rev`），為 v1.1 的同步做準備。
-- 單一執行檔：GitHub Actions 的建置和 release workflow、`SHA256SUMS`、白話的安裝和放行說明（5.5 節）；npm 套件同時發布。
+- 單一執行檔：GitHub Actions 的建置和 release workflow、`SHA256SUMS`、白話的安裝和放行說明（5.5 節），以及 README 和 release 說明裡的已知限制（本節開頭）；npm 套件同時發布。
 - 網頁看板（唯讀，第 4 節）。
 - `init`、`uninstall`：只支援 Claude Code（CLI）；偵測到桌面版 mod 時只提示、不加 MCP 設定（3.7 節）。
 - `hook claude-code <事件>`：Stop、UserPromptSubmit、PostToolUse（TodoWrite、背景指令）寫 actor 紀錄；UserPromptSubmit 同時把開發準則和交付指示放進提示（取代 mod 的 `prompt.compose`，CLI 不用等 PM 在桌面版）。
@@ -644,7 +652,7 @@ Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1
 - 修 report 的假成功（核心這邊；mod 那邊在 v1.1 改）。
 - 桌面版 mod：**不改**（E1 期間 mod 照舊）。
 
-先查證再實作的事：MCP 子行程拿不拿得到 Session id（1.5 節）；外掛安裝會不會帶上 `core/`（1.4 節）；mod 在終端機互動模式的面板（v1-cli-check.md 第 4 節沒實測）；Node SEA 和 Bun 哪個編得出能正常跑的執行檔（5.5 節）；Windows「智慧型應用程式控制」會不會擋未簽章的執行檔（5.5 節）。
+先查證再實作的事：MCP 子行程拿不拿得到 Session id（1.5 節）；外掛安裝會不會帶上 `core/`（1.4 節）；mod 在終端機互動模式的面板（v1-cli-check.md 第 4 節沒實測）；Node SEA 和 Bun 哪個編得出能正常跑的執行檔（5.5 節）；Windows「智慧型應用程式控制」實際怎麼擋（5.5 節；已定案列為已知限制，查的是 README 要怎麼描述）。
 
 驗證：
 
@@ -658,7 +666,7 @@ Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1
 | git hook | bare repo 當遠端的六種情況（6.2 節），含 `git pm skip` | 每次 PR（CI）；三個作業系統 |
 | 安裝 | `init` → 檢查 → `uninstall` → 檔案和安裝前完全相同（第 5 節的各種情況）；用建置出來的執行檔跑。`claude mcp add`、`claude mcp list` 不需要模型（是否需要登入，實作時確認；需要的話這一項改成發版前手動） | 每次 PR（CI）；三個作業系統 |
 | CI 範本 | 對 Acme demo 假專案（放假金鑰、舊套件、假禁用詞）跑範本，確認每步都擋、訊息正確 | 每次 PR（CI） |
-| 下載和放行 | 從 release 下載執行檔，照安裝說明在 Windows、macOS 上放行並跑 `init` | 發版前手動一次（CI 模擬不了 SmartScreen、Gatekeeper） |
+| 下載和放行 | 從 release 下載執行檔，照安裝說明在 Windows 上放行並跑 `init`。macOS 沒有實機（Q3），不驗證，release 說明標「放行步驟未在實機驗證」 | Windows：發版前手動一次（CI 模擬不了 SmartScreen）。macOS：不跑 |
 | Claude Code 冒煙測試（需要模型） | `claude -p --mcp-config <核心設定> --output-format json` 在 Acme demo 上跑固定劇本：新增工作、回報、結案被 QA 擋、記錄 QA 後結案。檢查 JSON 結果和核心的資料檔，不只看 exit code | 發版前在本機手動跑，用使用者現有的 Claude 訂閱（Claude Code 已登入的帳號），不另外申請 API 金鑰；CI 不跑（D9） |
 | 遷移 | 用舊格式的假資料跑 E1，舊 mod（v0.9.0）同時開著，兩邊都看得到對方寫的 | 發版前手動一次 |
 
@@ -668,33 +676,46 @@ Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1
 - 設定：`project-pm uninstall`。
 - 資料：E1 雙寫，舊路徑一直完整；移除核心等於回到 v0.9.0，桌面版完全不受影響。
 
-### ② v1.1：多人協作（主打）、Codex、Copilot、Antigravity
+### ② v1.1：多人協作（主打）、E2
 
-範圍：
+範圍（Q4 定案：v1.1 只做這兩件）：
 
 - **多人協作**（D2，第 10 節）：`project-pm sync`、`sync on｜off｜resolve`、`terms upload`；GitHub Issues 的對應和三方合併；公開 repo 的警告和同意；上傳前的禁用詞掃描；看板的同步狀態和「同步衝突」。
-- `init` 支援 Codex（CLI、桌面版）、Copilot（CLI、VS Code）、Antigravity（CLI、桌面）；各自的 `hook <工具> <事件>`；AGENTS.md 大小檢查（Codex 32 KiB）；處理 Copilot 重複執行 Claude 的 hooks。
-- E2（桌面版 mod 改用核心的資料）。
+- **E2**（2.4 節）：桌面版 mod 改用核心的資料和身分；mod 這邊的 report 假成功一起修掉；mod 在核心已提供 `project-pm` MCP 時不再自己註冊工具（3.7 節）。
 
-先查證：GitHub 的寫入 API 支不支援條件式更新、Issues 的 ETag 行為（10.3 節）；報告裡這幾個平台的未確認項目（Codex 桌面版讀 AGENTS.md、Codex IDE 的 hooks、Antigravity 的外掛面板）；各平台 hook 事件 JSON 的欄位（Session id、cwd）；MCP 設定檔的確切路徑和寫法。
+先查證：GitHub 的寫入 API 支不支援條件式更新、Issues 的 ETag 行為（10.3 節）。
 
 驗證：
 
 - 多人協作：照 10.5 節。CI 用假的 GitHub API 和兩個 `PROJECT_PM_HOME` 跑每次 PR；發版前用使用者自己的私人測試 repo 手動跑一輪。都不需要模型。
-- 各平台的 MCP 協定、hook、`init`／`uninstall`：同 v1.0，每次 PR 在 CI 跑，不需要模型。
-- 需要模型的冒煙測試：發版前在本機手動跑同一個劇本，用使用者現有的訂閱額度，CI 不跑（D9）。指令：`codex exec --json`（要先把工作目錄設成受信任，否則不載入 MCP [X6]）、`copilot -p --output-format=json` [H5]、`agy -p`（輸出 json；不能只看 exit code，要檢查結果裡有沒有被拒絕的工具 [A7]）。使用者沒有訂閱的平台不跑，release 說明寫明。VS Code、桌面版沒有 headless，用手動清單驗證並在 release 說明寫明。
+- E2：同 2.4 節，用舊格式的假資料，新版 mod 和核心同時開著，兩邊都看得到對方寫的；舊路徑仍完整。發版前手動一次。
+- 需要模型的冒煙測試：同 v1.0，只跑 Claude Code（桌面版和 CLI），用使用者的 Claude 訂閱在本機手動跑；劇本多一段同步。
 
-回復：每個平台的轉接是獨立的（`init --tool codex`、`uninstall --tool codex`），一個平台出問題只移除那一個，不影響其他；同步出問題時 `project-pm sync off`，本機資料不受影響（10.5 節）；E2 出問題時 mod 退回 E1 版本，舊路徑仍完整。
+回復：同步出問題時 `project-pm sync off`，本機資料不受影響（10.5 節）；E2 出問題時 mod 退回 E1 版本，舊路徑仍完整。
 
-### ③ v1.2：Cursor、Devin
+### ③ v1.2：Codex、Copilot、Antigravity
 
-範圍：`init` 支援 Cursor（編輯器、CLI）、Devin（桌面、CLI）；各自的 hook。可以評估 VS Code 系的 webview 擴充（Cursor、Devin 都能裝 Open VSX 擴充）當第 4 層的面板。資料遷移的 C1 不在這一版，等 ② ③ 都穩定一個版本以上（v1.3 以後）。
+範圍：`init` 支援 Codex（CLI、桌面版）、Copilot（CLI、VS Code）、Antigravity（CLI、桌面）；各自的 `hook <工具> <事件>`；AGENTS.md 大小檢查（Codex 32 KiB）；處理 Copilot 重複執行 Claude 的 hooks。
+
+先查證：報告裡這幾個平台的未確認項目（Codex 桌面版讀 AGENTS.md、Codex IDE 的 hooks、Antigravity 的外掛面板）；各平台 hook 事件 JSON 的欄位（Session id、cwd）；MCP 設定檔的確切路徑和寫法；各工具列出 MCP 設定的指令（例如 `codex mcp list`）不登入能不能跑。
+
+驗證（Q2 定案：**未實測**）：
+
+- 使用者沒有這三個平台的訂閱或帳號，所以不用 AI 實際跑。只驗證不需要模型的部分，每次 PR 在 CI 跑：MCP 協定（用 MCP SDK 的 client 模擬這個工具連進來）、`init` 寫出的設定檔內容、用錄好的事件 JSON 餵 `hook <工具> <事件>`、`init`／`uninstall` 還原。工具本身的列出設定指令不登入也能跑的話，一起在 CI 跑。
+- release 說明和配備表標「未實測：只驗證到 MCP 協定、設定檔和 hook，沒有用 AI 實際跑過」。
+- 日後有帳號時可以用的冒煙測試指令（現在不跑）：`codex exec --json`（要先把工作目錄設成受信任，否則不載入 MCP [X6]）、`copilot -p --output-format=json` [H5]、`agy -p`（輸出 json；不能只看 exit code，要檢查結果裡有沒有被拒絕的工具 [A7]）。
+
+回復：每個平台的轉接是獨立的（`init --tool codex`、`uninstall --tool codex`），一個平台出問題只移除那一個，不影響其他。
+
+### ④ v1.3：Cursor、Devin
+
+範圍：`init` 支援 Cursor（編輯器、CLI）、Devin（桌面、CLI）；各自的 hook。可以評估 VS Code 系的 webview 擴充（Cursor、Devin 都能裝 Open VSX 擴充）當第 4 層的面板。資料遷移的 C1 不在這一版，等 ③ ④ 都穩定一個版本以上（v1.4 以後）。
 
 先查證：Cursor CLI 的 hooks 和子代理、Devin CLI `-p` 的輸出格式、兩者擴充的面板能力（報告標未確認）。
 
-驗證：不需要模型的測試（MCP 協定、hook、`init`／`uninstall`）每次 PR 在 CI 跑。需要模型的冒煙測試發版前在本機手動跑，用使用者現有的訂閱額度，沒有訂閱的平台不跑並在 release 說明寫明（D9）：`agent -p --force --output-format json`（Cursor 管理員可以關掉這個模式 [U5]）、`devin -p`（格式查證後再寫檢查）。編輯器手動清單。
+驗證（Q2 定案：**未實測**）：同 ③。使用者沒有這兩個平台的帳號，只在 CI 驗證 MCP 協定、設定檔、hook、`init`／`uninstall`；release 說明和配備表標「未實測」。日後有帳號時可用的指令（現在不跑）：`agent -p --force --output-format json`（Cursor 管理員可以關掉這個模式 [U5]）、`devin -p`（格式查證後再寫檢查）。
 
-回復：同 ②，各平台獨立；C1 之後要回去需要 `project-pm export --legacy`，所以 C1 要等 ② ③ 都穩定一個版本以上再做。
+回復：同 ③，各平台獨立；C1 之後要回去需要 `project-pm export --legacy`，所以 C1 要等 ③ ④ 都穩定一個版本以上再做。
 
 ## 9. 已定案的取捨
 
@@ -716,16 +737,16 @@ Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1
 | D12 | CI 範本預設開哪些檢查 | 四項全開，偵測不到測試時顯示「略過」而不是失敗 | 2026-11-19 | 照原建議。Vibe Coder 不知道該選哪些；全開但不因為「沒有測試」就擋（6.3 節） |
 | D13 | `init` 預設要不要直接改檔 | 只顯示差異，`--yes` 才改 | 2026-11-19 | 照原建議。改的是使用者的 AI 工具設定和專案檔，先讓人看到（5.1 節） |
 
-### 9.1 寫入決定時發現、還要使用者決定的事
+### 9.1 寫入決定時發現的問題（已定案）
 
-這些不推翻上面的結論，但會影響 v1.0、v1.1 的實際範圍：
+寫入 D1～D13 時發現的四個問題，使用者在同一天決定：
 
-| # | 問題 | 為什麼會出現 | 可能的做法 |
-| --- | --- | --- | --- |
-| Q1 | Windows「智慧型應用程式控制」擋下未簽章的執行檔時怎麼辦 | D3 不買簽章。開著這個功能的 Windows 11 可能直接擋、沒有放行按鈕（實作時實測），這時只剩 npm 版本，又要裝 Node | 接受，寫進已知限制；或查有沒有給開源專案的免費簽章服務（例如 SignPath 的開源方案，實作時查證條件） |
-| Q2 | 使用者沒有訂閱的平台怎麼做冒煙測試 | D9 只用現有訂閱。Codex、Copilot、Antigravity、Cursor、Devin 若沒有訂閱，那個平台就沒有用 AI 實際跑過 | 接受，在 release 說明和 README 的平台表註明「未實測」；或只用各平台的免費方案能跑到的部分 |
-| Q3 | macOS 的下載和放行步驟由誰實機走一次 | 5.5 節的放行步驟 CI 測不到，需要一台 Mac | 有 Mac 就發版前手動走；沒有的話，macOS 版在 release 說明標「放行步驟未實機驗證」 |
-| Q4 | v1.1 的範圍是否太大 | v1.1 同時有多人協作、三個平台（含桌面版和 VS Code）、E2 | 照現在的分法；或多人協作和 E2 先出（v1.1），三個平台延到下一版 |
+| # | 問題 | 結論 | 定案日期 | 理由與影響的章節 |
+| --- | --- | --- | --- | --- |
+| Q1 | Windows「智慧型應用程式控制」擋下未簽章的執行檔時怎麼辦 | 列為已知限制，不申請簽章。README 和 release 說明寫明：遇到這種情況改用 npm 版，要先裝 Node | 2026-11-19 | 和 D3 一致：不花錢、不另外申請。這是少數會要使用者裝 Node 的情況，所以要寫清楚。影響：5.5 節、第 8 節開頭的「release 說明固定要寫的已知限制」 |
+| Q2 | 使用者沒有訂閱的平台怎麼做冒煙測試 | 使用者除了 Claude 之外沒有其他平台的訂閱或帳號。Codex、Copilot、Antigravity、Cursor、Devin 都不用 AI 實際跑，只驗證不需要模型的部分（MCP 協定、設定檔、hook）；配備表和 release 說明標「未實測」 | 2026-11-19 | 和 D9 一致：不花錢、不另外申請帳號。影響：7.3 節（圖例和註腳 ˡ）、第 8 節開頭和 ③ ④ 的驗證 |
+| Q3 | macOS 的下載和放行步驟由誰實機走一次 | 使用者沒有 Mac，不驗證。macOS 版的 release 說明標「放行步驟未在實機驗證」；執行檔本身仍在 CI 的 macOS runner 上跑測試 | 2026-11-19 | 如實回報沒驗到的部分。影響：5.5 節、第 8 節 ① 的驗證和 release 說明 |
+| Q4 | v1.1 的範圍是否太大 | 拆開。v1.1：多人協作＋E2（桌面版外掛改用核心）。v1.2：Codex、Copilot、Antigravity。v1.3：Cursor、Devin。資料遷移的 C1 順延到 v1.4 以後 | 2026-11-19 | 讓 v1.1 專心在主打的多人協作。影響：摘要、1.5、2.4、5.2、7.2、7.3、第 8 節、第 11 節 |
 
 ## 10. 多人協作（v1.1）
 
@@ -858,6 +879,6 @@ pre-push 關卡（6.2 節）在多人時照樣成立：QA 紀錄的 `sha` 和項
 
 - [M1] MCP 規格 2025-11-25，Transports 章節：https://modelcontextprotocol.io/specification/2025-11-25/basic/transports 。2026-11-19 查閱，內容：Streamable HTTP 取代 HTTP+SSE；安全警告要求驗證 `Origin`（不合法回 403）、本機執行時只綁 127.0.0.1、應驗證所有連線；伺服器可以對 GET 回 405 表示不提供 SSE 串流。實測的 Claude Code 2.1.326 協商的版本也是 2025-11-25（v1-cli-check.md 第 3 節的 debug log）。
 
-沒有另外查證、寫在文件裡要實作時再確認的：gitleaks 官方 action 對組織帳號的授權要求、osv-scanner 的授權與 action 版本、各平台 ② ③ 的設定檔確切路徑。
+沒有另外查證、寫在文件裡要實作時再確認的：gitleaks 官方 action 對組織帳號的授權要求、osv-scanner 的授權與 action 版本、各平台 ③ ④ 的設定檔確切路徑。
 
 2026-11-19 定案時加入、同樣還沒查證的（都標了「實作時確認」）：Node SEA 和 Bun 支援的目標平台、檔案大小、macOS ad-hoc 簽章的做法；Windows SmartScreen 和「智慧型應用程式控制」對未簽章執行檔的實際行為；macOS 放行步驟在各版本的寫法；GitHub Actions 對公開 repo 標準 runner 的免費範圍；`claude mcp add`／`list` 是否需要登入；GitHub Issues API 的條件式寫入和 ETag 行為。
