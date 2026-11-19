@@ -83,7 +83,22 @@ for (const lang of LANGS) {
       assert.equal(out.status, 0, out.stderr)
     })
 
-    test('a commit after the QA is held again', { timeout: 60_000 }, async () => {
+    test('a new branch (the remote has none: git sends zeros) goes through once QA passed', { timeout: 60_000 }, async () => {
+      // The one path that asks rev-list `--not --remotes`: the QA commits must still be left out after that --not.
+      await install()
+      git(w.repo, 'checkout', '-q', '-b', 'acme-coupon')
+      await addItem()
+      await ledgerTool(ctx(), { action: 'update', id: 1, qa: 'pass', qa_by: 'agent:qa1' })
+      const out = spawnSync('git', ['push', 'origin', 'acme-coupon'], { cwd: w.repo, env, encoding: 'utf8', windowsHide: true })
+      assert.equal(out.status, 0, out.stderr)
+      const unchecked = w.commit('coupon.js', 'export const ACME10 = 0.2\n', 'Raise the discount')
+      git(w.repo, 'checkout', '-q', '-b', 'acme-coupon-2')
+      const held = spawnSync('git', ['push', 'origin', 'acme-coupon-2'], { cwd: w.repo, env, encoding: 'utf8', windowsHide: true })
+      assert.notEqual(held.status, 0)
+      assert.ok(held.stderr.includes(unchecked.slice(0, 7)), held.stderr)
+    })
+
+    test('a commit after the QA is held again',{ timeout: 60_000 }, async () => {
       await install()
       await addItem()
       await ledgerTool(ctx(), { action: 'update', id: 1, qa: 'pass', qa_by: 'agent:qa1' })
