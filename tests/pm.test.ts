@@ -2640,7 +2640,7 @@ async function qaBriefs($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en') {
   expect([qa.includes(words.qaReply), qa.includes(words.inReply), qa.includes(words.readOnly)]).toEqual([true, true, true])
   expect([qa.includes(words.reply), qa.includes(words.file)]).toEqual([false, false])
   // Another agent that only reads: the usual first line, its account in its reply, no checklist.
-  await spawn('c2', 'T-13 Lookup of old dates', 'Explore')
+  await spawn('c2', 'T-13 QA-free lookup', 'Explore')
   const lookup = w.spawned[1]!.prompt
   expect([lookup.includes(words.reply), lookup.includes(words.inReply), lookup.includes(words.qa), lookup.includes(words.file)]).toEqual([true, true, false, false])
   // One that writes: the detail file, as before, and no checklist.
@@ -2666,7 +2666,7 @@ test('a QA agent gets the checklist, in English', { options: { language: 'en' } 
 
 test('a QA description leads with the item and QA', () => {
   expect(['T-12 QA', ' t-3 qa of export', 'T-12 QA: diff abc', 'T-31 QA（第二次）', 'T-31 QA(2nd)', 'T-31 QA (2nd)', 'T-31 QA-2', 'T-31 QA、複驗'].map(isQaDescription)).toEqual([true, true, true, true, true, true, true, true])
-  expect(['T-12 QAX', 'T-12 QAfix', 'QA T-12', 'T-12 fix QA', 'T-12'].map(isQaDescription)).toEqual([false, false, false, false, false])
+  expect(['T-12 QAX', 'T-12 QAfix', 'T-13 QA-free', 'T-13 QA-free lookup', 'T-12 QA-less', 'QA T-12', 'T-12 fix QA', 'T-12'].map(isQaDescription)).toEqual([false, false, false, false, false, false, false, false])
 })
 
 test('the QA core decides on plain data, with no engine: an update, a close and the attention lines, in both languages', () => {
