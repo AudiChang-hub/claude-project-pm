@@ -10,7 +10,9 @@
   },
   "files": [
     "dist/project-pm.cjs",
-    "README.md"
+    "README.md",
+    "README.zh-TW.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20"
@@ -20,7 +22,8 @@
     "typecheck": "node scripts/web-assets.mjs && tsc --noEmit",
     "build": "node scripts/build.mjs",
     "sea": "node scripts/sea.mjs",
-    "pretest": "node scripts/web-assets.mjs"
+    "pretest": "node scripts/web-assets.mjs",
+    "prepack": "npm run build"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
