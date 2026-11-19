@@ -2999,8 +2999,8 @@ test('the QA checklist covers a counter-example swapped for one that passes, as 
 const limitTranscript = (said: string) => `[user] 繼續\n[assistant] ${said}\n[result] error (success), 2 turns`
 const HIT_LIMIT = "You've hit your 5-hour limit · resets 3pm (Asia/Taipei)"
 /**
- * The track the session's mod (0.9.0) left when a usage limit ended its turn, as local_3bf6b9da… left it on
- * 2026-11-19: every step ticked, no answer and no recap, the turn's end at its last activity.
+ * The track the session's mod (0.9.0) left when a usage limit ended its turn, as in a usage-limit stop met in real
+ * use: every step ticked, no answer and no recap, the turn's end at its last activity.
  */
 const limitTrack = () =>
   track('local_open', {
