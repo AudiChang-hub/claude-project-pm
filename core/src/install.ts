@@ -6,6 +6,7 @@
  * outside these files is touched: no PATH, no registry, no Node install (5.4).
  */
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, rmdir, unlink } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 
@@ -364,10 +365,16 @@ async function removeMade(file: string, root: string | undefined) {
 }
 
 /** Undoes one change; a file nobody changed since init is left exactly as it was before init. */
-export async function undo(done: Done, ie: InstallEnv): Promise<void> {
+export async function undo(done: Done, ie: InstallEnv): Promise<string | void> {
   switch (done.kind) {
     case 'copy':
-      await rm(done.file, { force: true })
+      try {
+        await rm(done.file, { force: true })
+      } catch (err) {
+        // Windows will not delete a program while it runs: this very one, when uninstall runs from the copy.
+        if (isThisProgram(done.file) && deleteAfterExit(done.file)) return ct('uninstall.deleteLater', { file: done.file })
+        throw err
+      }
       await removeEmptyDirs(dirname(done.file), done.root ?? dirname(done.file))
       return
     case 'mcp':
@@ -539,10 +546,48 @@ export async function uninstall(ref: ProjectRef | null, ie: InstallEnv, options:
     return 0
   }
   const order = log.entries.filter(e => chosen.includes(e)).reverse()
-  for (const entry of order) await undo(entry, ie)
-  log.entries = log.entries.filter(e => !chosen.includes(e))
+  // One change that cannot be undone stops none of the others, and the log is written either way: what failed stays
+  // in it, so uninstall can be run again.
+  const failed = new Set<Done>()
+  const notes: string[] = []
+  for (const entry of order) {
+    try {
+      const note = await undo(entry, ie)
+      if (note) notes.push(note)
+    } catch (err) {
+      failed.add(entry)
+      const what = describe(entry).split('\n')[0]!
+      const reason = err instanceof Error ? err.message : String(err)
+      notes.push('file' in entry ? ct('uninstall.failedFile', { what, reason, file: entry.file }) : ct('uninstall.failed', { what, reason }))
+    }
+  }
+  log.entries = log.entries.filter(e => !chosen.includes(e) || failed.has(e))
   await writeLog(ie.env, log)
-  say(ct('uninstall.done', { n: chosen.length }))
+  say(ct('uninstall.done', { n: chosen.length - failed.size }))
+  for (const note of notes) say(`! ${note}`)
 
-  return chosen.length
+  return chosen.length - failed.size
+}
+
+/** Whether `file` is the program running now. */
+function isThisProgram(file: string): boolean {
+  const norm = (path: string) => resolve(path).toLowerCase()
+
+  return process.platform === 'win32' && norm(file) === norm(process.execPath)
+}
+
+/**
+ * Windows: deletes `file` (and its folder, when empty) a few seconds after this program ends, from a hidden cmd that
+ * outlives it. False when that cannot be started.
+ */
+function deleteAfterExit(file: string): boolean {
+  try {
+    const line = `"ping -n 4 127.0.0.1 >nul & del /f /q "${file}" & rmdir "${dirname(file)}" 2>nul"`
+    const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', line], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true })
+    child.unref()
+
+    return true
+  } catch {
+    return false
+  }
 }

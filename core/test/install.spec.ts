@@ -4,7 +4,7 @@
  * command line is stood in for (fakeClaude), so nothing touches the person's real settings.
  */
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
@@ -235,6 +235,30 @@ for (const lang of LANGS) {
       await uninstall(ref, ie({ env, exe }), { yes: true, hooksOnly: false }, say)
       assert.ok(!existsSync(copy))
       assert.ok(!existsSync(join(copy, '..')))
+    })
+
+    test('a copy that cannot be deleted (Windows: the program running) leaves a sound log, the rest undone, and the way on', async () => {
+      const before = snapshot(w.home, w.repo)
+      const exe = join(w.root, 'Downloads', 'project-pm.exe')
+      write(exe, 'MZ acme stand-in for the program')
+      await init(ref, ie({ exe }), { yes: true, ci: false }, say)
+      const copy = binPath(w.env)
+      // A folder with a file in it stands for a file the system will not delete: rm fails the same way.
+      rmSync(copy)
+      write(join(copy, 'busy'), 'in use')
+      said = []
+      const undone = await uninstall(ref, ie({ exe }), { yes: true, hooksOnly: false }, say)
+      assert.ok(undone > 0)
+      assert.deepEqual(snapshot(w.home, w.repo), before)
+      const left = (await readLog(w.env)).entries
+      assert.deepEqual(left.map(e => e.kind), ['copy'])
+      assert.ok(said.join('\n').includes(copy))
+      // Once the file is free, uninstall finishes the job.
+      rmSync(copy, { recursive: true })
+      write(copy, 'MZ')
+      await uninstall(ref, ie({ exe }), { yes: true, hooksOnly: false }, say)
+      assert.deepEqual((await readLog(w.env)).entries, [])
+      assert.ok(!existsSync(copy))
     })
 
     test('uninstall without --yes only lists', async () => {
