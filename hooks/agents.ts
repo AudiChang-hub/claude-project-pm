@@ -3,7 +3,7 @@
 
 import type { AgentRecord, AgentState, LedgerItem } from '../types'
 import { t } from './messages'
-import { qaBrief } from './qa'
+import { isSameId, qaBrief } from './qa'
 
 /** One line, cut to `max` characters (the same as sessions.ts's clip, which imports this file). */
 function clip(text: string, max: number): string {
@@ -128,7 +128,7 @@ export function shortNotices(text: string, known: Readonly<Record<string, AgentR
  */
 export function settledAgentState(one: AgentRecord, ledger: LedgerItem[]): AgentState | null {
   if (one.state === 'running' || one.endedAt === undefined) return null
-  const owned = ledger.filter(item => item.owner === `agent:${one.id}`)
+  const owned = ledger.filter(item => isSameId(item.owner, `agent:${one.id}`))
   if (owned.length === 0 || owned.some(item => item.status === 'open')) return null
   if (Math.max(...owned.map(item => item.updatedAt)) < one.endedAt) return null
 

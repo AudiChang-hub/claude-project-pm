@@ -2772,7 +2772,7 @@ async function qaFindings($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en')
   expect(await ledger({ action: 'update', id: 1, qa: 'pass', qa_by: ' local_open ' })).toMatch(w.byOwner)
   await ledger({ action: 'update', id: 1, owner: ' agent:a1 ' })
   expect(await ledger({ action: 'update', id: 1, qa: 'pass', qa_by: 'agent:A1' })).toMatch(w.byOwner)
-  expect(saved(1).owner).toBe(' agent:a1 ')
+  expect(saved(1).owner).toBe('agent:a1')
   expect(saved(1).qa).toBe(undefined)
   // …and a verdict already kept by the owner under another spelling does not close the item.
   expect(await ledger({ action: 'update', id: 4, status: 'done' })).toMatch(w.byOwnerClose)
@@ -2810,4 +2810,47 @@ test('QA review findings: owner spelling, a new owner or a reopen voids the verd
 
 test('QA review findings, in English', { options: { language: 'en' } }, async ($, on) => {
   await qaFindings($, on, 'en')
+})
+
+// ── Owner ids written with spaces or another case: every check finds the owner (QA review, follow-up 1) ──
+
+async function ownerSpelling($: Parameters<TestBody>[0], on: On) {
+  const files: Files = new Map()
+  mock.clock(on, { now: NOW })
+  agentWorld(on, files, argv => (argv[1] === 'rev-parse' ? { exitCode: 0, stdout: 'true' } : null))
+  // Old items, their owners written before ids were trimmed: a running agent, and a session waiting on CI.
+  const at = NOW - 3_600_000
+  const items = [
+    { id: 1, text: 'Export', owner: ' agent:a1 ', status: 'open', note: '', createdAt: at, updatedAt: at },
+    { id: 2, text: 'Import', owner: 'LOCAL_OPEN', status: 'open', note: '', createdAt: at, updatedAt: at },
+  ]
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: items, nextId: 3 }))
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { recap: 'Pushed to main; CI is still running. 已推上 main，CI 還在跑。' })))
+  await $.session.start(START)
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', description: 'T-01 Export', prompt: 'x', subagent_type: 'general-purpose' } as never)
+  const ledger = async (input: object) => String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', ...input } as never)) as { result?: unknown }).result)
+  const saved = (id: number) => (JSON.parse(files.get(PROJECT_FILE)!).ledger as Record<string, unknown>[]).find(i => i.id === id)!
+
+  // The running agent has not delivered: its item does not await QA. The session waiting on CI has (QA is due before
+  // the release), and it is named, not taken for a session gone from the list.
+  const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(board).not.toMatch(/\[(待 QA|Awaiting QA)\] T-01/)
+  expect(board).toMatch(/\[(待 QA|Awaiting QA)\] T-02\D.*商品列表頁/)
+  expect(board).not.toMatch(/LOCAL_OPEN/)
+  // A pass does not close either: the owner gate finds the running agent and the session waiting on CI.
+  await ledger({ action: 'update', id: 1, qa: 'pass', qa_by: 'agent:q1', status: 'done' })
+  await ledger({ action: 'update', id: 2, qa: 'pass', qa_by: 'agent:q1', status: 'done' })
+  expect([saved(1).status, saved(2).status]).toEqual(['open', 'open'])
+  // New owners are written trimmed.
+  await ledger({ action: 'add', text: 'x', owner: ' local_open ' })
+  await ledger({ action: 'update', id: 2, owner: '  agent:a1 ' })
+  expect([saved(3).owner, saved(2).owner]).toEqual(['local_open', 'agent:a1'])
+}
+
+test('an owner written with spaces or in another case is still found by every check', ZH, async ($, on) => {
+  await ownerSpelling($, on)
+})
+
+test('an owner written with spaces or in another case is still found, in English', { options: { language: 'en' } }, async ($, on) => {
+  await ownerSpelling($, on)
 })

@@ -53,7 +53,7 @@ import {
   statusOf,
   undeliveredOf,
 } from './sessions'
-import { qaKeptText, qaUpdate } from './qa'
+import { isAgentId, isSameId, qaKeptText, qaUpdate } from './qa'
 import type { CiRun, Project, Status } from './sessions'
 import { t } from './messages'
 
@@ -1260,18 +1260,21 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
 }
 
 /** Why the owner's work cannot be counted done yet, or null when nothing stands in the way. */
-async function ownerBlocker($: EngineInterface, ownerId: string): Promise<string | null> {
+async function ownerBlocker($: EngineInterface, written: string): Promise<string | null> {
+  // An owner is found however its id was spaced or cased (items written before ids were trimmed).
   // An agent: done only once it is (a commit it made counts once the PM has merged it).
-  if (ownerId.startsWith(AGENT_OWNER)) {
+  if (isAgentId(written)) {
     await checkAgents($)
-    const one = agentRecords().find(a => a.id === ownerId.slice(AGENT_OWNER.length))
-    if (!one) return t('blocker.agentGone', { id: ownerId })
+    const one = agentRecords().find(a => isSameId(`${AGENT_OWNER}${a.id}`, written))
+    if (!one) return t('blocker.agentGone', { id: written.trim() })
 
     return one.state === 'done' ? null : t('blocker.agent', { name: agentName(one), why: t(`agent.state.${one.state}`) })
   }
   await refresh($, true, true)
   const list = (await read($, sessions)).list
-  const one = list.find(s => s.id === ownerId)
+  const one = list.find(s => isSameId(s.id, written))
+  // The session's own id where it is listed, else the id as written, trimmed: its kept files are named by it.
+  const ownerId = one?.id ?? written.trim()
   const words = await read($, lastWords)
   const kept = (await read($, tracks))[ownerId] ?? (await readJson<Track>($, `${await dataDir($)}/sessions/${ownerId}.json`))
   const track = hasReport(kept) ? (one ? liveTracks([one], { [ownerId]: kept }, words)[ownerId] : kept) : undefined
@@ -1329,7 +1332,7 @@ export async function ledger($: EngineInterface, input: Record<string, unknown>)
     const item: LedgerItem = {
       id: project.nextId,
       text,
-      owner: str(input.owner) || null,
+      owner: str(input.owner)?.trim() || null,
       status: 'open',
       note: str(input.note) ?? '',
       createdAt: now,
@@ -1345,7 +1348,8 @@ export async function ledger($: EngineInterface, input: Record<string, unknown>)
     const item = project.ledger.find(i => i.id === id)
     if (!item) return t('ledger.notFound', { id: String(input.id) })
     const status = str(input.status)
-    const owner = input.owner === undefined ? item.owner : str(input.owner) || null
+    // Owners are written trimmed; older ones may not be, and every check compares them with isSameId.
+    const owner = input.owner === undefined ? item.owner : str(input.owner)?.trim() || null
     const isClosing = status === 'done' && item.status !== 'done' && !(input.force === true && str(input.note)?.trim())
     // A verdict keeps the project's HEAD it was given at, to trace what was checked.
     const head = input.qa !== undefined ? await headOf($, self.projectPath) : null

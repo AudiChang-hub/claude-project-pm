@@ -7,7 +7,7 @@ import type { ElementConstructor, EngineInterface, RenderInputOf, RenderSurface,
 import type { AgentRecord, AgentState, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Step, Track } from '../types'
 import { agentName } from './agents'
 import { STATUS, agentTime, ago, caveatOf, clip, groupProjects, isActive, isDeliveredAgent, isDeliveredStatus, itemCode, liveTracks, openSteps, projectKey, settledAt, shownAgents, statusOf } from './sessions'
-import { qaShown, qaText } from './qa'
+import { isAgentId, isSameId, qaShown, qaText } from './qa'
 import type { QaShown } from './qa'
 import type { Project, Status } from './sessions'
 import { archive, claim, dismissBand, refresh, startPmSession } from './actions'
@@ -202,14 +202,17 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
    * An item's QA: its verdict, or awaiting once its owner has delivered (a session ended, to release or on CI, or no
    * longer listed; an agent done or to verify).
    */
+  // An owner is found however its id was spaced or cased (items written before ids were trimmed).
+  const agentOwner = (id: string | null) => (isAgentId(id) ? myAgents.find(a => isSameId(`agent:${a.id}`, id)) : undefined)
+  const sessionOwner = (id: string | null) => (id && !isAgentId(id) ? state.list.find(s => isSameId(s.id, id)) : undefined)
   const qaOfItem = (item: LedgerItem): QaShown | null => {
     if (!item.owner) return qaShown(item, false)
-    if (item.owner.startsWith('agent:')) {
-      const agent = myAgents.find(a => `agent:${a.id}` === item.owner)
+    if (isAgentId(item.owner)) {
+      const agent = agentOwner(item.owner)
 
       return qaShown(item, !!agent && isDeliveredAgent(agent.state))
     }
-    const owner = state.list.find(s => s.id === item.owner)
+    const owner = sessionOwner(item.owner)
 
     return qaShown(item, !owner || isDeliveredStatus(statusOfOne(owner)))
   }
@@ -481,9 +484,9 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
 
   const ledgerRow = ({ project, item }: { project: Project; item: LedgerItem }) => {
     // An owner working from another project's folder is still there: only one gone from the list is lost.
-    const owner = item.owner ? state.list.find(s => s.id === item.owner) : undefined
+    const owner = sessionOwner(item.owner)
     // An agent owner: the PM's agent, by its record (its name without the item code the row already shows).
-    const agent = item.owner?.startsWith('agent:') ? myAgents.find(a => `agent:${a.id}` === item.owner) : undefined
+    const agent = agentOwner(item.owner)
     const elsewhere = owner && !project.sessions.includes(owner) ? t('pane.elsewhere') : ''
     const ownerText = !item.owner
       ? t('pane.ownerNone')
@@ -581,9 +584,9 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
 
   const byRank = (a: Session, b: Session) => STATUS[statusOfOne(a)].rank - STATUS[statusOfOne(b)].rank
   // A session that owns open work stays in sight, whatever it is doing.
-  const owners = new Set(ledgers.map(({ item }) => item.owner).filter(Boolean))
+  const isOwner = (one: Session) => ledgers.some(({ item }) => isSameId(item.owner, one.id))
   const active = (list: Session[]) =>
-    list.filter(one => isActive(statusOfOne(one)) || !!caveatOfOne(one) || one.hasOpenPr || owners.has(one.id)).sort(byRank)
+    list.filter(one => isActive(statusOfOne(one)) || !!caveatOfOne(one) || one.hasOpenPr || isOwner(one)).sort(byRank)
   const ended = (list: Session[]) => list.filter(one => !active(list).includes(one))
 
   const sessionsBlock = (project: Project) => {

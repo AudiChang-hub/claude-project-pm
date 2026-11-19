@@ -28,6 +28,11 @@ export function isSameId(a: string | null | undefined, b: string | null | undefi
   return !!a?.trim() && !!b?.trim() && a.trim().toLowerCase() === b.trim().toLowerCase()
 }
 
+/** Whether an owner id names an agent (`agent:<agent id>`), however it is spaced or cased. */
+export function isAgentId(id: string | null | undefined): boolean {
+  return !!id && /^\s*agent:/i.test(id)
+}
+
 /** What an item shows of its QA: its verdict; else, while it is open and its owner has delivered, awaiting. */
 export type QaShown = QaRecord['result'] | 'awaiting'
 

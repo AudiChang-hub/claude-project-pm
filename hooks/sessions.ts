@@ -4,7 +4,7 @@
 import type { AgentRecord, AgentState, BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, PushCheck, Report, ReportStatus, Session, Step, Track } from '../types'
 import { agentName, isSettledAgent } from './agents'
 import { t } from './messages'
-import { qaAttention, qaShown, qaText } from './qa'
+import { isAgentId, isSameId, qaAttention, qaShown, qaText } from './qa'
 
 export type Status = 'running' | 'asking' | 'failed' | 'open' | 'unreleased' | 'ci' | 'waiting' | 'done' | 'stale'
 
@@ -241,7 +241,7 @@ export function quoteOf(track: Track | undefined, word: LastWord | undefined): s
  * gives way to it until the session reports again (statusOf).
  */
 export function settledAt(id: string, ledger: LedgerItem[]): number | undefined {
-  const owned = ledger.filter(item => item.owner === id && item.status !== 'dropped')
+  const owned = ledger.filter(item => isSameId(item.owner, id) && item.status !== 'dropped')
   if (owned.length === 0 || owned.some(item => item.status !== 'done')) return undefined
 
   return Math.max(...owned.map(item => item.updatedAt))
@@ -1186,7 +1186,6 @@ export function boardText(input: BoardInput): string {
     if (r.one.hasOpenPr && r.status !== 'running') attention.push(t('board.attention.pr', { name }))
   }
   const openLedger = ledger.filter(item => item.status === 'open')
-  const known = new Set(everyone.map(s => s.id))
   // The PM's agents that need it: failed, interrupted, waiting on the person, or committed for the PM to verify.
   const agents = input.agents ?? []
   for (const one of agents) {
@@ -1197,25 +1196,28 @@ export function boardText(input: BoardInput): string {
     if (one.state === 'decide') attention.push(t('board.attention.agentDecide', { name, line }))
     if (one.state === 'verify') attention.push(t('board.attention.agentVerify', { name, commit: one.commit ?? '', branch: one.worktree?.branch ?? '' }))
   }
+  // An owner is found however its id was spaced or cased (items written before ids were trimmed).
+  const agentOf = (id: string) => agents.find(a => isSameId(`agent:${a.id}`, id))
+  const sessionOf = (id: string) => everyone.find(s => isSameId(s.id, id))
+  const statusOfOwner = (one: Session) => statusOf(one, tracks[one.id], words[one.id], now, ci[one.id], push[one.id], settled(one.id))
   for (const item of openLedger) {
     if (!item.owner) attention.push(t('board.attention.unassigned', { code: itemCode(item.id), text: item.text }))
     // An agent owner is accounted for by its own record (above, and in the owner's words below).
-    else if (!item.owner.startsWith('agent:') && !known.has(item.owner)) attention.push(t('board.attention.lost', { code: itemCode(item.id), text: item.text, owner: item.owner }))
+    else if (!isAgentId(item.owner) && !sessionOf(item.owner)) attention.push(t('board.attention.lost', { code: itemCode(item.id), text: item.text, owner: item.owner.trim() }))
   }
   const inProject = new Set(sessions.map(s => s.id))
   /** An owner as the ledger shows it: its title and status, and whether it works from another project's folder. */
   const ownerText = (id: string | null) => {
     if (!id) return t('board.owner.unassigned')
-    if (id.startsWith('agent:')) {
-      const agent = agents.find(a => `agent:${a.id}` === id)
+    if (isAgentId(id)) {
+      const agent = agentOf(id)
 
-      return agent ? t('board.owner.agent', { name: agentName(agent), status: t(`agent.state.${agent.state}`) }) : t('board.owner.agentGone', { id })
+      return agent ? t('board.owner.agent', { name: agentName(agent), status: t(`agent.state.${agent.state}`) }) : t('board.owner.agentGone', { id: id.trim() })
     }
-    const one = everyone.find(s => s.id === id)
-    if (!one) return t('board.owner.gone', { id })
-    const status = statusOf(one, tracks[id], words[id], now, ci[id], push[id], settled(id))
+    const one = sessionOf(id)
+    if (!one) return t('board.owner.gone', { id: id.trim() })
 
-    return t('board.owner.status', { title: one.title, tag: STATUS[status].tag, elsewhere: inProject.has(id) ? '' : t('board.owner.elsewhere') })
+    return t('board.owner.status', { title: one.title, tag: STATUS[statusOfOwner(one)].tag, elsewhere: inProject.has(one.id) ? '' : t('board.owner.elsewhere') })
   }
   /**
    * Whether an owner has handed its work over: a session ended, waiting to release or on CI, or no longer listed
@@ -1223,14 +1225,14 @@ export function boardText(input: BoardInput): string {
    */
   const isDelivered = (id: string | null) => {
     if (!id) return false
-    if (id.startsWith('agent:')) {
-      const agent = agents.find(a => `agent:${a.id}` === id)
+    if (isAgentId(id)) {
+      const agent = agentOf(id)
 
       return !!agent && isDeliveredAgent(agent.state)
     }
-    const one = everyone.find(s => s.id === id)
+    const one = sessionOf(id)
 
-    return !one || isDeliveredStatus(statusOf(one, tracks[id], words[id], now, ci[id], push[id], settled(id)))
+    return !one || isDeliveredStatus(statusOfOwner(one))
   }
   const qaOf = (item: LedgerItem) => qaShown(item, isDelivered(item.owner))
   attention.push(...qaAttention(openLedger, isDelivered, ownerText))
@@ -1260,7 +1262,7 @@ export function boardText(input: BoardInput): string {
   lines.push('', '## Sessions')
   let listed = 0
   for (const r of rows) {
-    const isOwner = openLedger.some(item => item.owner === r.one.id)
+    const isOwner = openLedger.some(item => isSameId(item.owner, r.one.id))
     const isCaveat = !!caveatOf(r.track, push[r.one.id]) && settled(r.one.id) === undefined
     if (!input.isIncludingDone && !isActive(r.status) && !isCaveat && !r.one.hasOpenPr && !isOwner) continue
     listed += 1
