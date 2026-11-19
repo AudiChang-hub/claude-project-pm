@@ -6,8 +6,8 @@ import type { ElementConstructor, EngineInterface, RenderInputOf, RenderSurface,
 
 import type { AgentRecord, AgentState, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Step, Track } from '../types'
 import { agentName } from './agents'
-import { STATUS, agentTime, ago, caveatOf, clip, groupProjects, isActive, itemCode, liveTracks, openSteps, projectKey, settledAt, shownAgents, statusOf } from './sessions'
-import type { Project, Status } from './sessions'
+import { STATUS, agentTime, ago, caveatOf, clip, groupProjects, isActive, isDeliveredAgent, isDeliveredStatus, itemCode, liveTracks, openSteps, projectKey, qaShown, qaText, settledAt, shownAgents, statusOf } from './sessions'
+import type { Project, QaShown, Status } from './sessions'
 import { archive, claim, dismissBand, refresh, startPmSession } from './actions'
 import { t } from './messages'
 
@@ -69,6 +69,9 @@ async function toggleDetail($: EngineInterface, id: string, path: string) {
 
 const TRACK_HEX = '#9ca3af'
 const ACCENT_HEX = '#d97757'
+
+/** A work item's QA by its theme color: passed green, failed red, awaiting amber; skipped dimmed (none). */
+const QA_COLOR: Record<QaShown, string | undefined> = { pass: 'success', fail: 'error', awaiting: 'warning', skipped: undefined }
 
 // ── SVG marks: no text inside, mid-tone hues that read on light and dark ──
 
@@ -193,6 +196,15 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const items = shown.flatMap(project => (files[project.key]?.ledger ?? []).filter(i => i.status !== 'dropped'))
   const itemsDone = items.filter(i => i.status === 'done').length
   const unassigned = ledgers.filter(({ item }) => !item.owner).length
+  /** An item's QA: its verdict, or awaiting once its owner has delivered (a session ended, to release or on CI; an agent done or to verify). */
+  const qaOfItem = (item: LedgerItem): QaShown | null => {
+    const agent = item.owner?.startsWith('agent:') ? myAgents.find(a => `agent:${a.id}` === item.owner) : undefined
+    const owner = item.owner && !agent ? state.list.find(s => s.id === item.owner) : undefined
+
+    return qaShown(item, agent ? isDeliveredAgent(agent.state) : !!owner && isDeliveredStatus(statusOfOne(owner)))
+  }
+  const qaAwaiting = ledgers.filter(({ item }) => qaOfItem(item) === 'awaiting').length
+  const qaFailed = ledgers.filter(({ item }) => qaOfItem(item) === 'fail').length
   const steps = everyone.flatMap(one => all[one.id]?.plan ?? [])
   const stepsDone = steps.filter(s => s.status === 'completed').length
   const isByItems = items.length > 0
@@ -246,6 +258,20 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
               <Text dimColor>{t('pane.itemsOpen', { n: ledgers.length })}</Text>
               {unassigned > 0 && <Text color="warning">{t('pane.itemsUnassigned', { n: unassigned })}</Text>}
             </Text>
+          )}
+          {(qaAwaiting > 0 || qaFailed > 0) && (
+            <Box flexDirection="row" flexWrap="wrap" columnGap="sm">
+              {qaFailed > 0 && (
+                <Text key="kpi:qaFailed" size="caption" color="error" wrap="truncate-end">
+                  {t('pane.itemsQaFailed', { n: qaFailed })}
+                </Text>
+              )}
+              {qaAwaiting > 0 && (
+                <Text key="kpi:qaAwaiting" size="caption" color="warning" wrap="truncate-end">
+                  {t('pane.itemsQaAwaiting', { n: qaAwaiting })}
+                </Text>
+              )}
+            </Box>
           )}
         </Box>
       </Box>
@@ -457,6 +483,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
           ? t('pane.owner', { title: owner.title, status: STATUS[statusOfOne(owner)].label, elsewhere })
           : t('pane.ownerGone')
     const isKnown = !!owner || !!agent
+    const qa = qaOfItem(item)
 
     return (
       <Box key={`ledger:${project.key}:${item.id}`} flexDirection="row" columnGap="sm" alignItems="flex-start" paddingY="xs">
@@ -473,6 +500,11 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
               {isAll ? `${project.name}　·　${ownerText}` : ownerText}
             </Text>
           </Box>
+          {qa && (
+            <Text key={`qa:${item.id}`} size="caption" color={QA_COLOR[qa]} dimColor={!QA_COLOR[qa]} wrap="truncate-end">
+              {qaText(item, qa)}
+            </Text>
+          )}
         </Box>
       </Box>
     )

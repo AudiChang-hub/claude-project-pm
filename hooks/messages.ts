@@ -72,7 +72,8 @@ const zhTW = {
 9. 提到 Session 時用 [標題](#local_…) 連結它。
 10. 派工前先決定交給 Session 還是 Agent（Agent 工具），以額度為優先。之後會追問、要 commit／push／等 CI／發布、或要做比較久的，交給 Session；做完就結束、唯讀查詢、或幾分鐘內的小改動，開 Agent；拿不準時用 Session。要交給既有 Session 前先看它的最後活動：1 小時內有活動、而且還沒做很多輪的，才交給它（實測約 1.8 萬等值 tokens，最省）。閒置超過 1 小時、或已經做很多輪的大 Session，喚醒時要把整段上下文重新寫進快取（實測 65 萬上下文約 84 萬），小事改開新 Session（約 7 萬）或 Agent（唯讀的 Explore 約 6 萬，會寫檔的約 12～15 萬）。
 11. 開 Agent 時，description 以工作項目代號開頭（例如「T-12 比對撥款報表」），派出後用 ledger update 把 owner 設成 agent:<agentId>。mod 會讓它在背景執行，會寫檔的類型放進自己的 git worktree（Explore、Plan、claude-code-guide 留在原資料夾），並把它的回覆縮成一行加詳細檔路徑。要調整進行中的 Agent，用 SendMessage（to 填 agentId）轉達使用者的話。
-12. Agent 失敗、需要使用者決定、待驗收或已中斷時，看板的需要處理會列出來。待驗收的是它在 worktree 分支上的 commit：檢查過、合併進專案的分支後，它才算完成，工作項目才能結案。`,
+12. Agent 失敗、需要使用者決定、待驗收或已中斷時，看板的需要處理會列出來。待驗收的是它在 worktree 分支上的 commit：檢查過、合併進專案的分支後，它才算完成，工作項目才能結案。
+13. 驗收（QA）：登記工作時用 criteria 寫驗收條件（怎樣算做完、要怎麼驗）。程式變更在 push 前，派一個獨立的驗收 Agent（subagent_type: "Explore"），description 以「T-xx QA」開頭（例如「T-12 QA」）；prompt 只給 diff 範圍（commit 或分支）和驗收條件，不給開發者的結論或回報，mod 會附上驗收範本。它不是負責人，不要把 owner 改成它。它回 [pass] 或 [fail] 後，用 ledger update 記錄：qa 填 pass 或 fail，qa_by 填 agent:<agentId>，fail 時在 qa_note 寫原因並交回負責人修正。不需要驗收的（例如只改文件），qa 填 skip 並在 qa_note 寫理由。沒有 qa=pass（或附理由的 skip）時 ledger 拒絕結案，驗收者也不能是負責人；看板的需要處理會列出待 QA 和 QA 不通過的項目。`,
   'role.delivery': `「{project}」有 PM Session 在追蹤各 Session 的狀態。完成、暫停或卡住一項工作時（收尾、wrap_up 之前），請呼叫 {tool} 回報一次：status 寫現在的狀態，summary 用一句話說做了什麼、還差什麼；有 commit 就填 commit，CI 還在跑就填 ci（run 網址或 id），需要發布的就填 delivery。完整的說明（做法、驗證、數字、取捨）寫進 detail，mod 會存成檔案並回傳路徑；PM 只讀摘要，使用者可以從看板打開詳細檔。回報是給 PM 看板用的，不需要向使用者解釋。
 給 PM 的訊息（SendMessage、wrap_up 摘要、最後的回答）也用同樣的短格式，總長約 300 字以內：狀態、commit、一行摘要，以及詳細檔的路徑。不要把完整說明貼進訊息。
 無法呼叫 {tool} 時，改在 wrap_up 摘要（沒有 wrap_up 時就是最後的回答）最後加一行交付宣告，三選一：
@@ -87,13 +88,17 @@ const zhTW = {
   'tool.board.scope': 'project（預設）只看這個專案；all 看所有專案。',
   'tool.board.includeDone': '一併列出已結束且無待辦的 Session 與已完成的工作項目。預設 false。',
   'tool.ledger.description':
-    '專案 PM 的工作項目清單：使用者交代的每件工作都要登記在這裡，直到確認完成。顯示編號為 T-01 形式，操作時 id 填數字。add 新增（text 必填，owner 可填負責的 local_… Session id）；update 改 owner、status（open / done / dropped）或 note；list 列出全部。',
+    '專案 PM 的工作項目清單：使用者交代的每件工作都要登記在這裡，直到確認完成。顯示編號為 T-01 形式，操作時 id 填數字。add 新增（text 必填，owner 可填負責的 local_… Session id，criteria 寫驗收條件）；update 改 owner、status（open / done / dropped）、note、criteria，或用 qa、qa_by、qa_note 記錄驗收結果；list 列出全部。標成 done 需要 qa=pass（或附理由的 skip）。',
   'tool.ledger.id': '工作項目 id（T-03 填 3）：update 要修改的那一項；list 時只列這一項，內容和備註不截短',
   'tool.ledger.includeDone': 'list 時一併列出已結案和放棄的項目（預設只列未結案的）',
   'tool.ledger.text': '工作項目內容（add 必填；update 時可改寫）',
   'tool.ledger.owner': '負責的 Session id（local_…）；空字串表示取消指派',
   'tool.ledger.note': '備註：進度、驗收結果、為什麼放棄',
-  'tool.ledger.force': '負責 Session 仍在等 CI 或未完成時，強制結案。只有使用者明確確認時才能用，且 note 必填。',
+  'tool.ledger.criteria': '驗收條件：怎樣算做完、要怎麼驗（add 或 update 時填；空字串清除）',
+  'tool.ledger.qa': '記錄一次驗收：pass（通過）、fail（不通過）、skip（不需要驗收，qa_note 必填）。新的紀錄取代舊的。',
+  'tool.ledger.qaBy': '驗收者：QA Agent 填 agent:<agentId>，Session 填 local_… id，使用者填 user。pass 和 fail 必填，不能是負責人。',
+  'tool.ledger.qaNote': '驗收說明：fail 的原因、skip 的理由',
+  'tool.ledger.force': '負責 Session 仍在等 CI、未完成或還沒通過驗收時，強制結案。只有使用者明確確認時才能用，且 note 必填。',
   'tool.report.description': '向這個專案的 PM 回報你目前的工作狀態。完成、暫停、卡住或交給背景作業時都要呼叫一次；PM 看板以這份回報為準，不再從你的文字猜。',
   'tool.report.status': 'done：做完了（需要發布的已發布或不需要發布）；in_progress：還在做但這回合先停；blocked：卡住，需要別人處理；waiting_user：在等使用者回覆或決定；waiting_ci：等 CI 跑完；waiting_release：做完了但還沒發布或部署。',
   'tool.report.summary': '一句話：做了什麼、還差什麼。',
@@ -179,8 +184,17 @@ const zhTW = {
   'board.section.items': '## 工作項目',
   'board.none': '（無）',
   'board.allDone': '（全部完成）',
-  'board.item': '- {code} (id {id}) [{status}] {text}｜負責：{owner}{note}',
+  'board.item': '- {code} (id {id}) [{status}] {text}｜負責：{owner}{qa}{criteria}{note}',
   'board.itemNote': '｜備註：{note}',
+  'board.itemQa': '｜{qa}',
+  'board.itemCriteria': '｜驗收條件：{criteria}',
+  'board.attention.qaAwaiting': '- [待 QA] {code}「{text}」：{owner}已交付，還沒有驗收紀錄。派一個「{code} QA」Agent 驗收',
+  'board.attention.qaFailed': '- [QA 不通過] {code}「{text}」：{note}（{by}）',
+  'qa.pass': 'QA 通過（{by}）',
+  'qa.fail': 'QA 不通過（{by}）',
+  'qa.skipped': 'QA 略過：{note}',
+  'qa.awaiting': '待 QA',
+  'qa.noNote': '沒有寫原因',
   'board.flag.pr': 'PR 開啟中',
   'board.flag.pinned': '已釘選',
   'board.lastActive': '最後活動 {ago}{flags}',
@@ -220,7 +234,14 @@ const zhTW = {
   'ledger.empty': '目前沒有工作項目。',
   'ledger.noneOpen': '沒有未結案的工作項目。',
   'ledger.hidden': '（另有 {n} 項已結案或放棄；include_done: true 列出全部，指定 id 看單項完整內容）',
-  'ledger.row': '{code} (id {id}) [{status}] {text}｜負責：{owner}{note}',
+  'ledger.row': '{code} (id {id}) [{status}] {text}｜負責：{owner}{qa}{criteria}{note}',
+  'ledger.qaBad': 'qa 只能是 pass、fail 或 skip，這次沒有修改。',
+  'ledger.qaNeedsBy': 'qa 為 pass 或 fail 時要填 qa_by（驗收者，例如 agent:<agentId>），這次沒有修改。',
+  'ledger.qaNeedsNote': 'qa 為 skip 時要在 qa_note 寫理由（例如「只改文件」），這次沒有修改。',
+  'ledger.qaByOwner': '驗收者不能是負責人（{owner}），這次沒有修改。派一個獨立的「{code} QA」Agent 驗收。',
+  'ledger.qaNone': '無法將 {code} 標記為完成：還沒有驗收紀錄。派一個獨立的驗收 Agent（subagent_type: "Explore"，description 以「{code} QA」開頭，只給 diff 範圍和驗收條件），通過後用 qa: "pass"、qa_by: "agent:<agentId>" 記錄再結案。不需要驗收的（例如只改文件），qa 填 skip 並在 qa_note 寫理由。',
+  'ledger.qaFailed': '無法將 {code} 標記為完成：驗收不通過（{note}）。交回負責人修正，再派一次「{code} QA」驗收。',
+  'ledger.qaByOwnerClose': '無法將 {code} 標記為完成：驗收者 {by} 就是負責人。派一個獨立的「{code} QA」Agent 重新驗收。',
   'ledger.unassigned': '未指派',
   'ledger.noProject': '此 Session 不屬於任何專案，沒有工作項目。',
   'ledger.needText': 'add 需要 text。',
@@ -252,6 +273,8 @@ const zhTW = {
   'pane.noItems': '尚無工作項目',
   'pane.itemsOpen': '{n} 項進行中',
   'pane.itemsUnassigned': '　·　{n} 項未指派',
+  'pane.itemsQaAwaiting': '{n} 項待 QA',
+  'pane.itemsQaFailed': '{n} 項 QA 不通過',
   'pane.kpiRunning': '執行中',
   'pane.kpiAsking': '待回覆',
   'pane.kpiOpen': '尚未完成',
@@ -288,12 +311,22 @@ const zhTW = {
   'pane.ownerAgent': '負責　Agent・{name}・{status}',
   'pane.agentsHidden': '另有 {n} 個已完成或已捨棄的 Agent',
   'agent.brief': `這是 PM 派給你的背景工作（工作項目 {item}）。規則：
-- 只做這件事。不要 push、不要發布，也不要改 PM 的 ledger。
-- 最後一則回覆只寫一行：[狀態, commit] 一行摘要。狀態寫 done、waiting_user（需要使用者決定，把問題寫在摘要）或 blocked；沒有 commit 就省略。
-- 完整說明（做法、驗證、數字、取捨）寫進這個檔案：{detail}。PM 只讀那一行，使用者可以從看板打開這個檔案。`,
+- 只做這件事。不要 push、不要發布，也不要改 PM 的 ledger。`,
+  'agent.briefReply': '- 最後一則回覆的第一行：[狀態, commit] 一行摘要。狀態寫 done、waiting_user（需要使用者決定，把問題寫在摘要）或 blocked；沒有 commit 就省略。',
+  'agent.briefQaReply': '- 最後一則回覆的第一行：[pass] 或 [fail]，接一行摘要（例如「[fail] 修 bug 沒有重現測試」）。每一項檢查都通過才寫 pass。',
+  'agent.briefDetailFile': '- 完整說明（做法、驗證、數字、取捨）寫進這個檔案：{detail}。PM 只讀那一行，使用者可以從看板打開這個檔案。',
+  'agent.briefDetailReply': '- 你不能寫檔：完整說明（做法、驗證、數字、取捨）接在第一行後面，寫在同一則回覆裡。mod 會把它存成檔案，PM 只讀第一行，使用者可以從看板打開。',
+  'agent.briefQa': `這是 {item} 的獨立驗收（QA）。你只拿到 diff 範圍和驗收條件，沒有開發者的結論：自己看、自己跑，不要相信 commit 訊息或回報裡的說法。逐項檢查：
+1. diff 只包含這個工作項目的標的，沒有順手改別的（鐵律：只改要改的標的）。
+2. 修 bug 的變更有重現測試，而且這個測試在修正之前會失敗（準則第 3 條）。在專案資料夾以外取出修正前的版本（例如 git archive 到暫存資料夾），放上新測試跑一次確認；不要改專案資料夾裡的檔案。
+3. 測試、validate 都通過：實際執行，看 exit code，不要只看輸出文字。
+4. 版號和 CHANGELOG 照開發準則（沒有準則時照專案自己的慣例）。
+5. 沒有夾帶 secret、token、密碼或本機設定（本機路徑、帳號、.env、settings.local 之類）。
+6. 改到介面時，打開實際畫面看（有瀏覽器或預覽工具時）。
+沒辦法做的檢查（例如沒有工具看畫面）寫在回覆裡，不能當作通過。`,
   'agent.noItem': '未指定',
   'agent.briefWorktree': '你在自己的 git worktree 裡工作：可以修改檔案，並在這個分支上 commit，交給 PM 驗收和合併。不要切換到其他分支，也不要 push。',
-  'agent.briefReadOnly': '這是唯讀工作：除了上面的詳細檔，不要修改任何檔案。',
+  'agent.briefReadOnly': '這是唯讀工作：不要修改任何檔案。',
   'agent.detailLine': '詳細：{path}',
   'agent.noRepo': '這個專案的資料夾不是 git repo，沒有 worktree 可以隔離會寫檔的 Agent。唯讀的工作改用 Explore 類型；要修改檔案的工作請交給 Session。',
   'agent.state.running': '執行中',
@@ -406,7 +439,8 @@ Rules:
 9. When you mention a session, link it as [title](#local_…).
 10. Before handing out work, choose a session or an agent (the Agent tool), quota first. Work you will follow up on, that commits, pushes, waits on CI or releases, or that takes long goes to a session; work that ends when it is done, read-only questions and changes of a few minutes go to an agent; when unsure, use a session. Before giving work to a session that is already open, check its last activity: give it the work only if it was active within the last hour and has not run many turns (measured at about 18,000 input-equivalent tokens, the cheapest). Waking a session that has been idle for over an hour, or a large one that has run many turns, writes its whole context into the cache again (a 650,000-token context measured at about 840,000), so for a small thing open a new session (about 70,000) or an agent (about 60,000 for a read-only Explore agent, 120,000 to 150,000 for one that writes files).
 11. When you start an agent, lead its description with the work item's code (for example "T-12 Reconcile payouts"), and once it is started set the item's owner to agent:<agentId> with a ledger update. The mod runs it in the background, puts a type that may write in a git worktree of its own (Explore, Plan and claude-code-guide stay in the folder), and cuts its reply to one line and the path of its detail file. To adjust a running agent, pass the user's words on with SendMessage (to: its agentId).
-12. An agent that failed, needs the user to decide, is waiting to be verified or was interrupted shows under the board's "Needs attention". One to verify has committed on its worktree branch: once you have checked the commit and merged it into the project's branch, it is done and its work item can close.`,
+12. An agent that failed, needs the user to decide, is waiting to be verified or was interrupted shows under the board's "Needs attention". One to verify has committed on its worktree branch: once you have checked the commit and merged it into the project's branch, it is done and its work item can close.
+13. QA: when you record work, write its acceptance criteria in criteria (what counts as done, and how to check it). Before a code change is pushed, start an independent QA agent (subagent_type: "Explore") whose description leads with "T-xx QA" (for example "T-12 QA"); give its prompt only the diff's range (a commit or branch) and the criteria, never the developer's conclusions or report. The mod adds the QA checklist. It is not the owner: do not make it the item's owner. Once it answers [pass] or [fail], record it with a ledger update: qa pass or fail, qa_by agent:<agentId>, and on a fail the reason in qa_note, handing the work back to its owner to fix. Work that needs no QA (for example a change to docs only) takes qa skip with the reason in qa_note. Without qa=pass (or a skip with its reason) the ledger refuses to close an item, and whoever checked it may not be its owner; the board's "Needs attention" lists items awaiting QA and items that failed it.`,
   'role.delivery': `"{project}" has a PM session tracking each session's state. When you finish, pause or get stuck on a piece of work (at the end, before wrap_up), call {tool} once: status is where it stands now, summary one sentence on what was done and what is left; fill commit when you committed, ci (the run URL or id) while CI is still running, and delivery when the work needs releasing. Put the full account (how, how it was checked, numbers, trade-offs) in detail: the mod saves it to a file and answers with its path. The PM reads the summary alone; the user can open the detail file from the board. The report is for the PM's board; there is no need to explain it to the user.
 Messages to the PM (SendMessage, the wrap_up recap, your final answer) take the same short form, about 300 characters in all: the status, the commit, a one-line summary and the detail file's path. Do not paste the full account into a message.
 When you cannot call {tool}, end your wrap_up recap (or, without wrap_up, your final answer) with one delivery line instead, one of:
@@ -420,13 +454,17 @@ Delivery: pending (what it waits on)`,
   'tool.board.scope': 'project (default) shows this project only; all shows every project.',
   'tool.board.includeDone': 'Also list ended sessions with nothing left and work items that are done. Default false.',
   'tool.ledger.description':
-    "The project PM's work items: record every piece of work the user asks for here until it is confirmed done. Items read as T-01; pass the number as id. add creates one (text required, owner optional: the owning local_… session id); update changes owner, status (open / done / dropped) or note; list shows them all.",
+    "The project PM's work items: record every piece of work the user asks for here until it is confirmed done. Items read as T-01; pass the number as id. add creates one (text required, owner optional: the owning local_… session id, criteria its acceptance criteria); update changes owner, status (open / done / dropped), note or criteria, or records a QA verdict with qa, qa_by and qa_note; list shows them all. Marking one done needs qa=pass (or a skip with its reason).",
   'tool.ledger.id': 'A work item id (3 for T-03): the one to update; with list, only that item, its text and note in full',
   'tool.ledger.includeDone': 'With list, also show items done or dropped (by default only open ones)',
   'tool.ledger.text': 'What the work item is (required for add; may be rewritten on update)',
   'tool.ledger.owner': 'The owning session id (local_…); an empty string unassigns it',
   'tool.ledger.note': 'A note: progress, how it was checked, why it was dropped',
-  'tool.ledger.force': 'Close the item although its owner is still waiting on CI or unfinished. Only when the user has explicitly confirmed it; note is then required.',
+  'tool.ledger.criteria': 'Acceptance criteria: what counts as done, and how to check it (on add or update; an empty string clears them)',
+  'tool.ledger.qa': 'Record a QA verdict: pass, fail, or skip (needs no QA; qa_note required). A new verdict replaces the last.',
+  'tool.ledger.qaBy': 'Who checked it: agent:<agentId> for a QA agent, a local_… id for a session, user for the user. Required for pass and fail; never the owner.',
+  'tool.ledger.qaNote': 'About the verdict: why it failed, why QA was skipped',
+  'tool.ledger.force': 'Close the item although its owner is still waiting on CI, unfinished, or not through QA. Only when the user has explicitly confirmed it; note is then required.',
   'tool.report.description': 'Report where your work stands to this project\'s PM. Call it once whenever you finish, pause, get stuck or hand work to the background; the PM\'s board goes by this report rather than guessing from your words.',
   'tool.report.status': 'done: finished (released, or nothing to release); in_progress: still working but stopping this turn; blocked: stuck, someone else must act; waiting_user: waiting on the user\'s answer or decision; waiting_ci: waiting for CI to finish; waiting_release: finished but not yet released or deployed.',
   'tool.report.summary': 'One sentence: what was done and what is left.',
@@ -509,8 +547,17 @@ Delivery: pending (what it waits on)`,
   'board.section.items': '## Work items',
   'board.none': '(none)',
   'board.allDone': '(all done)',
-  'board.item': '- {code} (id {id}) [{status}] {text} | owner: {owner}{note}',
+  'board.item': '- {code} (id {id}) [{status}] {text} | owner: {owner}{qa}{criteria}{note}',
   'board.itemNote': ' | note: {note}',
+  'board.itemQa': ' | {qa}',
+  'board.itemCriteria': ' | criteria: {criteria}',
+  'board.attention.qaAwaiting': '- [Awaiting QA] {code} "{text}": its owner {owner} has delivered and there is no QA record. Start a "{code} QA" agent',
+  'board.attention.qaFailed': '- [QA failed] {code} "{text}": {note} ({by})',
+  'qa.pass': 'QA passed ({by})',
+  'qa.fail': 'QA failed ({by})',
+  'qa.skipped': 'QA skipped: {note}',
+  'qa.awaiting': 'awaiting QA',
+  'qa.noNote': 'no reason given',
   'board.flag.pr': 'PR open',
   'board.flag.pinned': 'pinned',
   'board.lastActive': 'Last active {ago}{flags}',
@@ -548,7 +595,14 @@ Delivery: pending (what it waits on)`,
   'ledger.empty': 'No work items yet.',
   'ledger.noneOpen': 'No open work items.',
   'ledger.hidden': '({n} more done or dropped; include_done: true lists all, an id shows one item in full)',
-  'ledger.row': '{code} (id {id}) [{status}] {text} | owner: {owner}{note}',
+  'ledger.row': '{code} (id {id}) [{status}] {text} | owner: {owner}{qa}{criteria}{note}',
+  'ledger.qaBad': 'qa is pass, fail or skip; nothing was changed.',
+  'ledger.qaNeedsBy': 'qa pass or fail needs qa_by (who checked it, for example agent:<agentId>); nothing was changed.',
+  'ledger.qaNeedsNote': 'qa skip needs its reason in qa_note (for example "docs only"); nothing was changed.',
+  'ledger.qaByOwner': 'Whoever checks an item may not be its owner ({owner}); nothing was changed. Start an independent "{code} QA" agent.',
+  'ledger.qaNone': 'Cannot mark {code} done: it has no QA record. Start an independent QA agent (subagent_type: "Explore", its description leading with "{code} QA", given only the diff\'s range and the criteria); once it passes, record qa: "pass", qa_by: "agent:<agentId>", then close it. Work that needs no QA (for example docs only) takes qa skip with the reason in qa_note.',
+  'ledger.qaFailed': 'Cannot mark {code} done: it failed QA ({note}). Hand it back to its owner to fix, then start "{code} QA" again.',
+  'ledger.qaByOwnerClose': 'Cannot mark {code} done: it was checked by {by}, its owner. Start an independent "{code} QA" agent to check it again.',
   'ledger.unassigned': 'unassigned',
   'ledger.noProject': 'This session belongs to no project, so it has no work items.',
   'ledger.needText': 'add needs text.',
@@ -578,6 +632,8 @@ Delivery: pending (what it waits on)`,
   'pane.noItems': 'No work items yet',
   'pane.itemsOpen': '{n} open',
   'pane.itemsUnassigned': '　·　{n} unassigned',
+  'pane.itemsQaAwaiting': '{n} awaiting QA',
+  'pane.itemsQaFailed': '{n} failed QA',
   'pane.kpiRunning': 'Running',
   'pane.kpiAsking': 'Waiting on you',
   'pane.kpiOpen': 'Not finished',
@@ -614,12 +670,22 @@ Delivery: pending (what it waits on)`,
   'pane.ownerAgent': 'Owner　Agent · {name} · {status}',
   'pane.agentsHidden': '{n} more {n|agent|agents} done or dropped',
   'agent.brief': `This is background work the PM has given you (work item {item}). The rules:
-- Do this and nothing else. Do not push, do not release, and do not change the PM's ledger.
-- Your final reply is one line: [status, commit] a one-line summary. The status is done, waiting_user (the user must decide: put the question in the summary) or blocked; leave the commit out when you made none.
-- Write the full account (how, how it was checked, numbers, trade-offs) to this file: {detail}. The PM reads the one line; the user can open the file from the board.`,
+- Do this and nothing else. Do not push, do not release, and do not change the PM's ledger.`,
+  'agent.briefReply': '- The first line of your final reply: [status, commit] a one-line summary. The status is done, waiting_user (the user must decide: put the question in the summary) or blocked; leave the commit out when you made none.',
+  'agent.briefQaReply': '- The first line of your final reply: [pass] or [fail], then a one-line summary (for example "[fail] the bug fix has no test that reproduces it"). Write pass only when every check passed.',
+  'agent.briefDetailFile': '- Write the full account (how, how it was checked, numbers, trade-offs) to this file: {detail}. The PM reads the one line; the user can open the file from the board.',
+  'agent.briefDetailReply': '- You cannot write files: put the full account (how, how it was checked, numbers, trade-offs) after the first line, in the same reply. The mod saves it to a file; the PM reads the first line, and the user can open the rest from the board.',
+  'agent.briefQa': `This is the independent QA of {item}. You have only the diff's range and the acceptance criteria, not the developer's conclusions: look and run things yourself, and do not take a commit message or a report at its word. Check each of these:
+1. The diff holds only what this work item is about, nothing changed on the side (the iron rule: change only what is to be changed).
+2. A bug fix comes with a test that reproduces the bug and fails before the fix (guideline 3). Take the version before the fix outside the project's folder (for example git archive into a temporary folder), put the new test in it and run it; change no file in the project's folder.
+3. The tests and validate pass: run them and read the exit code, not just the output.
+4. The version and CHANGELOG follow the development guidelines (without guidelines, the project's own practice).
+5. No secret, token, password or local setting rides along (local paths, accounts, .env, settings.local and the like).
+6. When the interface changed, look at it on screen (when a browser or preview tool is at hand).
+A check you could not make (no tool to see the screen, say) goes in your reply, and does not count as passed.`,
   'agent.noItem': 'none given',
   'agent.briefWorktree': 'You work in a git worktree of your own: you may change files and commit on its branch, for the PM to verify and merge. Do not switch to another branch, and do not push.',
-  'agent.briefReadOnly': 'This work only reads: change no file other than the detail file above.',
+  'agent.briefReadOnly': 'This work only reads: change no file.',
   'agent.detailLine': 'Detail: {path}',
   'agent.noRepo': 'This project\'s folder is not a git repository, so there is no worktree to keep an agent that may write apart. Use the Explore type for work that only reads; give work that changes files to a session.',
   'agent.state.running': 'Running',

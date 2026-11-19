@@ -40,6 +40,8 @@ import {
   ledgerRow,
   ledgerText,
   liveTracks,
+  qaBlocker,
+  qaOfInput,
   quoteOf,
   settledAt,
   openSteps,
@@ -1120,6 +1122,10 @@ export async function registerTools($: EngineInterface) {
         owner: { type: 'string', description: t('tool.ledger.owner') },
         status: { type: 'string', enum: ['open', 'done', 'dropped'] },
         note: { type: 'string', description: t('tool.ledger.note') },
+        criteria: { type: 'string', description: t('tool.ledger.criteria') },
+        qa: { type: 'string', enum: ['pass', 'fail', 'skip'], description: t('tool.ledger.qa') },
+        qa_by: { type: 'string', description: t('tool.ledger.qaBy') },
+        qa_note: { type: 'string', description: t('tool.ledger.qaNote') },
         force: { type: 'boolean', description: t('tool.ledger.force') },
       },
       required: ['action'],
@@ -1322,6 +1328,7 @@ export async function ledger($: EngineInterface, input: Record<string, unknown>)
       note: str(input.note) ?? '',
       createdAt: now,
       updatedAt: now,
+      ...(str(input.criteria)?.trim() ? { criteria: str(input.criteria)!.trim() } : {}),
     }
     await saveProject($, { ...project, ledger: [...project.ledger, item], nextId: project.nextId + 1 })
 
@@ -1332,21 +1339,30 @@ export async function ledger($: EngineInterface, input: Record<string, unknown>)
     const item = project.ledger.find(i => i.id === id)
     if (!item) return t('ledger.notFound', { id: String(input.id) })
     const status = str(input.status)
-    if (status === 'done' && item.status !== 'done') {
-      const owner = input.owner === undefined ? item.owner : str(input.owner) || null
+    const owner = input.owner === undefined ? item.owner : str(input.owner) || null
+    // A QA verdict that cannot be recorded changes nothing: the answer says what it lacks.
+    const verdict = qaOfInput(input, owner, self.id ?? 'pm', now, itemCode(id))
+    if (verdict && 'error' in verdict) return `${verdict.error}\n${ledgerRow(item)}`
+    const qa = verdict?.qa ?? item.qa
+    if (status === 'done' && item.status !== 'done' && !(input.force === true && str(input.note)?.trim())) {
+      // QA first: it asks neither GitHub nor git.
+      const unchecked = qaBlocker(qa, owner, itemCode(id))
+      if (unchecked) return `${unchecked}\n${ledgerRow(item)}`
       const blocker = owner ? await ownerBlocker($, owner) : null
-      if (blocker && !(input.force === true && str(input.note)?.trim())) {
-        return `${t('ledger.refused', { code: itemCode(id), blocker })}\n${ledgerRow(item)}`
-      }
+      if (blocker) return `${t('ledger.refused', { code: itemCode(id), blocker })}\n${ledgerRow(item)}`
     }
+    const criteria = input.criteria === undefined ? item.criteria : str(input.criteria)?.trim() || undefined
     const changed: LedgerItem = {
       ...item,
       text: str(input.text)?.trim() || item.text,
-      owner: input.owner === undefined ? item.owner : str(input.owner) || null,
+      owner,
       status: status === 'open' || status === 'done' || status === 'dropped' ? status : item.status,
       note: str(input.note) ?? item.note,
       updatedAt: now,
+      ...(criteria ? { criteria } : {}),
+      ...(qa ? { qa } : {}),
     }
+    if (!criteria) delete changed.criteria
     const list = project.ledger.map(i => (i.id === id ? changed : i))
     await saveProject($, { ...project, ledger: list })
 

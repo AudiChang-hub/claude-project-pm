@@ -16,8 +16,36 @@ jobs:
     env:
       # The Claude Code version the plugin is tested with; neither command needs a login or an API key.
       CLAUDE_CODE_VERSION: 2.1.317
+      # Whether the BLOCKED_TERMS secret is set: a step's `if` cannot read secrets, only this.
+      HAS_BLOCKED_TERMS: ${{ secrets.BLOCKED_TERMS != '' }}
     steps:
       - uses: actions/checkout@v4
+      # Real data (names, places, accounts) must never reach the repository. The list lives only in the repo secret
+      # BLOCKED_TERMS, one term per line; without it (or on a fork's pull request) this step is skipped. The output
+      # names the file and line of each hit, never the term or the line.
+      - name: Scan for blocked terms
+        if: env.HAS_BLOCKED_TERMS == 'true'
+        env:
+          BLOCKED_TERMS: ${{ secrets.BLOCKED_TERMS }}
+        run: |
+          terms="$RUNNER_TEMP/blocked-terms"
+          # Trimmed, without blank lines: an empty pattern would match every line.
+          printf '%s\n' "$BLOCKED_TERMS" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' > "$terms"
+          if [ ! -s "$terms" ]; then
+            rm -f "$terms"
+            echo "BLOCKED_TERMS holds no terms; nothing to scan."
+            exit 0
+          fi
+          hits="$(git grep -n -I -i -F -f "$terms" | cut -d: -f1,2 || true)"
+          rm -f "$terms"
+          if [ -n "$hits" ]; then
+            echo "Blocked terms found on $(printf '%s\n' "$hits" | wc -l) line(s); the terms are not printed."
+            printf '%s\n' "$hits" | while IFS=: read -r file line; do
+              echo "::error file=${file},line=${line}::A blocked term is on this line."
+            done
+            exit 1
+          fi
+          echo "No blocked terms in $(git ls-files | wc -l) tracked files."
       - uses: actions/setup-node@v4
         with:
           node-version: 22

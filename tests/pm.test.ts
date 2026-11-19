@@ -2,9 +2,10 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, statusOf, undeliveredOf } from '../hooks/sessions'
+import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isDeliveredAgent, isDeliveredStatus, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, qaBlocker, qaShown, reportOf, reportWords, statusOf, undeliveredOf } from '../hooks/sessions'
+import type { Status } from '../hooks/sessions'
 import { closesBoard } from '../hooks/actions'
-import { commitOfLine, isSettledAgent, itemOf, noticesOf, settledAgentState, stateOf } from '../hooks/agents'
+import { commitOfLine, isQaDescription, isSettledAgent, itemOf, noticesOf, settledAgentState, stateOf } from '../hooks/agents'
 import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hooks/messages'
 import type { Lang, MessageKey } from '../hooks/messages'
 import { installOf, isReplaced } from '../hooks/update'
@@ -249,7 +250,7 @@ test('the ledger will not close an item while its session waits on CI', ZH, asyn
   const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
   expect(board).toMatch(/\[等待 CI・未完成\] 「商品列表頁」\(local_open\) 最後回報 CI 尚未跑完/)
 
-  const refused = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done' } as never)) as { result?: unknown }).result)
+  const refused = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'user' } as never)) as { result?: unknown }).result)
   expect(refused).toMatch(/無法將 T-01 標記為完成：負責的 Session「商品列表頁」CI 尚未跑完/)
   expect(JSON.parse(files.get(PROJECT_FILE)!).ledger[0].status).toBe('open')
 
@@ -365,7 +366,7 @@ test('a track that missed later turns gives way to the transcript', ZH, async ($
   expect(board).not.toMatch(/\[需追蹤\] 「商品列表頁」/)
   expect(board).toMatch(/最後回報：已部署 2.4.0，正式站驗證通過。/)
 
-  const closed = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done' } as never)) as { result?: unknown }).result)
+  const closed = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'user' } as never)) as { result?: unknown }).result)
   expect(closed).toMatch(/已更新工作項目 T-01/)
 })
 
@@ -393,7 +394,7 @@ test('GitHub decides whether CI the words left running is still running', ZH, as
   await clock.advance(400)
   const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
   const close = async () =>
-    String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done' } as never)) as { result?: unknown }).result)
+    String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'user' } as never)) as { result?: unknown }).result)
 
   // Still running on GitHub: the old guard stands.
   expect(await board()).toMatch(/\[等待 CI・未完成\] 「商品列表頁」/)
@@ -1068,7 +1069,7 @@ test('a session whose words leave its work undelivered is not ended, however tic
   expect(board).not.toMatch(/\[已結束\] 商品列表頁/)
 
   const close = async (extra: object = {}) =>
-    String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done', ...extra } as never)) as { result?: unknown }).result)
+    String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'user', ...extra } as never)) as { result?: unknown }).result)
   expect(await close()).toMatch(/無法將 T-01 標記為完成：負責的 Session「商品列表頁」最後回報尚未交付/)
   expect(await close({ force: true, note: '使用者確認 2.4.2 已上線' })).toMatch(/已更新工作項目 T-01/)
 })
@@ -1094,7 +1095,7 @@ test('a commit kept here until the PM confirms is undelivered until git shows it
   await $.session.start(START)
   const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
   const close = async () =>
-    String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done' } as never)) as { result?: unknown }).result)
+    String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'user' } as never)) as { result?: unknown }).result)
 
   expect(await board()).toMatch(/\[待發布・未完成\] 「商品列表頁」\(local_open\) 最後回報尚未交付（push）/)
   expect(asked).toContain(`git branch -r --contains 9638755 @ ${PROJECT}`)
@@ -1404,7 +1405,7 @@ test('a fix pushed after a cancelled or failed commit is what CI waits on', ZH, 
   shown = await board()
   expect(shown).toMatch(/\[等待 CI・未完成\] 「商品列表頁」/)
   expect(shown).not.toMatch(/CI 失敗・需處理\] 「商品列表頁」/)
-  const refused = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done' } as never)) as { result?: unknown }).result)
+  const refused = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'user' } as never)) as { result?: unknown }).result)
   expect(refused).toMatch(/無法將 T-01 標記為完成：負責的 Session「商品列表頁」CI 尚未跑完/)
 })
 
@@ -1468,7 +1469,7 @@ test('in English: the board, the ledger and the pane', { options: { language: 'e
   // Only the data stays as it was written: the sessions' titles, the project's folder, a transcript's words.
   expect(board.replace(/商品列表頁|移除舊版優惠欄位|金流對帳|Acme 商店後台|已修好。/g, '')).not.toMatch(/[一-鿿]/)
 
-  const refused = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 2, status: 'done' } as never)) as { result?: unknown }).result)
+  const refused = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 2, status: 'done', qa: 'pass', qa_by: 'user' } as never)) as { result?: unknown }).result)
   expect(refused).toMatch(/^Cannot mark T-02 done: The owning session "移除舊版優惠欄位" is waiting on CI \(last report: /)
   expect(refused).toMatch(/pass force: true/)
 
@@ -1994,7 +1995,7 @@ test('a released report is delivered, and the ledger closes it without force', Z
   const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
   expect(board).not.toMatch(/待發布・未完成\] 「商品列表頁」/)
   expect(board).not.toMatch(/Committed as|Delivery: deployed/)
-  const close = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done' } as never)) as { result?: unknown }).result)
+  const close = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'user' } as never)) as { result?: unknown }).result)
   expect(close).toMatch(/已更新工作項目 T-01/)
 })
 
@@ -2233,7 +2234,7 @@ test("the PM's agents: in the background, in a worktree unless they only read, f
 
   // An agent owns a work item: it is not closed while the agent runs, and an agent cannot change the ledger.
   await ledger({ action: 'add', text: '修正匯出欄位順序', owner: 'agent:a1' })
-  expect(await ledger({ action: 'update', id: 1, status: 'done' })).toMatch(/^無法將 T-01 標記為完成：負責的 Agent「T-12 修正匯出欄位順序」執行中/)
+  expect(await ledger({ action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'agent:q1' })).toMatch(/^無法將 T-01 標記為完成：負責的 Agent「T-12 修正匯出欄位順序」執行中/)
   expect(await ledger({ action: 'update', id: 1, status: 'done', agentId: 'a1' })).toBe('Agent 只能讀 ledger（list），新增和修改工作項目是 PM 的事。把要改的內容寫在你的回覆裡，交給 PM。')
   expect(await ledger({ action: 'add', text: '另一件事', agentId: 'a1' })).toMatch(/^Agent 只能讀 ledger/)
   expect(await ledger({ action: 'list', agentId: 'a1' })).toMatch(/^T-01 \(id 1\) \[open\] 修正匯出欄位順序｜負責：agent:a1/)
@@ -2246,7 +2247,7 @@ test("the PM's agents: in the background, in a worktree unless they only read, f
   expect(w.seen.at(-1)).toContain(`<result>[done, 3fa1c2e] 欄位依範本排序，新增 6 項測試\n詳細：${kept}</result>`)
   expect(w.seen.at(-1)).not.toContain('做法')
   expect(agents()[0]).toMatchObject({ state: 'verify', commit: '3fa1c2e', tokens: 58000, tools: 12, durationMs: 140000, detail: kept, worktree: { branch: 'worktree-agent-a1' } })
-  expect(await ledger({ action: 'update', id: 1, status: 'done' })).toMatch(/負責的 Agent「T-12 修正匯出欄位順序」待驗收/)
+  expect(await ledger({ action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'agent:q1' })).toMatch(/負責的 Agent「T-12 修正匯出欄位順序」待驗收/)
   const text = await board()
   expect(text).toMatch(/- \[Agent 待驗收\] T-12 修正匯出欄位順序：commit 3fa1c2e 在分支 worktree-agent-a1，尚未合併進專案分支/)
   expect(text).toMatch(/負責：Agent「T-12 修正匯出欄位順序」（待驗收）/)
@@ -2285,7 +2286,7 @@ test("the PM's agents: in the background, in a worktree unless they only read, f
 
   // The PM merges the commit: done, and the work item closes.
   merged = true
-  expect(await ledger({ action: 'update', id: 1, status: 'done' })).toMatch(/^已更新工作項目 T-01/)
+  expect(await ledger({ action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'agent:q1' })).toMatch(/^已更新工作項目 T-01/)
   expect(agents()[0]).toMatchObject({ state: 'done' })
 })
 
@@ -2463,4 +2464,203 @@ test("the person's closing settles an ended agent only when it came after the en
   expect(settledAgentState(one, [item('dropped', 300, 'agent:a8')])).toBe(null)
   expect(settledAgentState({ ...one, state: 'running', endedAt: undefined }, [item('dropped', 300)])).toBe(null)
   expect([isSettledAgent('done'), isSettledAgent('dropped'), isSettledAgent('verify'), isSettledAgent('failed')]).toEqual([true, true, false, false])
+})
+
+// ── QA: the verdict a work item needs before it closes (docs/design/qa.md) ──
+
+/** What the QA tests read, in each language. */
+const QA_WORDS = {
+  zh: {
+    row: 'T-01 (id 1) [open] 清單批次修改｜負責：local_open',
+    awaiting: /- \[待 QA\] T-01「清單批次修改」：商品列表頁（[^）]+）已交付，還沒有驗收紀錄。派一個「T-01 QA」Agent 驗收/,
+    itemAwaiting: /- T-01 \(id 1\) \[open\] 清單批次修改｜負責：商品列表頁（[^）]+）｜待 QA/,
+    none: /^無法將 T-01 標記為完成：還沒有驗收紀錄。派一個獨立的驗收 Agent/,
+    bad: /^qa 只能是 pass、fail 或 skip，這次沒有修改。/,
+    needsBy: /^qa 為 pass 或 fail 時要填 qa_by/,
+    needsNote: /^qa 為 skip 時要在 qa_note 寫理由/,
+    byOwner: /^驗收者不能是負責人（local_open），這次沒有修改。派一個獨立的「T-01 QA」Agent 驗收。/,
+    updated: /^已更新工作項目 T-01。\nT-01 \(id 1\) \[open\] 清單批次修改｜負責：local_open｜QA 不通過（agent:q1）$/,
+    failed: /- \[QA 不通過\] T-01「清單批次修改」：沒有重現測試（agent:q1）/,
+    refusedFail: /^無法將 T-01 標記為完成：驗收不通過（沒有重現測試）。交回負責人修正/,
+    refusedByOwner: /^無法將 T-01 標記為完成：驗收者 agent:q1 就是負責人。/,
+    closed: /^已更新工作項目 T-01。\nT-01 \(id 1\) \[done\] 清單批次修改｜負責：local_open｜QA 通過（agent:q2）｜驗收條件：批次改價後列表即時更新$/,
+    skipped: /\[done\] 文件錯字｜負責：未指派｜QA 略過：只改文件/,
+    paneAwaiting: '1 項待 QA',
+    paneFailed: '1 項 QA 不通過',
+    paneItemAwaiting: '待 QA',
+    paneItemFailed: 'QA 不通過（agent:q1）',
+  },
+  en: {
+    row: 'T-01 (id 1) [open] Batch edit | owner: local_open',
+    awaiting: /- \[Awaiting QA\] T-01 "Batch edit": its owner 商品列表頁 \([^)]+\) has delivered and there is no QA record. Start a "T-01 QA" agent/,
+    itemAwaiting: /- T-01 \(id 1\) \[open\] Batch edit \| owner: 商品列表頁 \([^)]+\) \| awaiting QA/,
+    none: /^Cannot mark T-01 done: it has no QA record. Start an independent QA agent/,
+    bad: /^qa is pass, fail or skip; nothing was changed\./,
+    needsBy: /^qa pass or fail needs qa_by/,
+    needsNote: /^qa skip needs its reason in qa_note/,
+    byOwner: /^Whoever checks an item may not be its owner \(local_open\); nothing was changed\. Start an independent "T-01 QA" agent\./,
+    updated: /^Updated work item T-01\.\nT-01 \(id 1\) \[open\] Batch edit \| owner: local_open \| QA failed \(agent:q1\)$/,
+    failed: /- \[QA failed\] T-01 "Batch edit": 沒有重現測試 \(agent:q1\)/,
+    refusedFail: /^Cannot mark T-01 done: it failed QA \(沒有重現測試\)\. Hand it back to its owner/,
+    refusedByOwner: /^Cannot mark T-01 done: it was checked by agent:q1, its owner\./,
+    closed: /^Updated work item T-01\.\nT-01 \(id 1\) \[done\] Batch edit \| owner: local_open \| QA passed \(agent:q2\) \| criteria: 批次改價後列表即時更新$/,
+    skipped: /\[done\] Typo in docs \| owner: unassigned \| QA skipped: 只改文件/,
+    paneAwaiting: '1 awaiting QA',
+    paneFailed: '1 failed QA',
+    paneItemAwaiting: 'awaiting QA',
+    paneItemFailed: 'QA failed (agent:q1)',
+  },
+} as const
+
+async function qaGate($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en') {
+  const w = QA_WORDS[lang]
+  const files: Files = new Map()
+  // Items written before QA: no criteria, no qa. The owner has released its work (as in the release test above).
+  const old = (id: number, text: string, owner: string | null) => ({ id, text, owner, status: 'open', note: '', createdAt: NOW - 7_200_000, updatedAt: NOW - 7_200_000 })
+  const ledgerItems = [old(1, lang === 'zh' ? '清單批次修改' : 'Batch edit', 'local_open'), old(2, lang === 'zh' ? '文件錯字' : 'Typo in docs', null), old(3, lang === 'zh' ? '舊報表' : 'Old report', null)]
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: ledgerItems, nextId: 4 }))
+  const report = { status: 'done', summary: 'T-01 已隨 2.4.1 上線', delivery: 'released', commit: '3fa1c2e' }
+  const plan = [{ content: '步驟 1', status: 'completed' }]
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { plan, report, reportAt: NOW - 600_000 - 1, lastAnswer: 'T-01 已隨 2.4.1 上線。' })))
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files, [], argv => (argv[0] === 'git' && argv[1] === 'rev-parse' ? { exitCode: 0, stdout: '3fa1c2e' } : null))
+  await $.session.start(START)
+  await clock.advance(61_000)
+  const ledger = async (input: object) => String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', ...input } as never)) as { result?: unknown }).result)
+  const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board', include_done: true } as never)) as { result?: unknown }).result)
+  const saved = () => JSON.parse(files.get(PROJECT_FILE)!).ledger as Record<string, unknown>[]
+  const pane = async () =>
+    $.ui.mount({
+      plugin: 'project-pm',
+      surface: 'desktop',
+      component: 'Pane',
+      requestId: 'project-pm',
+      props: { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 80 } },
+    } as never)
+
+  // Old data reads as before; its owner has delivered, so the board and the pane ask for QA.
+  expect(await ledger({ action: 'list', id: 1 })).toBe(w.row)
+  let text = await board()
+  expect(text).toMatch(w.awaiting)
+  expect(text).toMatch(w.itemAwaiting)
+  let ui = await pane()
+  expect(await ui.find({ type: 'Text', text: w.paneAwaiting })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: w.paneItemAwaiting })).toBeDefined()
+
+  // No verdict: it does not close, and nothing is written.
+  expect(await ledger({ action: 'update', id: 1, status: 'done' })).toMatch(w.none)
+  expect(saved()[0]).toEqual(ledgerItems[0])
+  // A verdict that cannot be recorded changes nothing, a status beside it included.
+  expect(await ledger({ action: 'update', id: 1, qa: 'maybe', qa_by: 'agent:q1', status: 'done' })).toMatch(w.bad)
+  expect(await ledger({ action: 'update', id: 1, qa: 'pass', status: 'done' })).toMatch(w.needsBy)
+  expect(await ledger({ action: 'update', id: 2, qa: 'skip', status: 'done' })).toMatch(w.needsNote)
+  expect(await ledger({ action: 'update', id: 2, qa: 'skip', qa_note: '   ', status: 'done' })).toMatch(w.needsNote)
+  expect(await ledger({ action: 'update', id: 2, qa: 'skip' })).toMatch(w.needsNote)
+  expect(await ledger({ action: 'update', id: 1, qa: 'pass', qa_by: 'local_open', status: 'done' })).toMatch(w.byOwner)
+  expect(saved()).toEqual(ledgerItems)
+  // An update without QA writes the old item back without the new fields.
+  await ledger({ action: 'update', id: 3, note: 'x' })
+  expect(Object.keys(saved()[2]!).sort()).toEqual(Object.keys(ledgerItems[2]!).sort())
+
+  // A failed verdict is kept and shown; the item stays open.
+  expect(await ledger({ action: 'update', id: 1, qa: 'fail', qa_by: 'agent:q1', qa_note: '沒有重現測試' })).toMatch(w.updated)
+  expect(saved()[0]!.qa).toEqual({ result: 'fail', by: 'agent:q1', at: NOW + 61_000, note: '沒有重現測試' })
+  text = await board()
+  expect(text).toMatch(w.failed)
+  expect(text).not.toMatch(w.awaiting)
+  await ui.unmount()
+  ui = await pane()
+  expect(await ui.find({ type: 'Text', text: w.paneFailed })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: w.paneItemFailed })).toBeDefined()
+  expect(await ledger({ action: 'update', id: 1, status: 'done' })).toMatch(w.refusedFail)
+  // Its checker made its owner: it does not close.
+  await ledger({ action: 'update', id: 1, qa: 'pass', qa_by: 'agent:q1' })
+  expect(await ledger({ action: 'update', id: 1, owner: 'agent:q1', status: 'done' })).toMatch(w.refusedByOwner)
+  expect(saved()[0]!.owner).toBe('local_open')
+
+  // Passed by someone else, criteria written, and closed in one call.
+  expect(await ledger({ action: 'update', id: 1, qa: 'pass', qa_by: 'agent:q2', criteria: '批次改價後列表即時更新', status: 'done' })).toMatch(w.closed)
+  expect(saved()[0]).toMatchObject({ status: 'done', criteria: '批次改價後列表即時更新', qa: { result: 'pass', by: 'agent:q2' } })
+  // Skipped for a reason: the PM's own word closes it.
+  await ledger({ action: 'update', id: 2, qa: 'skip', qa_note: '只改文件', status: 'done' })
+  expect(saved()[1]).toMatchObject({ status: 'done', qa: { result: 'skipped', by: 'local_pm', note: '只改文件' } })
+  expect(await ledger({ action: 'list', id: 2 })).toMatch(w.skipped)
+  // Force still closes without QA, and only with a note.
+  expect(await ledger({ action: 'update', id: 3, status: 'done', force: true })).toMatch(lang === 'zh' ? /^無法將 T-03 標記為完成：還沒有驗收紀錄/ : /^Cannot mark T-03 done: it has no QA record/)
+  await ledger({ action: 'update', id: 3, status: 'done', force: true, note: '使用者確認不需要驗收' })
+  expect(saved()[2]).toMatchObject({ status: 'done' })
+  expect(saved()[2]!.qa).toBe(undefined)
+  // A new item takes its criteria.
+  await ledger({ action: 'add', text: 'x', criteria: '  匯出含表頭  ' })
+  expect(saved()[3]).toMatchObject({ criteria: '匯出含表頭' })
+}
+
+test('the ledger closes an item only once it passed QA, checked by someone not its owner', ZH, async ($, on) => {
+  await qaGate($, on, 'zh')
+})
+
+test('the ledger closes an item only once it passed QA, in English', { options: { language: 'en' } }, async ($, on) => {
+  await qaGate($, on, 'en')
+})
+
+test('QA is due once the owner has delivered: a session ended, to release or on CI; an agent done or to verify', () => {
+  const delivered: Status[] = ['done', 'unreleased', 'ci']
+  for (const status of ['running', 'asking', 'failed', 'open', 'unreleased', 'ci', 'waiting', 'done', 'stale'] as Status[]) expect(isDeliveredStatus(status)).toBe(delivered.includes(status))
+  for (const state of ['running', 'done', 'verify', 'decide', 'failed', 'lost', 'dropped'] as const) expect(isDeliveredAgent(state)).toBe(state === 'done' || state === 'verify')
+  const item = { id: 1, text: 'x', owner: 'local_a', status: 'open' as const, note: '', createdAt: NOW, updatedAt: NOW }
+  expect([qaShown(item, false), qaShown(item, true), qaShown({ ...item, status: 'done' }, true)]).toEqual([null, 'awaiting', null])
+  expect(qaShown({ ...item, qa: { result: 'fail', by: 'user', at: NOW, note: '' } }, false)).toBe('fail')
+  // The gate on its own: a verdict by the owner, a failed one, or a skip without its reason never closes.
+  const qa = (result: 'pass' | 'fail' | 'skipped', by = 'agent:q', note = 'n') => ({ result, by, at: NOW, note })
+  expect([qaBlocker(qa('pass'), 'local_a', 'T-01'), qaBlocker(qa('skipped'), 'local_a', 'T-01'), qaBlocker(qa('pass'), null, 'T-01')]).toEqual([null, null, null])
+  for (const blocked of [undefined, qa('fail'), qa('pass', 'local_a'), qa('skipped', 'agent:q', ' ')]) expect(qaBlocker(blocked, 'local_a', 'T-01')).not.toBe(null)
+})
+
+async function qaBriefs($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en') {
+  const files: Files = new Map()
+  mock.clock(on, { now: NOW })
+  const w = agentWorld(on, files, argv => (argv[1] === 'rev-parse' ? { exitCode: 0, stdout: 'true' } : null))
+  await $.session.start(START)
+  const spawn = (id: string, description: string, subagentType: string) =>
+    $.agent.spawn({ tool_use_id: id, prompt: 'x', description, subagentType, provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-opus-5-5', background: true, fork: false } as never)
+  const words =
+    lang === 'zh'
+      ? { qa: '這是 T-12 的獨立驗收（QA）', checks: ['只包含這個工作項目的標的', '修正之前會失敗', '看 exit code', 'CHANGELOG', 'secret', '實際畫面'], qaReply: '[pass] 或 [fail]', reply: '[狀態, commit]', file: '寫進這個檔案：', inReply: '你不能寫檔：完整說明', readOnly: '這是唯讀工作：不要修改任何檔案。' }
+      : { qa: 'This is the independent QA of T-12.', checks: ['only what this work item is about', 'fails before the fix', 'read the exit code', 'CHANGELOG', 'secret', 'on screen'], qaReply: '[pass] or [fail]', reply: '[status, commit]', file: 'to this file: ', inReply: 'You cannot write files: put the full account', readOnly: 'This work only reads: change no file.' }
+
+  // A QA agent: the checklist, pass or fail for its first line, and the rest in its reply (it only reads).
+  await spawn('c1', 'T-12 QA', 'Explore')
+  const qa = w.spawned[0]!.prompt
+  expect(qa).toContain(words.qa)
+  for (const check of words.checks) expect(qa).toContain(check)
+  expect([qa.includes(words.qaReply), qa.includes(words.inReply), qa.includes(words.readOnly)]).toEqual([true, true, true])
+  expect([qa.includes(words.reply), qa.includes(words.file)]).toEqual([false, false])
+  // Another agent that only reads: the usual first line, its account in its reply, no checklist.
+  await spawn('c2', 'T-13 QA-free lookup', 'Explore')
+  const lookup = w.spawned[1]!.prompt
+  expect([lookup.includes(words.reply), lookup.includes(words.inReply), lookup.includes(words.qa), lookup.includes(words.file)]).toEqual([true, true, false, false])
+  // One that writes: the detail file, as before, and no checklist.
+  await spawn('c3', 'T-14 Fix', 'general-purpose')
+  const writer = w.spawned[2]!.prompt
+  expect([writer.includes(words.reply), writer.includes(words.file), writer.includes(words.inReply), writer.includes(words.qa)]).toEqual([true, true, false, false])
+
+  // The QA agent's verdict and account: its first line for the PM, the rest kept in a file.
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', description: 'T-12 QA', prompt: 'x', subagent_type: 'Explore' } as never)
+  await $.prompt.submit({ text: notice('a1', '[fail] no repro test\n1. diff ok\n2. missing', ''), isMeta: true } as never)
+  const one = JSON.parse(files.get(`${DIR}/sessions/local_pm.json`)!).agents[0]
+  expect(one).toMatchObject({ id: 'a1', state: 'done', result: '[fail] no repro test', detail: `${DIR}/reports/agents/a1.md` })
+  expect(files.get(`${DIR}/reports/agents/a1.md`)).toBe('[fail] no repro test\n1. diff ok\n2. missing\n')
+}
+
+test('a QA agent gets the checklist; an agent that only reads keeps its account in its reply', ZH, async ($, on) => {
+  await qaBriefs($, on, 'zh')
+})
+
+test('a QA agent gets the checklist, in English', { options: { language: 'en' } }, async ($, on) => {
+  await qaBriefs($, on, 'en')
+})
+
+test('a QA description leads with the item and QA', () => {
+  expect(['T-12 QA', ' t-3 qa of export', 'T-12 QA: diff abc'].map(isQaDescription)).toEqual([true, true, true])
+  expect(['T-12 QAX', 'T-13 QA-free lookup', 'QA T-12', 'T-12 fix QA', 'T-12'].map(isQaDescription)).toEqual([false, false, false, false, false])
 })

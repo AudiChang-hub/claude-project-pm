@@ -46,7 +46,7 @@ import {
   updateOf,
 } from './actions'
 import { MAX_CHARS, WRITING_TOOLS, asksForGuidelines, guidelinesPath, isSameFile, readGuidelines } from './guidelines'
-import { READ_ONLY_TYPES, briefOf, itemOf } from './agents'
+import { READ_ONLY_TYPES, briefOf, isQaDescription, itemOf } from './agents'
 import { getLang, resolveLang, setLang, systemLocale, t } from './messages'
 import { reloadIfUpdated } from './update'
 import { renderBand, renderPane } from './view'
@@ -283,14 +283,16 @@ export const register: Register = (on, options) => {
     return result
   }).catch(($, e, next) => next(e))
 
-  // What the PM's agent is told beside its task: how to report, where to write the rest, and the guidelines.
+  // What the PM's agent is told beside its task: how to report, where to write the rest, and the guidelines; a QA
+  // agent ("T-12 QA") also the checklist. One that only reads has no detail file: its reply holds the rest.
   on('agent.spawn', async ($, e, next) => {
     if (e.parentAgentId !== undefined || e.workflow || !(await isPmCall($, undefined))) return next(e)
     const self = await read($, me)
-    const detail = await agentDetailPath($, e.tool_use_id)
+    const isIsolated = !READ_ONLY_TYPES.includes(e.subagentType)
+    const detail = isIsolated ? await agentDetailPath($, e.tool_use_id) : null
     const rules = self ? await agentGuidelines($, self) : null
 
-    return next({ ...e, prompt: `${e.prompt}${briefOf(detail, itemOf(e.description), !READ_ONLY_TYPES.includes(e.subagentType), rules)}` })
+    return next({ ...e, prompt: `${e.prompt}${briefOf(detail, itemOf(e.description), isIsolated, rules, isQaDescription(e.description))}` })
   }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'mcp__ccd_turn__update_plan' }, async ($, e, next) => {

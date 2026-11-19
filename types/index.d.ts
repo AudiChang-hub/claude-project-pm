@@ -154,6 +154,19 @@ export type LedgerItem = {
   note: string
   createdAt: number
   updatedAt: number
+  /** How it is checked done: what to verify, and how. Absent on items written before QA (docs/design/qa.md). */
+  criteria?: string
+  /** Its latest QA verdict; a new one replaces it. Absent until one is recorded. */
+  qa?: QaRecord
+}
+
+/** One QA verdict on a work item: who checked it (never its owner), when, and why it failed or was skipped. */
+export type QaRecord = {
+  result: 'pass' | 'fail' | 'skipped'
+  /** `agent:<agentId>`, a `local_…` session id, or `user`. */
+  by: string
+  at: number
+  note: string
 }
 
 /** A project's PM and ledger, one file per project. */

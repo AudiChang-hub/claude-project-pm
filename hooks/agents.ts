@@ -85,10 +85,23 @@ export function stateOf(status: string, line: string, isIsolated: boolean): Agen
   return 'done'
 }
 
-/** What the PM's mod adds to an agent's prompt: the rules it works by, how to report, and the guidelines. */
-export function briefOf(detail: string, item: number | null, isIsolated: boolean, guidelines: string | null): string {
-  const parts = [t('agent.brief', { detail, item: item === null ? t('agent.noItem') : `T-${String(item).padStart(2, '0')}` })]
+/** A QA agent's description: the work item's code, then QA as a word of its own (`T-12 QA`, `T-12 QA: abc`; not `T-12 QA-free`). */
+export function isQaDescription(description: string): boolean {
+  return /^\s*T-\d+\s+QA(?=$|[\s:：,，.。])/i.test(description)
+}
+
+/**
+ * What the PM's mod adds to an agent's prompt: the rules it works by, how to report, and the guidelines. One that may
+ * write puts its full account in `detail`; one that only reads cannot write a file, so it puts it in its reply, which
+ * the mod keeps. A QA agent gets the checklist and answers pass or fail instead of the usual first line.
+ */
+export function briefOf(detail: string | null, item: number | null, isIsolated: boolean, guidelines: string | null, isQa = false): string {
+  const code = item === null ? t('agent.noItem') : `T-${String(item).padStart(2, '0')}`
+  const rules = [t('agent.brief', { item: code }), isQa ? t('agent.briefQaReply') : t('agent.briefReply')]
+  rules.push(isIsolated && detail ? t('agent.briefDetailFile', { detail }) : t('agent.briefDetailReply'))
+  const parts = [rules.join('\n')]
   parts.push(isIsolated ? t('agent.briefWorktree') : t('agent.briefReadOnly'))
+  if (isQa) parts.push(t('agent.briefQa', { item: code }))
   if (guidelines) parts.push(guidelines)
 
   return `\n\n---\n${parts.join('\n\n')}`
