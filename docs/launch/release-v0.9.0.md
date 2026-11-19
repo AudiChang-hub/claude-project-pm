@@ -12,7 +12,7 @@ Then type `/pm` in a new session of your project.
 
 ## Highlights
 
-- **A QA gate.** Each work item can carry acceptance criteria. Before a code change is pushed, the PM sends an independent QA agent (Explore, its description starting with "T-xx QA") that gets only the diff's range and the criteria, never the developer's conclusions. The mod gives it a checklist: the diff holds only its target, a bug fix comes with a test that fails before the fix, tests and validate pass by their exit code, the version and CHANGELOG follow your guidelines, no secret or local setting rides along, and an interface change is looked at on screen. The ledger won't close an item without a QA pass (or a skip with its reason), and whoever checked it is never its owner.
+- **A QA gate.** Each work item can carry acceptance criteria. Before a code change is pushed, the PM sends an independent QA agent (Explore, its description starting with "T-xx QA") that gets only the diff's range and the criteria, never the developer's conclusions. The mod gives it a checklist: the diff holds only its target, a bug fix comes with a test that fails before the fix, tests and validate pass by their exit code, the version and CHANGELOG follow your guidelines, no secret or local setting rides along, and an interface change is looked at on screen. The ledger won't close an item without a QA pass (or a skip with its reason), and it refuses a verdict recorded under the owner's name; it cannot prove who really checked.
 - **Quota first.** The PM picks where work goes by what it costs, measured in input-equivalent tokens per hand-off:
 
   | Hand-off | Cost |

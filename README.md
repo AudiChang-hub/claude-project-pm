@@ -44,8 +44,8 @@ Needs the Claude Code desktop app (Code tab).
 | Ledger | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
 | QA gate | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
 | Delivery check (git, CI) | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| Live session tracking | ✅ | 🗓 v1.0 | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ |
-| Agent hand-off | ✅ | 🗓 v1.0 | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ |
+| Live session tracking | ✅ | 🗓 v1.0 ◐ | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ |
+| Agent hand-off | ✅ | 🗓 v1.0 ◐ | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ |
 | Development guidelines | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
 | CI real-data scan³ | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 |
 
@@ -58,11 +58,8 @@ This table is updated with every release.
 
 ## New in v0.9.0
 
-- **QA gate.** Each work item carries acceptance criteria. Before a code change is pushed, the PM sends an independent QA agent that sees only the diff and the criteria, and the ledger won't close an item without a QA pass (or a skip with its reason). Whoever checks it is never its owner. The board lists what awaits QA and what failed it.
-- **Quota-first hand-offs.** The PM reuses an open session only if it was active in the last hour and hasn't run many turns (about 18k input-equivalent tokens). Waking a large idle one costs about 840k, so a small thing goes to a new session (70k) or an agent (60k read-only) instead.
-- **CI blocks real data.** This repository's CI scans every tracked file for real data; the list lives in a secret, never in the repo. A CI template for your own projects comes in v1.0.
-
-v0.8.0 brought agents: background work in its own worktree, merged after the PM reviews it ([release notes](https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.8.0)).
+- **QA gate.** A work item can carry acceptance criteria. Before a code change is pushed, the PM sends an independent QA agent that sees only the diff and the criteria, and the ledger won't close an item without a QA pass (or a skip with its reason), and refuses a verdict recorded under the owner's name. The board lists what awaits QA and what failed it.
+- **Quota-first hand-offs.** The PM reuses an open session only if it was active in the last hour and hasn't run many turns (about 18k input-equivalent tokens). Waking a large idle one (a 650k context) costs about 840k, so a small thing goes to a new session (70k) or an agent (60k read-only) instead.
 
 [CHANGELOG](CHANGELOG.md) · [How QA works](docs/design/qa.md) · [How agents work](docs/design/agents.md)
 
