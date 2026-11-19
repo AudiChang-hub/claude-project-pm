@@ -148,6 +148,18 @@ for (const lang of LANGS) {
       assert.ok(held.stderr.includes('acme lint failed'), held.stderr)
     })
 
+    test('a pre-push hook already there in another language runs as git ran it, by its own #! line', { timeout: 60_000 }, async () => {
+      const own = join(hooks(), 'pre-push')
+      writeFileSync(own, '#!/usr/bin/env node\nrequire("fs").appendFileSync(require("path").join(process.env.GIT_DIR || ".git", "acme-node.txt"), "ran\\n")\n')
+      chmodSync(own, 0o755)
+      await install()
+      await addItem()
+      await ledgerTool(ctx(), { action: 'update', id: 1, qa: 'pass', qa_by: 'agent:qa1' })
+      const out = push()
+      assert.equal(out.status, 0, out.stderr)
+      assert.ok(existsSync(join(w.repo, '.git', 'acme-node.txt')), out.stderr)
+    })
+
     test('skip with no work item for the commits adds an unregistered push', async () => {
       await ledgerTool(ctx(), { action: 'add', text: 'Something else at Acme' })
       const sha = w.commit('banner.txt', 'Acme sale\n', 'Add a banner')

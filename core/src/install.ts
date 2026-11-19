@@ -100,15 +100,18 @@ export function skillText(): string {
   return `---\nname: project-pm\ndescription: ${ct('skill.description')}\n---\n\n${START}\n${ct('skill.body', { tool: REPORT_TOOL }).trim()}\n${END}\n`
 }
 
-/** The pre-push hook: runs the hook that was there first (pre-push.local), then the check, both with git's input. */
+/**
+ * The pre-push hook: runs the hook that was there first (pre-push.local) as git would have, directly and only when it
+ * may be executed (its own #! picks sh, node, python…), then the check, both with git's input.
+ */
 export function prePushScript(command: string): string {
   return [
     '#!/bin/sh',
     `${SH_START} (Project PM: docs/design/v1-core.md 6.2; undo with project-pm uninstall --hooks)`,
     'input=$(cat)',
     'here=$(dirname "$0")',
-    'if [ -f "$here/pre-push.local" ]; then',
-    '  printf \'%s\\n\' "$input" | sh "$here/pre-push.local" "$@" || exit $?',
+    'if [ -x "$here/pre-push.local" ]; then',
+    '  printf \'%s\\n\' "$input" | "$here/pre-push.local" "$@" || exit $?',
     'fi',
     `printf '%s\\n' "$input" | ${command} check pre-push "$@"`,
     '',
