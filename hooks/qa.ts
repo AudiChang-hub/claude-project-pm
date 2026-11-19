@@ -128,9 +128,12 @@ export function qaAttention(items: LedgerItem[], isDelivered: (owner: string | n
     })
 }
 
-/** A QA agent's description: the work item's code, then QA as a word of its own (`T-12 QA`, `T-12 QA: abc`; not `T-12 QA-free`). */
+/**
+ * A QA agent's description: the work item's code, then QA, then nothing, a space or punctuation (`T-12 QA`,
+ * `T-12 QA: abc`, `T-31 QA（第二次）`, `T-31 QA(2nd)`, `T-31 QA-2`, `T-31 QA、複驗`); not a longer word (`T-12 QAX`).
+ */
 export function isQaDescription(description: string): boolean {
-  return /^\s*T-\d+\s+QA(?=$|[\s:：,，.。])/i.test(description)
+  return /^\s*T-\d+\s+QA(?=$|[\s:：,，.。（(\-、])/i.test(description)
 }
 
 /** What a QA agent is told for work item `code`: how its reply starts (pass or fail), and the checklist. */
