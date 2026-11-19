@@ -8,7 +8,7 @@ import { boardAddress, runningServer, serve } from './http'
 import type { InstallEnv } from './install'
 import { init, uninstall } from './install'
 import { ct } from './messages'
-import { checkPrePush, skipPush } from './prepush'
+import { prePushHook, skipPush } from './prepush'
 import { resolveProject } from './project'
 import { VERSION } from './version'
 
@@ -130,20 +130,13 @@ COMMANDS.check = async args => {
     return 2
   }
   const input = await readStdin()
-  try {
-    const ref = await resolveProject(process.cwd())
-    if (!ref) return 0
-    const checked = await checkPrePush(ref, input, run)
-    if (checked.ok) return 0
-    process.stderr.write(`\n${checked.message}\n\n`)
+  const ref = await resolveProject(process.cwd())
+  if (!ref) return 0
+  // A push the PM cannot check goes through, said here and kept for the board (prePushHook).
+  const out = await prePushHook(ref, input, run)
+  if (out.stderr) process.stderr.write(`${out.stderr}\n`)
 
-    return 1
-  } catch (err) {
-    // The PM itself failing never holds a push: the board names unchecked commits afterwards.
-    process.stderr.write(`${ct('push.checkFailed', { reason: err instanceof Error ? err.message : String(err) })}\n`)
-
-    return 0
-  }
+  return out.code
 }
 
 COMMANDS.skip = async args => {

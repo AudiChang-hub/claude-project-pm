@@ -32,7 +32,7 @@ import type { Ctx, ToolResult } from './context'
 import { projectOf } from './context'
 import { checkCi, checkPush, heldCi } from './facts'
 import { GIT_TIMEOUT_MS } from './host'
-import { prePushInstalled, pushedUnchecked, withAttention } from './prepush'
+import { prePushInstalled, pushProblems, pushedUnchecked, withAttention } from './prepush'
 import { authorOf, uuidv7 } from './identity'
 import { ct } from './messages'
 import type { ProjectRef } from './project'
@@ -383,6 +383,8 @@ export type BoardJson = {
   isCheckingCi: boolean
   /** Commits pushed past the pre-push check (git push --no-verify), newest first. */
   noPush: { branch: string; commits: string[] } | null
+  /** Pushes the pre-push check could not check, in the last week. */
+  pushProblems: { at: number; reason: string }[]
 }
 
 export async function boardTool(ctx: Ctx, input: Record<string, unknown>): Promise<ToolResult> {
@@ -477,6 +479,12 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     const line = ct('board.noPush', { branch: pushed.branch, n: pushed.commits.length, sha: pushed.commits[0]!.slice(0, 7) })
     text = withAttention(text, line, t('board.section.attention'), t('board.none'))
   }
+  // Pushes the check let through because it could not check them (6.2), for a week.
+  const problems = await pushProblems(ref, ctx.env, now)
+  for (const problem of problems) {
+    const line = ct('board.pushNotChecked', { when: localMinute(problem.at), reason: problem.reason })
+    text = withAttention(text, line, t('board.section.attention'), t('board.none'))
+  }
   if (sessionsError) text += `\n\n${ct('board.noSessionsRead', { error: sessionsError })}`
   if (isCheckingCi) text += `\n\n${ct('board.ciChecking')}`
   const url = await boardUrl(ctx, ref)
@@ -525,9 +533,18 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     sessionsError,
     isCheckingCi,
     noPush: pushed?.commits.length ? { branch: pushed.branch, commits: pushed.commits } : null,
+    pushProblems: problems,
   }
 
   return { text, json, project }
+}
+
+/** A moment as the person's clock shows it, to the minute: 2026-11-19 20:05. */
+function localMinute(at: number): string {
+  const d = new Date(at)
+  const two = (n: number) => String(n).padStart(2, '0')
+
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`
 }
 
 /** The lines of the board's attention section. */

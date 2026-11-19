@@ -6,12 +6,14 @@
  * A QA record covers its commit and every commit before it: `git rev-list <pushed> --not <remote> <QA commits>`
  * lists exactly the commits nobody checked.
  */
+import { join } from 'node:path'
+
 import { itemCode } from '../../hooks/sessions'
 import type { Run } from './host'
 import { GIT_TIMEOUT_MS } from './host'
 import { ct } from './messages'
 import type { ProjectRef } from './project'
-import { changeProject, loadProject, paths, readJsonFile } from './store'
+import { changeProject, loadProject, paths, readJsonFile, withLock, writeAtomic } from './store'
 import type { CoreItem, CoreProject } from './types'
 import { uuidv7 } from './identity'
 
@@ -44,7 +46,7 @@ export function itemOfCommit(items: CoreItem[], sha: string): CoreItem | undefin
   return items.find(item => (item.commits ?? []).some(c => c.startsWith(sha) || sha.startsWith(c)))
 }
 
-export type PushCheck = { ok: true } | { ok: false; message: string; commits: string[] }
+export type PushCheck = { ok: true; problems?: string[] } | { ok: false; message: string; commits: string[]; problems?: string[] }
 
 /** Checks git's pre-push input (`<local ref> <local sha> <remote ref> <remote sha>` per line) against the ledger. */
 export async function checkPrePush(ref: ProjectRef, stdin: string, run: Run, env: NodeJS.ProcessEnv = process.env): Promise<PushCheck> {
@@ -52,20 +54,73 @@ export async function checkPrePush(ref: ProjectRef, stdin: string, run: Run, env
   // A project that does not use the PM is not stopped.
   if (project.ledger.length === 0) return { ok: true }
   const left: string[] = []
+  const problems: string[] = []
   for (const line of stdin.split('\n')) {
-    const [, local, , remote] = line.trim().split(/\s+/)
+    const [localRef, local, , remote] = line.trim().split(/\s+/)
     if (!local || ZERO.test(local)) continue
     // The remote's tip, when this repository holds it (someone else may have pushed since the last fetch).
     const isKnown = !!remote && !ZERO.test(remote) && (await run(['git', 'cat-file', '-e', `${remote}^{commit}`], ref.cwd, GIT_TIMEOUT_MS)) !== null
     const range = isKnown ? [local, `^${remote}`] : [local, '--not', '--remotes']
     const commits = await uncovered(project, ref.cwd, run, range)
-    // git cannot answer (a shallow clone, a missing object): the check stands aside rather than block on a guess.
-    if (commits === null) continue
+    // git cannot answer (a shallow clone, a missing object): no guess blocks the push, but it is said and kept.
+    if (commits === null) {
+      problems.push(ct('push.gitFailed', { ref: localRef ?? local }))
+      continue
+    }
     for (const sha of commits) if (!left.includes(sha)) left.push(sha)
   }
-  if (!left.length) return { ok: true }
+  const said = problems.length ? { problems } : {}
+  if (!left.length) return { ok: true, ...said }
 
-  return { ok: false, message: blockMessage(project.ledger, left), commits: left }
+  return { ok: false, message: blockMessage(project.ledger, left), commits: left, ...said }
+}
+
+/** How long a push the check could not check stays on the board. */
+export const PROBLEM_SHOWN_MS = 7 * 24 * 60 * 60 * 1000
+
+export type PushProblem = { at: number; reason: string }
+
+function problemsFile(ref: ProjectRef, env: NodeJS.ProcessEnv): string {
+  // Beside the project's file, not in it: the problem may be that the project's file cannot be read.
+  return join(paths(env).home, 'push-checks', `${ref.file}.json`)
+}
+
+/** Keeps a push the check could not check (the last ten). */
+export async function recordPushProblem(ref: ProjectRef, reason: string, env: NodeJS.ProcessEnv = process.env, now = Date.now()): Promise<void> {
+  const file = problemsFile(ref, env)
+  await withLock(file, async () => {
+    const held = (await readJsonFile<{ problems?: PushProblem[] }>(file).catch(() => null))?.problems ?? []
+    await writeAtomic(file, `${JSON.stringify({ problems: [...held, { at: now, reason }].slice(-10) }, null, 2)}\n`)
+  })
+}
+
+/** The pushes the check could not check in the last week, oldest first. */
+export async function pushProblems(ref: ProjectRef, env: NodeJS.ProcessEnv = process.env, now = Date.now()): Promise<PushProblem[]> {
+  const held = (await readJsonFile<{ problems?: PushProblem[] }>(problemsFile(ref, env)).catch(() => null))?.problems ?? []
+
+  return held.filter(p => typeof p.at === 'number' && typeof p.reason === 'string' && now - p.at < PROBLEM_SHOWN_MS)
+}
+
+/**
+ * `project-pm check pre-push`: the exit code for git and what to tell the person. A push the check cannot check goes
+ * through (a broken PM must not stop work) but is said here and kept for the board; one it holds gets the reasons.
+ */
+export async function prePushHook(ref: ProjectRef, stdin: string, run: Run, env: NodeJS.ProcessEnv = process.env, now = Date.now()): Promise<{ code: number; stderr: string }> {
+  try {
+    const checked = await checkPrePush(ref, stdin, run, env)
+    const said: string[] = checked.ok ? [] : [`\n${checked.message}\n`]
+    for (const reason of checked.problems ?? []) {
+      await recordPushProblem(ref, reason, env, now).catch(() => {})
+      said.push(ct('push.notChecked', { reason }))
+    }
+
+    return { code: checked.ok ? 0 : 1, stderr: said.join('\n') }
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    await recordPushProblem(ref, reason, env, now).catch(() => {})
+
+    return { code: 0, stderr: ct('push.checkFailed', { reason }) }
+  }
 }
 
 function blockMessage(items: CoreItem[], commits: string[]): string {

@@ -67,6 +67,9 @@ const zhTW = {
   'push.lineNone': '  • 沒有對應的工作項目：{n} 個 commit，最新的是 {sha}',
   'push.unregistered': '未登記的 push：{branch}（{sha}）',
   'push.checkFailed': 'Project PM 這次沒辦法檢查（{reason}），先讓 push 通過。看板之後會標出沒驗收的 commit。',
+  'push.gitFailed': 'git 沒辦法列出 {ref} 要上傳的 commit',
+  'push.notChecked': 'Project PM 這次沒辦法完整檢查（{reason}），先讓 push 通過。看板會把這件事列在「需要處理」，請確認這次上傳的改動有沒有驗收。',
+  'board.pushNotChecked': '[push 時沒檢查到] {when} 的 push，Project PM 沒辦法檢查（{reason}），改動直接上傳了。請確認它們有沒有驗收。',
   'skip.recorded': '已記錄：{code} 在 {sha} 略過驗收，理由「{reason}」。現在可以 push 了，看板上會顯示這筆略過。',
   'skip.recordedNew': '已記錄：新增 {code}（未登記的 push），在 {sha} 略過驗收，理由「{reason}」。現在可以 push 了，看板上會顯示這筆略過。',
   'agents.section': `## Project PM
@@ -220,6 +223,9 @@ What you can do:
   'push.lineNone': '  • No work item: {n} commit(s), the latest is {sha}',
   'push.unregistered': 'Unregistered push: {branch} ({sha})',
   'push.checkFailed': 'Project PM could not check this push ({reason}), so it goes through. The board will name any commit nobody checked.',
+  'push.gitFailed': 'git could not list the commits {ref} would push',
+  'push.notChecked': 'Project PM could not fully check this push ({reason}), so it goes through. The board lists it under Needs attention: make sure what was pushed got checked.',
+  'board.pushNotChecked': '[push not checked] Project PM could not check the push of {when} ({reason}); the changes went up as they were. Make sure they got checked.',
   'skip.recorded': 'Recorded: {code} skips QA at {sha}, because "{reason}". You can push now; the board shows the skip.',
   'skip.recordedNew': 'Recorded: added {code} (an unregistered push), skipping QA at {sha}, because "{reason}". You can push now; the board shows the skip.',
   'agents.section': `## Project PM
