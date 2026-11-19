@@ -265,7 +265,7 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 | --- | --- | --- | --- |
 | E1（v1.0） | 讀：新路徑優先，沒有就讀舊路徑。寫：新路徑，**同時寫回舊路徑的 `projects/*.json`**（只寫舊格式有的欄位以外照抄，多的欄位舊 mod 會忽略） | 不改，照舊讀寫舊路徑 | 可以：舊路徑一直是完整的，移除核心就回到 v0.9 |
 | E2（v1.1） | 同 E1 | 改成透過核心的純函式讀寫新路徑，也照樣寫回舊路徑 | 可以：舊路徑仍完整 |
-| C1（v1.2 以後，所有使用中的 mod 都已更新） | 停止寫回舊路徑；仍會讀舊路徑（給沒遷移到的專案） | 只讀寫新路徑 | 要回去得先把新路徑複製回舊路徑（`project-pm export --legacy`） |
+| C1（v1.3 以後，所有使用中的 mod 都已更新） | 停止寫回舊路徑；仍會讀舊路徑（給沒遷移到的專案） | 只讀寫新路徑 | 要回去得先把新路徑複製回舊路徑（`project-pm export --legacy`） |
 | C2（再下一版） | 不再讀舊路徑；第一次啟動時若發現舊檔還有沒搬的專案，搬過去並在看板提示一次 | 同 C1 | 同 C1 |
 
 細節：
@@ -529,6 +529,46 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 
 所有形態的硬關卡都一樣：pre-push＋CI（第 6 節）。
 
+### 7.3 配備表（資料來源）
+
+給 README 的「支援平台」表用。列是功能，欄是平台；每格寫「v0.9.0 現況 → 目標（在哪一版達成）」。版本對應第 8 節：v1.0 是 ①，v1.1 是 ②（含遷移 E2，桌面版 mod 改用核心），v1.2 是 ③。
+
+圖例：✅ 可用、◐ 部分、🗓 規劃中、— 不支援。「目標」都是計畫，各版做完、驗證過才能改成 ✅ 放進 README。
+
+| 功能 | Claude Code 桌面版 | Claude Code CLI | Codex | Copilot | Antigravity | Cursor | Devin |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 看板面板 | ✅ → ✅ | — 〔實測 `-p`；互動模式讀程式〕 → ✅ v1.0 ⁽ᵃ⁾ | — → ✅ v1.1 ⁽ᵃ⁾ | — → ✅ v1.1 ⁽ᵃ⁾ | — → ✅ v1.1 ⁽ᵃ⁾ | — → ✅ v1.2 ⁽ᵃ⁾ | — → ✅ v1.2 ⁽ᵃ⁾ |
+| 文字看板 | ✅ → ✅ | — 〔實測〕 → ✅ v1.0 | — → ✅ v1.1 | — → ✅ v1.1 | — → ✅ v1.1 | — → ✅ v1.2 | — → ✅ v1.2 |
+| 交辦清單 | ✅ → ✅ | — 〔實測〕 ⁽ᵇ⁾ → ✅ v1.0 | — → ✅ v1.1 | — → ✅ v1.1 | — → ✅ v1.1 | — → ✅ v1.2 | — → ✅ v1.2 |
+| QA 關卡 | ✅ → ✅ | — 〔實測〕 ⁽ᵇ⁾ → ✅ v1.0 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.1 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.1 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.1 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.2 | — → ◐ v1.0 ⁽ᶜ⁾ → ✅ v1.2 |
+| 交付判斷（git 和 CI） | ✅ → ✅ | — 〔讀程式〕 → ✅ v1.0 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.1 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.1 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.1 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.2 | — → ◐ v1.0 ⁽ᵈ⁾ → ✅ v1.2 |
+| 即時追蹤 Session | ✅ → ✅ | — 〔實測＋讀程式〕 → ◐ v1.0 ⁽ᵉ⁾ | — → ◐ v1.1 ⁽ᵉ⁾⁽¹⁾ | — → ◐ v1.1 ⁽ᵉ⁾⁽²⁾ | — → ◐ v1.1 ⁽ᵉ⁾ | — → ◐ v1.2 ⁽ᵉ⁾⁽³⁾ | — → ◐ v1.2 ⁽ᵉ⁾ |
+| Agent 派工 | ✅ → ✅ | — 〔實測〕 ⁽ᶠ⁾ → ◐ v1.0 → ✅ v1.1 | — → ◐ v1.1 ⁽ᵍ⁾ | — → ◐ v1.1 ⁽ᵍ⁾ | — → ◐ v1.1 ⁽ᵍ⁾ | — → ◐ v1.2 ⁽ᵍ⁾ | — → ◐ v1.2 ⁽ᵍ⁾ |
+| 開發準則 | ✅ → ✅ | ◐ 〔讀程式，未實測〕 ⁽ʰ⁾ → ✅ v1.0 | — → ◐ v1.1 ⁽ⁱ⁾ | — → ◐ v1.1 ⁽ⁱ⁾ | — → ◐ v1.1 ⁽ⁱ⁾ | — → ◐ v1.2 ⁽ⁱ⁾ | — → ◐ v1.2 ⁽ⁱ⁾ |
+| CI 真實資料掃描 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 |
+
+Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1-cli-check.md)，Claude Code 2.1.326）。〔實測〕是用 `-p` 實際跑過的；〔讀程式〕是看程式碼判斷、沒有跑。其他欄的 v0.9.0 都是「—」，因為 mod 只能裝在 Claude Code；它們的目標來自查證報告和第 7.2 節，都還沒實測。
+
+註腳（功能）：
+
+- ⁽ᵃ⁾ 桌面版以外的「面板」是網頁看板（第 4 節），不在工具視窗裡。Claude Code CLI 在 v0.9.0：`-p` 實測開不出面板（`ui.open: no-surface`）；互動模式沒實測，讀程式判斷面板會開，但只顯示「讀不到 Session 清單」，所以算不支援。
+- ⁽ᵇ⁾ 實測：board、ledger 只在 `/pm` 成功後才註冊，而 `/pm` 在 CLI 失敗（拿不到 Session id）。用假的 Session id 繞過後，ledger 和 QA 關卡都正常，所以邏輯本身可用，卡在身分。
+- ⁽ᶜ⁾ v1.0 起 pre-push hook 和 CI 範本不管用哪個 AI 工具都有效（第 6 節），所以是「部分」；要在交辦清單結案時擋，得等該平台接上核心的 MCP。
+- ⁽ᵈ⁾ v1.0 起在終端機跑 `project-pm board` 就看得到這個 repo 的 git 和 CI 事實（第 1 層），但分不出是哪個 Session 做的；接上 MCP 和 hook 後才對得到 Session。
+- ⁽ᵉ⁾ 「部分」= 第 3 層：靠 hook 在每輪結束、工具呼叫時自動回報，網頁看板列出回報過的 Session；沒有平台的 Session 清單 API，看不到沒裝 hook 的 Session，也不能封存、開新 Session。只有 Claude Code 桌面版有第 4 層。Claude Code CLI 在 v0.9.0：實測 report 回「已回報」但沒寫任何檔（假成功）；讀程式確認任務清單、收尾摘要、通知 PM 都因為沒有 Session id 而丟掉。
+- ⁽ᶠ⁾ 實測：用假的 Session id 繞過 `/pm` 後，背景執行、worktree、附加說明、通知截短都正常；正式 CLI 沒有 PM 身分，所以都不會發生。v1.0 是「部分」，因為 v1.0 不改 mod（遷移 E1），PM 要靠 Skill 的指示自己附說明；v1.1 mod 改用核心的身分後恢復自動改寫。
+- ⁽ᵍ⁾ 其他平台的子代理機制各不相同，v1 只做到：Skill 指示 PM 把說明附進子代理的 prompt、子代理用 `report` 回報、Agent 紀錄存進核心。像 Claude Code 那樣自動改寫子代理呼叫（強制背景、隔離、截短通知），要看各平台的 PreToolUse 能否改寫參數（Codex 可以 [X3]，其他未確認），該版開工時評估。
+- ⁽ʰ⁾ 讀程式：準則由 `prompt.compose` 放進提示，不需要 Session id，所以「PM 在桌面版、這個 Session 在 CLI」時 CLI 會拿到準則（實測確認同一條路徑的交付指示有放進 CLI 的提示）；但 CLI 自己當不了 PM。改準則檔的擋法（`tool.call`）也不需要 id。這次的測試沒設定準則檔，所以沒實際驗證。v1.0 改由使用者層級的 UserPromptSubmit hook 每輪放進提示，不再依賴 PM 在桌面版。
+- ⁽ⁱ⁾ 「部分」：AGENTS.md 段落指向準則檔，靠 AI 自己去讀（第 2 層）；「沒問過不能改準則檔」靠各平台的 PreToolUse 類 hook。能不能像 Claude Code 一樣每輪自動放進提示，看各平台有沒有對應的 hook 事件，該版開工時查證。
+- ⁽ʲ⁾ v0.9.0 只有本 repo 自己的 CI 有這一步（qa.md 第 7 節），使用者的專案沒有。v1.0 的 CI 範本（第 6.3 節）是 GitHub Actions，和用哪個 AI 工具無關，所以所有欄同時變成 ✅。
+
+註腳（同一平台的桌面版和 CLI 有差異）：
+
+- ⁽¹⁾ Codex：CLI 的 hooks 已正式推出；桌面版（ChatGPT 桌面 App）有「設定 > Hooks」，IDE 擴充的 hooks 未確認 [X3]，桌面版讀 AGENTS.md 也未逐字確認 [X2]。IDE 擴充可能只到第 2 層。
+- ⁽²⁾ Copilot：CLI 的 hooks 已正式支援 [H3]；VS Code 的 hooks 還在預覽 [V3]，正式前 VS Code 只到第 2 層。VS Code 也會讀專案的 `.claude/settings.json` hooks，所以 hooks 要放使用者層級（第 5.3 節）。
+- ⁽³⁾ Cursor：編輯器有 18 個 hook 事件；CLI 只確認 workspaceOpen 會跑 [U3]，確認前 Cursor CLI 只到第 2 層。
+- Antigravity、Devin：桌面版和 CLI 用同一套 hook [A3][W1][W2]，表上沒有差異；差別只在 headless 測試（Antigravity `-p` 被拒絕仍 exit 0 [A7]、Devin `-p` 輸出格式未確認 [W6]），不影響功能。
+
 ## 8. 分版計畫
 
 每一版都遵守：新功能先擴充、不刪舊的；每版有獨立的回復方法；沒跑到的驗證如實寫在 release 說明。
@@ -540,7 +580,7 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 - `core/`：純函式（從 `hooks/` 搬，見 1.4 節）、Node 層、MCP server（stdio＋Streamable HTTP）、`board`、`ledger`、`report`、`pm` 四個工具。
 - 網頁看板（唯讀，第 4 節）。
 - `init`、`uninstall`：只支援 Claude Code（CLI）；偵測到桌面版 mod 時只提示、不加 MCP 設定（3.7 節）。
-- `hook claude-code <事件>`：Stop、UserPromptSubmit、PostToolUse（TodoWrite、背景指令）寫 actor 紀錄。
+- `hook claude-code <事件>`：Stop、UserPromptSubmit、PostToolUse（TodoWrite、背景指令）寫 actor 紀錄；UserPromptSubmit 同時把開發準則和交付指示放進提示（取代 mod 的 `prompt.compose`，CLI 不用等 PM 在桌面版）。
 - pre-push hook、`skip`、CI 範本。
 - 資料遷移 E1（雙寫）。
 - 修 report 的假成功（核心這邊；mod 那邊在 v1.1 改）。
@@ -567,7 +607,7 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 - 設定：`project-pm uninstall`。
 - 資料：E1 雙寫，舊路徑一直完整；移除核心等於回到 v0.9.0，桌面版完全不受影響。
 
-### ② v1.x：Codex、Copilot、Antigravity
+### ② v1.1：Codex、Copilot、Antigravity
 
 範圍：`init` 支援 Codex（CLI、桌面版）、Copilot（CLI、VS Code）、Antigravity（CLI、桌面）；各自的 `hook <工具> <事件>`；AGENTS.md 大小檢查（Codex 32 KiB）；處理 Copilot 重複執行 Claude 的 hooks。也在這一段做 E2（桌面版 mod 改用核心的資料）。
 
@@ -577,9 +617,9 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 
 回復：每個平台的轉接是獨立的（`init --tool codex`、`uninstall --tool codex`），一個平台出問題只移除那一個，不影響其他；E2 出問題時 mod 退回 E1 版本，舊路徑仍完整。
 
-### ③ v1.y：Cursor、Devin
+### ③ v1.2：Cursor、Devin
 
-範圍：`init` 支援 Cursor（編輯器、CLI）、Devin（桌面、CLI）；各自的 hook。可以評估 VS Code 系的 webview 擴充（Cursor、Devin 都能裝 Open VSX 擴充）當第 4 層的面板。也在這一段做資料遷移的 C1。
+範圍：`init` 支援 Cursor（編輯器、CLI）、Devin（桌面、CLI）；各自的 hook。可以評估 VS Code 系的 webview 擴充（Cursor、Devin 都能裝 Open VSX 擴充）當第 4 層的面板。資料遷移的 C1 不在這一版，等 ② ③ 都穩定一個版本以上（v1.3 以後）。
 
 先查證：Cursor CLI 的 hooks 和子代理、Devin CLI `-p` 的輸出格式、兩者擴充的面板能力（報告標未確認）。
 
