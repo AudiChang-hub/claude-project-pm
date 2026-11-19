@@ -3,6 +3,7 @@
  * starts it, and every tool is called through the protocol. No model is involved.
  */
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, test } from 'node:test'
@@ -165,3 +166,95 @@ describe('the structuredContent switch (3.1, decided 2026-11-19)', () => {
     assert.ok(called.content[0]!.text.includes('acme-shop'))
   })
 })
+
+describe('roots the client gets wrong (T-37 QA round 2, 1)', () => {
+  let w: World
+  beforeEach(() => {
+    w = world('en')
+  })
+  afterEach(() => w.done())
+
+  /**
+   * A client that speaks raw JSON lines (the SDK's would check the roots it sends): it answers roots/list with `roots`,
+   * then calls the board. The server is started outside any repository, so the roots are all it has to go on.
+   */
+  const callWithRoots = (roots: unknown) =>
+    new Promise<{ answer: JsonRpcLine | null; code: number | null; stderr: string }>((resolve, reject) => {
+      const { command, args } = serverCommand('mcp')
+      const child = spawn(command, args, { cwd: w.home, env: { ...w.env, PROJECT_PM_LANG: 'en', CLAUDE_CODE_SESSION_ID: SESSION }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+      let out = ''
+      let stderr = ''
+      let answer: JsonRpcLine | null = null
+      const timer = setTimeout(() => child.kill(), 20_000)
+      const send = (message: unknown) => child.stdin.write(`${JSON.stringify(message)}\n`)
+      child.stderr.on('data', chunk => (stderr += chunk))
+      child.stdout.on('data', chunk => {
+        out += chunk
+        let at: number
+        while ((at = out.indexOf('\n')) >= 0) {
+          const message = JSON.parse(out.slice(0, at)) as JsonRpcLine
+          out = out.slice(at + 1)
+          if (message.method === 'roots/list') send({ jsonrpc: '2.0', id: message.id, result: { roots } })
+          else if (message.id === 1) send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'board', arguments: {} } })
+          else if (message.id === 2) {
+            answer = message
+            child.stdin.end()
+          }
+        }
+      })
+      child.on('error', reject)
+      child.on('close', code => {
+        clearTimeout(timer)
+        resolve({ answer, code, stderr })
+      })
+      send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: { roots: { listChanged: true } }, clientInfo: { name: 'claude-code', version: '2.1.326' } } })
+    })
+
+  const repoUri = () => pathToFileURL(w.repo).href
+
+  for (const bad of ['file:///C:/acme%2Fshop', 'file://acme-host/srv/acme-shop', 'file:///srv/acme%2Fshop']) {
+    test(`a root the server cannot read (${bad}) is left out; the good one still names the project`, { timeout: 60_000 }, async () => {
+      const { answer, code, stderr } = await callWithRoots([{ uri: bad, name: 'Acme, written wrong' }, { uri: repoUri(), name: 'Acme shop' }])
+      assert.equal(code, 0, stderr)
+      assert.ok(answer, stderr)
+      const result = answer.result as Called
+      assert.equal(result.isError, false, result.content[0]!.text)
+      assert.ok(result.content[0]!.text.includes('acme-shop'), result.content[0]!.text)
+    })
+  }
+
+  for (const [label, roots] of [
+    ['not a list', { uri: 'file:///srv/acme-shop' }],
+    ['a string', 'file:///srv/acme-shop'],
+    ['entries that are not objects', [null, 7, 'file:///srv/acme-shop']],
+  ] as const) {
+    test(`roots that are ${label}: none, and the call is still answered`, { timeout: 60_000 }, async () => {
+      const { answer, code, stderr } = await callWithRoots(roots)
+      assert.equal(code, 0, stderr)
+      assert.ok(answer, stderr)
+      // No roots and a home folder that is no repository: an error said in words, not a crash and not a wait.
+      const result = answer.result as Called
+      assert.equal(result.isError, true)
+      assert.ok(result.content[0]!.text.length > 0)
+    })
+  }
+
+  test('a roots answer that throws inside still settles the question: the next call does not wait for ever', async () => {
+    const session = new McpSession({ cwd: w.home, env: w.env, run: hostWith() })
+    const sent: JsonRpcLine[] = []
+    session.send = message => sent.push(message as JsonRpcLine)
+    await session.handle({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: { roots: {} }, clientInfo: { name: 'claude-code' } } })
+    const asked = session.roots()
+    const id = sent.find(message => message.method === 'roots/list')!.id
+    // A roots list whose getter throws: the server must still answer itself.
+    const roots = Object.defineProperty({}, 'roots', {
+      get() {
+        throw new Error('Acme client bug')
+      },
+    })
+    await session.handle({ jsonrpc: '2.0', id, result: roots })
+    assert.deepEqual(await Promise.race([asked, new Promise(resolve => setTimeout(() => resolve('still waiting'), 1_000))]), [])
+  })
+})
+
+type JsonRpcLine = { jsonrpc: '2.0'; id?: string | number; method?: string; result?: unknown; error?: unknown }

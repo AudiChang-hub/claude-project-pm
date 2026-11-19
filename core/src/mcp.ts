@@ -175,8 +175,12 @@ export class McpSession {
       this.waiting.set(id, message => {
         clearTimeout(timer)
         this.waiting.delete(id)
-        const roots = ((message.result ?? {}) as { roots?: { uri?: unknown }[] }).roots ?? []
-        resolve(roots.flatMap(root => (typeof root.uri === 'string' && root.uri.startsWith('file:') ? [fileURLToPath(root.uri)] : [])))
+        // Whatever the client sent, the question is settled here: a call waiting for the roots must not wait for ever.
+        try {
+          resolve(rootFolders(message.result))
+        } catch {
+          resolve([])
+        }
       })
       this.send!({ jsonrpc: '2.0', id, method: 'roots/list' })
     })
@@ -217,6 +221,25 @@ export class McpSession {
         throw new RpcError(-32601, `Method not found: ${method}`)
     }
   }
+}
+
+/**
+ * The folders in a roots/list answer: roots that are not a list are none, and a root that is not a file URL this
+ * system can read (an encoded slash, a host on POSIX) is left out on its own.
+ */
+function rootFolders(result: unknown): string[] {
+  const roots = result && typeof result === 'object' ? (result as { roots?: unknown }).roots : undefined
+  if (!Array.isArray(roots)) return []
+
+  return roots.flatMap(root => {
+    try {
+      const uri = root && typeof root === 'object' ? (root as { uri?: unknown }).uri : undefined
+
+      return typeof uri === 'string' && uri.startsWith('file:') ? [fileURLToPath(uri)] : []
+    } catch {
+      return []
+    }
+  })
 }
 
 export class RpcError extends Error {
@@ -274,14 +297,18 @@ export function serveStdio(session: McpSession, input: NodeJS.ReadableStream = p
         if (!line) continue
         // The client's answer to our own request (roots/list) is taken at once: a call queued below may wait for it.
         if (isAnswer(line)) {
-          void handleText(session, line)
+          // An answer that goes wrong must not take the server down with it.
+          handleText(session, line).catch(() => undefined)
           continue
         }
         // Answers go out in the order the messages came in.
-        pending = pending.then(async () => {
-          const answer = await handleText(session, line)
-          if (answer) output.write(`${JSON.stringify(answer)}\n`)
-        })
+        pending = pending
+          .then(async () => {
+            const answer = await handleText(session, line)
+            if (answer) output.write(`${JSON.stringify(answer)}\n`)
+          })
+          // One message that goes wrong must not stop the ones after it.
+          .catch(() => undefined)
       }
     })
     input.on('end', () => {
