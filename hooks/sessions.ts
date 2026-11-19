@@ -1217,7 +1217,10 @@ export function boardText(input: BoardInput): string {
 
     return t('board.owner.status', { title: one.title, tag: STATUS[status].tag, elsewhere: inProject.has(id) ? '' : t('board.owner.elsewhere') })
   }
-  /** Whether an owner has handed its work over: a session ended, waiting to release or on CI; an agent done or to verify. */
+  /**
+   * Whether an owner has handed its work over: a session ended, waiting to release or on CI, or no longer listed
+   * (archived or gone: it has nothing left to do); an agent done or to verify.
+   */
   const isDelivered = (id: string | null) => {
     if (!id) return false
     if (id.startsWith('agent:')) {
@@ -1227,7 +1230,7 @@ export function boardText(input: BoardInput): string {
     }
     const one = everyone.find(s => s.id === id)
 
-    return !!one && isDeliveredStatus(statusOf(one, tracks[id], words[id], now, ci[id], push[id], settled(id)))
+    return !one || isDeliveredStatus(statusOf(one, tracks[id], words[id], now, ci[id], push[id], settled(id)))
   }
   const qaOf = (item: LedgerItem) => qaShown(item, isDelivered(item.owner))
   attention.push(...qaAttention(openLedger, isDelivered, ownerText))

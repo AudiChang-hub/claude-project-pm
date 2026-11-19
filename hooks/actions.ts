@@ -53,7 +53,7 @@ import {
   statusOf,
   undeliveredOf,
 } from './sessions'
-import { qaUpdate } from './qa'
+import { qaKeptText, qaUpdate } from './qa'
 import type { CiRun, Project, Status } from './sessions'
 import { t } from './messages'
 
@@ -1303,6 +1303,13 @@ async function ownerBlocker($: EngineInterface, ownerId: string): Promise<string
   return said ? t('blocker.lastReport', { title, why, said: clip(said, 120) }) : t('blocker.plain', { title, why })
 }
 
+/** The project's HEAD commit, short; null outside git or when git does not answer. */
+async function headOf($: EngineInterface, cwd: string): Promise<string | null> {
+  const sha = (await run($, ['git', 'rev-parse', 'HEAD'], cwd, GIT_TIMEOUT_MS))?.trim() ?? ''
+
+  return /^[0-9a-f]{7,40}$/i.test(sha) ? sha.slice(0, 7).toLowerCase() : null
+}
+
 export async function ledger($: EngineInterface, input: Record<string, unknown>): Promise<string> {
   const self = await identify($)
   if (!self || self.isScratch) return t('ledger.noProject')
@@ -1340,29 +1347,38 @@ export async function ledger($: EngineInterface, input: Record<string, unknown>)
     const status = str(input.status)
     const owner = input.owner === undefined ? item.owner : str(input.owner) || null
     const isClosing = status === 'done' && item.status !== 'done' && !(input.force === true && str(input.note)?.trim())
-    // The QA core (qa.ts) decides first: a verdict it cannot record, or a close it does not allow, changes nothing.
-    const checked = qaUpdate(item, input, owner, self.id ?? 'pm', now, isClosing)
-    if ('refusal' in checked) return `${checked.refusal}\n${ledgerRow(item)}`
+    // A verdict keeps the project's HEAD it was given at, to trace what was checked.
+    const head = input.qa !== undefined ? await headOf($, self.projectPath) : null
+    // The QA core (qa.ts) decides first: a verdict it cannot record changes nothing.
+    const checked = qaUpdate(item, input, owner, self.id ?? 'pm', now, isClosing, head)
+    if ('error' in checked) return `${checked.error}\n${ledgerRow(item)}`
     const qa = checked.qa
-    if (isClosing) {
+    let refusal = checked.refusal
+    if (isClosing && !refusal) {
       // Then the owner, as this desktop reads it (GitHub and git included).
       const blocker = owner ? await ownerBlocker($, owner) : null
-      if (blocker) return `${t('ledger.refused', { code: itemCode(id), blocker })}\n${ledgerRow(item)}`
+      if (blocker) refusal = t('ledger.refused', { code: itemCode(id), blocker })
     }
-    const criteria = input.criteria === undefined ? item.criteria : str(input.criteria)?.trim() || undefined
+    // A refused close changes nothing, unless it came with a verdict: that is kept, and only the status stays.
+    if (refusal && !checked.isRecorded) return `${refusal}\n${ledgerRow(item)}`
+    // Criteria that are not text (a number, null) leave them as they were; an empty string clears them.
+    const criteria = typeof input.criteria === 'string' ? input.criteria.trim() || undefined : item.criteria
     const changed: LedgerItem = {
       ...item,
       text: str(input.text)?.trim() || item.text,
       owner,
-      status: status === 'open' || status === 'done' || status === 'dropped' ? status : item.status,
+      status: !refusal && (status === 'open' || status === 'done' || status === 'dropped') ? status : item.status,
       note: str(input.note) ?? item.note,
       updatedAt: now,
       ...(criteria ? { criteria } : {}),
       ...(qa ? { qa } : {}),
     }
     if (!criteria) delete changed.criteria
+    // A verdict for another owner, or from before a reopen, goes.
+    if (!qa) delete changed.qa
     const list = project.ledger.map(i => (i.id === id ? changed : i))
     await saveProject($, { ...project, ledger: list })
+    if (refusal) return `${qaKeptText(refusal)}\n${ledgerRow(changed, true)}`
 
     return `${t('ledger.updated', { code: itemCode(id) })}\n${ledgerRow(changed, true)}`
   }

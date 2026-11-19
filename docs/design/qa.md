@@ -22,6 +22,7 @@ type QaRecord = {
   by: string      // 驗收者：agent:<agentId>、local_… Session id，或 user
   at: number      // 記錄時間（ms）
   note: string    // fail 的原因、skipped 的理由；pass 可留空
+  commit?: string // 記錄時專案的 HEAD（短 sha），追溯驗收的是哪個版本；不在 git 裡時沒有
 }
 
 type LedgerItem = {
@@ -44,6 +45,15 @@ type LedgerItem = {
 
 `qa` 的參數有錯時（值不對、少了 `qa_by`、`skip` 沒有理由、驗收者等於負責人），整個 update 被拒絕，什麼都不改，回覆寫明要補什麼。
 
+驗收者和負責人比對時先去掉前後空白、不分大小寫（`LOCAL_OPEN`、` agent:A1 ` 都算同一個）；這只用在比對，存下來的 id 照原樣。
+
+QA 紀錄跟著負責人和這一輪工作：
+- 換了負責人（去空白、不分大小寫後不同），舊的紀錄作廢。
+- 結案或放棄後重新打開（status 改回 open），舊的紀錄作廢。
+- 每次記錄時，mod 用 `git rev-parse HEAD` 取專案的 HEAD，存成 `commit`。結案時不比對它，看板和 ledger 會顯示。
+
+`criteria` 不是字串（數字、null）時忽略，保留原值；空字串才清除。
+
 ## 3. 結案關卡
 
 `status: "done"`（原本不是 done）時依序檢查，第一個不過的就拒絕，什麼都不改：
@@ -55,11 +65,11 @@ type LedgerItem = {
    - 驗收者是負責人：請派獨立的 Agent 重新驗收。
 3. 負責人：原本的檢查（CI、未交付、Agent 還沒完成），不變。
 
-QA 先檢查，因為它不用問 GitHub 或 git。同一次 update 可以同時記錄 `qa: "pass"` 和 `status: "done"`。標成 `dropped` 不需要驗收。Agent 本來就不能改 ledger，維持不變。
+QA 先檢查，因為它不用問 GitHub 或 git。同一次 update 可以同時記錄 `qa: "pass"` 和 `status: "done"`。結案被擋（QA 不過或負責人關卡）時，同一次 update 帶的驗收紀錄仍然存下來，只有狀態不改，回覆以「QA 已記錄，但結案被擋：」開頭並寫原因；沒有帶驗收紀錄的被擋 update 則什麼都不改。標成 `dropped` 不需要驗收。Agent 本來就不能改 ledger，維持不變。
 
 ## 4. 看板
 
-「已交付」的判斷：負責的 Session 狀態是「已結束」「待發布」「等待 CI」，或負責的 Agent 是「已完成」「待驗收」。
+「已交付」的判斷：負責的 Session 狀態是「已結束」「待發布」「等待 CI」，或已經封存、不在清單裡（它不會再做什麼）；負責的 Agent 是「已完成」「待驗收」。
 
 需要處理（只看 open 的項目）：
 
@@ -68,10 +78,10 @@ QA 先檢查，因為它不用問 GitHub 或 git。同一次 update 可以同時
 - [QA 不通過] T-12「匯出 CSV」：修 bug 沒有重現測試（agent:a7）
 ```
 
-工作項目那一行，有紀錄或待 QA 時加上 QA 狀態，有驗收條件時也列出（截短）：
+工作項目那一行，有紀錄或待 QA 時加上 QA 狀態（有 commit 時一併顯示），有驗收條件時也列出（截短）：
 
 ```
-- T-12 (id 12) [open] 匯出 CSV｜負責：商品列表頁（已結束）｜QA 通過（agent:a7）｜驗收條件：欄位依範本排序
+- T-12 (id 12) [open] 匯出 CSV｜負責：商品列表頁（已結束）｜QA 通過（agent:a7，於 3fa1c2e）｜驗收條件：欄位依範本排序
 ```
 
 沒有紀錄、負責人也還沒交付時不顯示 QA，讓還在做的項目保持簡短。ledger 工具的 list 也一樣：有紀錄才顯示。
@@ -137,7 +147,13 @@ PM 開的 Agent，description 符合 `^T-\d+ QA`（不分大小寫）時，mod �
 
 移植到其他工具時，要另寫的是：工作項目存在哪裡、怎麼判斷負責人已交付、怎麼把範本交給驗收的 Agent（或其他工具的子代理）。
 
-## 9. 不在這次範圍
+## 9. 已知限制
+
+- `qa_by` 只防誤用，不驗證真的有人或 Agent 驗收過。PM 可以填任何不是負責人的名字（例如 `user` 或一個不存在的 `agent:` id），mod 都會接受。它擋的是「負責人自己驗收自己」這種誤用，不是刻意繞過；真正的保證來自 PM 指示要它派獨立的 QA Agent，以及使用者看得到的看板與 ledger 紀錄。
+- `force` 加 note 仍可不經 QA 結案，由使用者明確同意時使用。
+- 結案時不比對 `commit`：驗收後又有新的 commit，舊的 pass 仍然有效。`commit` 只用來追溯。
+
+## 10. 不在這次範圍
 
 - README 和 overview 圖（T-32）。
 - QA Agent 的回報不會自動寫進 ledger：由 PM 讀了之後記錄，避免一行摘要被誤判。

@@ -20,6 +20,14 @@ function clip(text: string, max: number): string {
 
 const codeOf = (id: number) => `T-${String(id).padStart(2, '0')}`
 
+/**
+ * Whether two ids name the same owner or checker: compared trimmed and in any case, so `LOCAL_OPEN` or ` agent:A1 `
+ * is still the owner. Only for comparing; ids are kept as they were written.
+ */
+export function isSameId(a: string | null | undefined, b: string | null | undefined): boolean {
+  return !!a?.trim() && !!b?.trim() && a.trim().toLowerCase() === b.trim().toLowerCase()
+}
+
 /** What an item shows of its QA: its verdict; else, while it is open and its owner has delivered, awaiting. */
 export type QaShown = QaRecord['result'] | 'awaiting'
 
@@ -34,15 +42,18 @@ export function qaText(item: LedgerItem, shown: QaShown, isWhole = false): strin
   if (shown === 'awaiting' || !item.qa) return t('qa.awaiting')
   if (shown === 'skipped') return t('qa.skipped', { note: isWhole ? item.qa.note : clip(item.qa.note, NOTE) })
 
-  return t(shown === 'pass' ? 'qa.pass' : 'qa.fail', { by: item.qa.by })
+  const commit = item.qa.commit ? t('qa.commit', { sha: item.qa.commit }) : ''
+
+  return t(shown === 'pass' ? 'qa.pass' : 'qa.fail', { by: item.qa.by, commit })
 }
 
 /**
  * The QA verdict an update asks to record, or why it cannot be (the update then changes nothing); null when it records
  * none. `input` holds `qa` (pass, fail, skip), `qa_by` and `qa_note`. Pass and fail name who checked; skip gives its
- * reason and is `self`'s word unless it names someone. Whoever checked is never the item's owner.
+ * reason and is `self`'s word unless it names someone. Whoever checked is never the item's owner. `head`, the project's
+ * HEAD commit when the verdict was given, is kept with it to trace what was checked.
  */
-export function qaOfInput(input: Record<string, unknown>, owner: string | null, self: string, now: number, code: string): { qa: QaRecord } | { error: string } | null {
+export function qaOfInput(input: Record<string, unknown>, owner: string | null, self: string, now: number, code: string, head: string | null = null): { qa: QaRecord } | { error: string } | null {
   if (input.qa === undefined) return null
   const verdict = input.qa
   if (verdict !== 'pass' && verdict !== 'fail' && verdict !== 'skip') return { error: t('ledger.qaBad') }
@@ -51,15 +62,15 @@ export function qaOfInput(input: Record<string, unknown>, owner: string | null, 
   if (verdict === 'skip' && !note) return { error: t('ledger.qaNeedsNote') }
   if (verdict !== 'skip' && !by) return { error: t('ledger.qaNeedsBy') }
   const who = by || self
-  if (owner && who === owner) return { error: t('ledger.qaByOwner', { code, owner }) }
+  if (isSameId(who, owner)) return { error: t('ledger.qaByOwner', { code, owner: owner!.trim() }) }
 
-  return { qa: { result: verdict === 'skip' ? 'skipped' : verdict, by: who, at: now, note } }
+  return { qa: { result: verdict === 'skip' ? 'skipped' : verdict, by: who, at: now, note, ...(head ? { commit: head } : {}) } }
 }
 
 /** Why an item's QA keeps it from closing, or null when it has passed (or was skipped for a reason) by someone not its owner. */
 export function qaBlocker(qa: QaRecord | undefined, owner: string | null, code: string): string | null {
   if (!qa) return t('ledger.qaNone', { code })
-  if (owner && qa.by === owner) return t('ledger.qaByOwnerClose', { code, by: qa.by })
+  if (isSameId(qa.by, owner)) return t('ledger.qaByOwnerClose', { code, by: qa.by.trim() })
   if (qa.result === 'fail') return t('ledger.qaFailed', { code, note: qa.note || t('qa.noNote') })
   if (qa.result === 'skipped' && !qa.note.trim()) return t('ledger.qaNeedsNote')
 
@@ -67,18 +78,36 @@ export function qaBlocker(qa: QaRecord | undefined, owner: string | null, code: 
 }
 
 /**
- * The QA part of an update to `item`: the verdict it keeps (the one recorded now, else the one it had), or why the
- * update is refused. `owner` is the owner after the update; `isClosing` whether it closes the item (done, and not
- * forced with a note). The host runs its own checks on the owner only once this lets the update through.
+ * The QA part of an update to `item`. A verdict that cannot be recorded is an `error`: the update changes nothing.
+ * Otherwise `qa` is the verdict the item keeps: the one recorded now (`isRecorded`), else the one it had, unless the
+ * update hands the item to another owner or reopens it after it closed (that verdict was for other work, and goes).
+ * `refusal` says why a close is refused for its QA, or is null. A refused close keeps a verdict recorded with it: only
+ * the status stays. `owner` is the owner after the update; `isClosing` whether it closes the item (done, and not
+ * forced with a note); `head` the project's HEAD commit, kept with a verdict recorded now. The host runs its own
+ * checks on the owner only when this refuses nothing.
  */
-export function qaUpdate(item: LedgerItem, input: Record<string, unknown>, owner: string | null, self: string, now: number, isClosing: boolean): { refusal: string } | { qa: QaRecord | undefined } {
+export function qaUpdate(
+  item: LedgerItem,
+  input: Record<string, unknown>,
+  owner: string | null,
+  self: string,
+  now: number,
+  isClosing: boolean,
+  head: string | null = null,
+): { error: string } | { qa: QaRecord | undefined; isRecorded: boolean; refusal: string | null } {
   const code = codeOf(item.id)
-  const verdict = qaOfInput(input, owner, self, now, code)
-  if (verdict && 'error' in verdict) return { refusal: verdict.error }
-  const qa = verdict?.qa ?? item.qa
-  const blocker = isClosing ? qaBlocker(qa, owner, code) : null
+  const verdict = qaOfInput(input, owner, self, now, code, head)
+  if (verdict && 'error' in verdict) return { error: verdict.error }
+  const isSameOwner = owner?.trim() ? isSameId(owner, item.owner) : !item.owner?.trim()
+  const isReopened = input.status === 'open' && item.status !== 'open'
+  const qa = verdict?.qa ?? (isSameOwner && !isReopened ? item.qa : undefined)
 
-  return blocker ? { refusal: blocker } : { qa }
+  return { qa, isRecorded: !!verdict, refusal: isClosing ? qaBlocker(qa, owner, code) : null }
+}
+
+/** A refused close beside a verdict recorded in the same update: the verdict is kept, and the answer says both. */
+export function qaKeptText(refusal: string): string {
+  return t('ledger.qaKept', { reason: refusal })
 }
 
 /**

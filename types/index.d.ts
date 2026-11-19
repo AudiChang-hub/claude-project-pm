@@ -167,6 +167,8 @@ export type QaRecord = {
   by: string
   at: number
   note: string
+  /** The project's HEAD commit (short) when the verdict was given, to trace what was checked; absent outside git. */
+  commit?: string
 }
 
 /** A project's PM and ledger, one file per project. */

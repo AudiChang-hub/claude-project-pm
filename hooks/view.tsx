@@ -198,12 +198,20 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const items = shown.flatMap(project => (files[project.key]?.ledger ?? []).filter(i => i.status !== 'dropped'))
   const itemsDone = items.filter(i => i.status === 'done').length
   const unassigned = ledgers.filter(({ item }) => !item.owner).length
-  /** An item's QA: its verdict, or awaiting once its owner has delivered (a session ended, to release or on CI; an agent done or to verify). */
+  /**
+   * An item's QA: its verdict, or awaiting once its owner has delivered (a session ended, to release or on CI, or no
+   * longer listed; an agent done or to verify).
+   */
   const qaOfItem = (item: LedgerItem): QaShown | null => {
-    const agent = item.owner?.startsWith('agent:') ? myAgents.find(a => `agent:${a.id}` === item.owner) : undefined
-    const owner = item.owner && !agent ? state.list.find(s => s.id === item.owner) : undefined
+    if (!item.owner) return qaShown(item, false)
+    if (item.owner.startsWith('agent:')) {
+      const agent = myAgents.find(a => `agent:${a.id}` === item.owner)
 
-    return qaShown(item, agent ? isDeliveredAgent(agent.state) : !!owner && isDeliveredStatus(statusOfOne(owner)))
+      return qaShown(item, !!agent && isDeliveredAgent(agent.state))
+    }
+    const owner = state.list.find(s => s.id === item.owner)
+
+    return qaShown(item, !owner || isDeliveredStatus(statusOfOne(owner)))
   }
   const qaAwaiting = ledgers.filter(({ item }) => qaOfItem(item) === 'awaiting').length
   const qaFailed = ledgers.filter(({ item }) => qaOfItem(item) === 'fail').length

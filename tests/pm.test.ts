@@ -252,8 +252,9 @@ test('the ledger will not close an item while its session waits on CI', ZH, asyn
   expect(board).toMatch(/\[等待 CI・未完成\] 「商品列表頁」\(local_open\) 最後回報 CI 尚未跑完/)
 
   const refused = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'user' } as never)) as { result?: unknown }).result)
-  expect(refused).toMatch(/無法將 T-01 標記為完成：負責的 Session「商品列表頁」CI 尚未跑完/)
-  expect(JSON.parse(files.get(PROJECT_FILE)!).ledger[0].status).toBe('open')
+  // The verdict is kept; only the close is refused, and the answer says both.
+  expect(refused).toMatch(/^QA 已記錄，但結案被擋：無法將 T-01 標記為完成：負責的 Session「商品列表頁」CI 尚未跑完/)
+  expect(JSON.parse(files.get(PROJECT_FILE)!).ledger[0]).toMatchObject({ status: 'open', qa: { result: 'pass', by: 'user' } })
 
   // Only the person's explicit word, written down, closes it anyway.
   await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, status: 'done', force: true, note: '使用者確認 CI 已在 GitHub 上通過' } as never)
@@ -1471,8 +1472,10 @@ test('in English: the board, the ledger and the pane', { options: { language: 'e
   expect(board.replace(/商品列表頁|移除舊版優惠欄位|金流對帳|Acme 商店後台|已修好。/g, '')).not.toMatch(/[一-鿿]/)
 
   const refused = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 2, status: 'done', qa: 'pass', qa_by: 'user' } as never)) as { result?: unknown }).result)
-  expect(refused).toMatch(/^Cannot mark T-02 done: The owning session "移除舊版優惠欄位" is waiting on CI \(last report: /)
+  // The verdict is kept; only the close is refused, and the answer says both.
+  expect(refused).toMatch(/^QA recorded, but closing was refused: Cannot mark T-02 done: The owning session "移除舊版優惠欄位" is waiting on CI \(last report: /)
   expect(refused).toMatch(/pass force: true/)
+  expect(JSON.parse(files.get(PROJECT_FILE)!).ledger[1]).toMatchObject({ status: 'open', qa: { result: 'pass', by: 'user' } })
 
   const ui = await $.ui.mount({
     plugin: 'project-pm',
@@ -2235,7 +2238,7 @@ test("the PM's agents: in the background, in a worktree unless they only read, f
 
   // An agent owns a work item: it is not closed while the agent runs, and an agent cannot change the ledger.
   await ledger({ action: 'add', text: '修正匯出欄位順序', owner: 'agent:a1' })
-  expect(await ledger({ action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'agent:q1' })).toMatch(/^無法將 T-01 標記為完成：負責的 Agent「T-12 修正匯出欄位順序」執行中/)
+  expect(await ledger({ action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'agent:q1' })).toMatch(/^QA 已記錄，但結案被擋：無法將 T-01 標記為完成：負責的 Agent「T-12 修正匯出欄位順序」執行中/)
   expect(await ledger({ action: 'update', id: 1, status: 'done', agentId: 'a1' })).toBe('Agent 只能讀 ledger（list），新增和修改工作項目是 PM 的事。把要改的內容寫在你的回覆裡，交給 PM。')
   expect(await ledger({ action: 'add', text: '另一件事', agentId: 'a1' })).toMatch(/^Agent 只能讀 ledger/)
   expect(await ledger({ action: 'list', agentId: 'a1' })).toMatch(/^T-01 \(id 1\) \[open\] 修正匯出欄位順序｜負責：agent:a1/)
@@ -2480,16 +2483,15 @@ const QA_WORDS = {
     needsBy: /^qa 為 pass 或 fail 時要填 qa_by/,
     needsNote: /^qa 為 skip 時要在 qa_note 寫理由/,
     byOwner: /^驗收者不能是負責人（local_open），這次沒有修改。派一個獨立的「T-01 QA」Agent 驗收。/,
-    updated: /^已更新工作項目 T-01。\nT-01 \(id 1\) \[open\] 清單批次修改｜負責：local_open｜QA 不通過（agent:q1）$/,
+    updated: /^已更新工作項目 T-01。\nT-01 \(id 1\) \[open\] 清單批次修改｜負責：local_open｜QA 不通過（agent:q1，於 3fa1c2e）$/,
     failed: /- \[QA 不通過\] T-01「清單批次修改」：沒有重現測試（agent:q1）/,
     refusedFail: /^無法將 T-01 標記為完成：驗收不通過（沒有重現測試）。交回負責人修正/,
-    refusedByOwner: /^無法將 T-01 標記為完成：驗收者 agent:q1 就是負責人。/,
-    closed: /^已更新工作項目 T-01。\nT-01 \(id 1\) \[done\] 清單批次修改｜負責：local_open｜QA 通過（agent:q2）｜驗收條件：批次改價後列表即時更新$/,
+    closed: /^已更新工作項目 T-01。\nT-01 \(id 1\) \[done\] 清單批次修改｜負責：local_open｜QA 通過（agent:q2，於 3fa1c2e）｜驗收條件：批次改價後列表即時更新$/,
     skipped: /\[done\] 文件錯字｜負責：未指派｜QA 略過：只改文件/,
     paneAwaiting: '1 項待 QA',
     paneFailed: '1 項 QA 不通過',
     paneItemAwaiting: '待 QA',
-    paneItemFailed: 'QA 不通過（agent:q1）',
+    paneItemFailed: 'QA 不通過（agent:q1，於 3fa1c2e）',
   },
   en: {
     row: 'T-01 (id 1) [open] Batch edit | owner: local_open',
@@ -2500,16 +2502,15 @@ const QA_WORDS = {
     needsBy: /^qa pass or fail needs qa_by/,
     needsNote: /^qa skip needs its reason in qa_note/,
     byOwner: /^Whoever checks an item may not be its owner \(local_open\); nothing was changed\. Start an independent "T-01 QA" agent\./,
-    updated: /^Updated work item T-01\.\nT-01 \(id 1\) \[open\] Batch edit \| owner: local_open \| QA failed \(agent:q1\)$/,
+    updated: /^Updated work item T-01\.\nT-01 \(id 1\) \[open\] Batch edit \| owner: local_open \| QA failed \(agent:q1 at 3fa1c2e\)$/,
     failed: /- \[QA failed\] T-01 "Batch edit": 沒有重現測試 \(agent:q1\)/,
     refusedFail: /^Cannot mark T-01 done: it failed QA \(沒有重現測試\)\. Hand it back to its owner/,
-    refusedByOwner: /^Cannot mark T-01 done: it was checked by agent:q1, its owner\./,
-    closed: /^Updated work item T-01\.\nT-01 \(id 1\) \[done\] Batch edit \| owner: local_open \| QA passed \(agent:q2\) \| criteria: 批次改價後列表即時更新$/,
+    closed: /^Updated work item T-01\.\nT-01 \(id 1\) \[done\] Batch edit \| owner: local_open \| QA passed \(agent:q2 at 3fa1c2e\) \| criteria: 批次改價後列表即時更新$/,
     skipped: /\[done\] Typo in docs \| owner: unassigned \| QA skipped: 只改文件/,
     paneAwaiting: '1 awaiting QA',
     paneFailed: '1 failed QA',
     paneItemAwaiting: 'awaiting QA',
-    paneItemFailed: 'QA failed (agent:q1)',
+    paneItemFailed: 'QA failed (agent:q1 at 3fa1c2e)',
   },
 } as const
 
@@ -2565,7 +2566,7 @@ async function qaGate($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en') {
 
   // A failed verdict is kept and shown; the item stays open.
   expect(await ledger({ action: 'update', id: 1, qa: 'fail', qa_by: 'agent:q1', qa_note: '沒有重現測試' })).toMatch(w.updated)
-  expect(saved()[0]!.qa).toEqual({ result: 'fail', by: 'agent:q1', at: NOW + 61_000, note: '沒有重現測試' })
+  expect(saved()[0]!.qa).toEqual({ result: 'fail', by: 'agent:q1', at: NOW + 61_000, note: '沒有重現測試', commit: '3fa1c2e' })
   text = await board()
   expect(text).toMatch(w.failed)
   expect(text).not.toMatch(w.awaiting)
@@ -2574,9 +2575,9 @@ async function qaGate($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en') {
   expect(await ui.find({ type: 'Text', text: w.paneFailed })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: w.paneItemFailed })).toBeDefined()
   expect(await ledger({ action: 'update', id: 1, status: 'done' })).toMatch(w.refusedFail)
-  // Its checker made its owner: it does not close.
+  // Its checker made its owner: the verdict was for another owner, so it goes, and the item does not close.
   await ledger({ action: 'update', id: 1, qa: 'pass', qa_by: 'agent:q1' })
-  expect(await ledger({ action: 'update', id: 1, owner: 'agent:q1', status: 'done' })).toMatch(w.refusedByOwner)
+  expect(await ledger({ action: 'update', id: 1, owner: 'agent:q1', status: 'done' })).toMatch(w.none)
   expect(saved()[0]!.owner).toBe('local_open')
 
   // Passed by someone else, criteria written, and closed in one call.
@@ -2673,16 +2674,23 @@ test('the QA core decides on plain data, with no engine: an update, a close and 
       setLang(lang)
       const item = { id: 7, text: 'Export', owner: 'local_dev', status: 'open' as const, note: '', createdAt: NOW, updatedAt: NOW }
       // Recording only: the verdict it keeps; a bad one is refused; closing without one is refused.
-      expect(qaUpdate(item, { qa: 'fail', qa_by: 'agent:q', qa_note: 'no test' }, 'local_dev', 'pm', NOW, false)).toEqual({ qa: { result: 'fail', by: 'agent:q', at: NOW, note: 'no test' } })
-      expect(qaUpdate(item, {}, 'local_dev', 'pm', NOW, false)).toEqual({ qa: undefined })
-      expect('refusal' in qaUpdate(item, { qa: 'pass', qa_by: 'local_dev' }, 'local_dev', 'pm', NOW, false)).toBe(true)
-      expect('refusal' in qaUpdate(item, {}, 'local_dev', 'pm', NOW, true)).toBe(true)
+      expect(qaUpdate(item, { qa: 'fail', qa_by: 'agent:q', qa_note: 'no test' }, 'local_dev', 'pm', NOW, false, 'abc1234')).toEqual({ qa: { result: 'fail', by: 'agent:q', at: NOW, note: 'no test', commit: 'abc1234' }, isRecorded: true, refusal: null })
+      expect(qaUpdate(item, {}, 'local_dev', 'pm', NOW, false)).toEqual({ qa: undefined, isRecorded: false, refusal: null })
+      expect('error' in qaUpdate(item, { qa: 'pass', qa_by: 'LOCAL_DEV ' }, 'local_dev', 'pm', NOW, false)).toBe(true)
+      const unchecked = qaUpdate(item, {}, 'local_dev', 'pm', NOW, true)
+      expect('refusal' in unchecked && unchecked.refusal !== null).toBe(true)
+      // A failed verdict recorded with a close: kept, and the close refused.
+      const failedClose = qaUpdate(item, { qa: 'fail', qa_by: 'agent:q' }, 'local_dev', 'pm', NOW, true)
+      expect('qa' in failedClose && failedClose.isRecorded && failedClose.qa?.result === 'fail' && failedClose.refusal !== null).toBe(true)
       // Closing: a pass by someone else goes through; the verdict it had counts too, unless its checker is now the owner.
       const passed = { ...item, qa: { result: 'pass' as const, by: 'agent:q', at: NOW, note: '' } }
-      expect(qaUpdate(passed, {}, 'local_dev', 'pm', NOW, true)).toEqual({ qa: passed.qa })
-      expect('refusal' in qaUpdate(passed, {}, 'agent:q', 'pm', NOW, true)).toBe(true)
+      expect(qaUpdate(passed, {}, 'local_dev', 'pm', NOW, true)).toEqual({ qa: passed.qa, isRecorded: false, refusal: null })
+      expect(qaUpdate(passed, {}, ' LOCAL_DEV', 'pm', NOW, true)).toEqual({ qa: passed.qa, isRecorded: false, refusal: null })
+      // Another owner, or a reopen: the verdict goes.
+      expect(qaUpdate(passed, {}, 'local_other', 'pm', NOW, false)).toEqual({ qa: undefined, isRecorded: false, refusal: null })
+      expect(qaUpdate({ ...passed, status: 'done' }, { status: 'open' }, 'local_dev', 'pm', NOW, false)).toEqual({ qa: undefined, isRecorded: false, refusal: null })
       // A skip is the caller's own word.
-      expect(qaUpdate(item, { qa: 'skip', qa_note: 'docs' }, 'local_dev', 'pm', NOW, true)).toEqual({ qa: { result: 'skipped', by: 'pm', at: NOW, note: 'docs' } })
+      expect(qaUpdate(item, { qa: 'skip', qa_note: 'docs' }, 'local_dev', 'pm', NOW, true)).toEqual({ qa: { result: 'skipped', by: 'pm', at: NOW, note: 'docs' }, isRecorded: true, refusal: null })
       // Attention: awaiting once the host says the owner delivered, failed whatever it says; closed items never.
       const failed = { ...item, id: 8, qa: { result: 'fail' as const, by: 'agent:q', at: NOW, note: 'no test' } }
       const lines = qaAttention([item, failed, { ...item, id: 9, status: 'done' as const }], owner => owner === 'local_dev', owner => `<${owner}>`)
@@ -2696,4 +2704,108 @@ test('the QA core decides on plain data, with no engine: an update, a close and 
   } finally {
     setLang(was)
   }
+})
+
+// ── The T-31 QA review's findings B, C, D, F, G: each reproduced first, in both languages ──
+
+const FINDING_WORDS = {
+  zh: {
+    byOwner: /^驗收者不能是負責人（[^）]+），這次沒有修改。/,
+    byOwnerClose: /^無法將 T-04 標記為完成：驗收者 Local_Open 就是負責人。/,
+    none: /^無法將 T-01 標記為完成：還沒有驗收紀錄。/,
+    kept: /^QA 已記錄，但結案被擋：無法將 T-06 標記為完成：驗收不通過（缺測試）。/,
+    itemFailed: /- T-06 \(id 6\) \[open\] 匯出欄位｜負責：商品列表頁（[^）]+）｜QA 不通過（agent:q3，於 3fa1c2e）/,
+    gone: /- \[待 QA\] T-03「舊報表」：local_gone（已不在清單中）已交付，還沒有驗收紀錄。/,
+    paneAwaiting: '3 項待 QA',
+  },
+  en: {
+    byOwner: /^Whoever checks an item may not be its owner \([^)]+\); nothing was changed\./,
+    byOwnerClose: /^Cannot mark T-04 done: it was checked by Local_Open, its owner\./,
+    none: /^Cannot mark T-01 done: it has no QA record\./,
+    kept: /^QA recorded, but closing was refused: Cannot mark T-06 done: it failed QA \(缺測試\)\./,
+    itemFailed: /- T-06 \(id 6\) \[open\] 匯出欄位 \| owner: 商品列表頁 \([^)]+\) \| QA failed \(agent:q3 at 3fa1c2e\)/,
+    gone: /- \[Awaiting QA\] T-03 "舊報表": its owner local_gone \(no longer listed\) has delivered and there is no QA record\./,
+    paneAwaiting: '3 awaiting QA',
+  },
+} as const
+
+async function qaFindings($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en') {
+  const w = FINDING_WORDS[lang]
+  const files: Files = new Map()
+  const at = NOW - 7_200_000
+  const item = (id: number, text: string, owner: string | null, extra: object = {}) => ({ id, text, owner, status: 'open', note: '', createdAt: at, updatedAt: at, ...extra })
+  const items = [
+    item(1, '商品匯入', 'local_open'),
+    item(2, '已結案的頁面', 'local_open', { status: 'done', qa: { result: 'pass', by: 'agent:q1', at, note: '' } }),
+    item(3, '舊報表', 'local_gone'),
+    item(4, '舊紀錄', 'local_open', { qa: { result: 'pass', by: 'Local_Open ', at, note: '' } }),
+    item(5, '文件', null, { criteria: '保留這條' }),
+    item(6, '匯出欄位', 'local_open'),
+  ]
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: items, nextId: 7 }))
+  const report = { status: 'done', summary: 'T-01 已隨 2.4.1 上線', delivery: 'released', commit: '3fa1c2e' }
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { plan: [{ content: '步驟 1', status: 'completed' }], report, reportAt: NOW - 600_000 - 1, lastAnswer: 'T-01 已隨 2.4.1 上線。' })))
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files, [], argv => (argv[0] === 'git' && argv[1] === 'rev-parse' ? { exitCode: 0, stdout: '3fa1c2e9b0d4c6a8e2f1b3d5c7a9e0f2b4d6c8a1' } : null))
+  await $.session.start(START)
+  await clock.advance(61_000)
+  const ledger = async (input: object) => String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', ...input } as never)) as { result?: unknown }).result)
+  const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  const saved = (id: number) => (JSON.parse(files.get(PROJECT_FILE)!).ledger as Record<string, unknown>[]).find(i => i.id === id)!
+
+  // F: an owner no longer listed (archived, or gone) has nothing left to do: its open items await QA, on the board and the pane.
+  expect(await board()).toMatch(w.gone)
+  const ui = await $.ui.mount({
+    plugin: 'project-pm',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: 'project-pm',
+    props: { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 80 } },
+  } as never)
+  expect(await ui.find({ type: 'Text', text: w.paneAwaiting })).toBeDefined()
+  await ui.unmount()
+
+  // B: the owner checking its own work is caught whatever its case or spaces, on either side.
+  expect(await ledger({ action: 'update', id: 1, qa: 'pass', qa_by: 'LOCAL_OPEN' })).toMatch(w.byOwner)
+  expect(await ledger({ action: 'update', id: 1, qa: 'pass', qa_by: ' local_open ' })).toMatch(w.byOwner)
+  await ledger({ action: 'update', id: 1, owner: ' agent:a1 ' })
+  expect(await ledger({ action: 'update', id: 1, qa: 'pass', qa_by: 'agent:A1' })).toMatch(w.byOwner)
+  expect(saved(1).owner).toBe(' agent:a1 ')
+  expect(saved(1).qa).toBe(undefined)
+  // …and a verdict already kept by the owner under another spelling does not close the item.
+  expect(await ledger({ action: 'update', id: 4, status: 'done' })).toMatch(w.byOwnerClose)
+
+  // C: a verdict is for the owner it checked, and records the project's HEAD it checked.
+  await ledger({ action: 'update', id: 1, owner: 'local_open' })
+  await ledger({ action: 'update', id: 1, qa: 'pass', qa_by: 'agent:q1' })
+  expect(saved(1).qa).toEqual({ result: 'pass', by: 'agent:q1', at: NOW + 61_000, note: '', commit: '3fa1c2e' })
+  await ledger({ action: 'update', id: 1, owner: 'LOCAL_OPEN' })
+  expect(saved(1).qa).toMatchObject({ result: 'pass' })
+  await ledger({ action: 'update', id: 1, owner: 'local_ask' })
+  expect(saved(1).qa).toBe(undefined)
+  expect(await ledger({ action: 'update', id: 1, status: 'done' })).toMatch(w.none)
+  // Reopened after it closed: its verdict goes too.
+  await ledger({ action: 'update', id: 2, status: 'open' })
+  expect(saved(2)).toMatchObject({ status: 'open' })
+  expect(saved(2).qa).toBe(undefined)
+
+  // D: a verdict recorded beside a refused close is kept; the answer says so and why it did not close.
+  expect(await ledger({ action: 'update', id: 6, qa: 'fail', qa_by: 'agent:q3', qa_note: '缺測試', status: 'done' })).toMatch(w.kept)
+  expect(saved(6)).toMatchObject({ status: 'open', qa: { result: 'fail', by: 'agent:q3', note: '缺測試', commit: '3fa1c2e' } })
+  expect(await board()).toMatch(w.itemFailed)
+
+  // G: criteria that are not text leave the criteria as they were; an empty string clears them.
+  await ledger({ action: 'update', id: 5, criteria: 5 })
+  await ledger({ action: 'update', id: 5, criteria: null })
+  expect(saved(5).criteria).toBe('保留這條')
+  await ledger({ action: 'update', id: 5, criteria: '' })
+  expect(saved(5).criteria).toBe(undefined)
+}
+
+test('QA review findings: owner spelling, a new owner or a reopen voids the verdict, a refused close keeps it, a gone owner awaits QA', ZH, async ($, on) => {
+  await qaFindings($, on, 'zh')
+})
+
+test('QA review findings, in English', { options: { language: 'en' } }, async ($, on) => {
+  await qaFindings($, on, 'en')
 })
