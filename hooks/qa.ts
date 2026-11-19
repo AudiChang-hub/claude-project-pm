@@ -103,6 +103,8 @@ export function qaUpdate(
   const code = codeOf(item.id)
   const verdict = qaOfInput(input, owner, self, now, code, head)
   if (verdict && 'error' in verdict) return { error: verdict.error }
+  // Handed to another owner in the same update: the owner it had may not check its own work either.
+  if (verdict && isSameId(verdict.qa.by, item.owner)) return { error: t('ledger.qaByOwner', { code, owner: item.owner!.trim() }) }
   const isSameOwner = owner?.trim() ? isSameId(owner, item.owner) : !item.owner?.trim()
   const isReopened = input.status === 'open' && item.status !== 'open'
   const qa = verdict?.qa ?? (isSameOwner && !isReopened ? item.qa : undefined)

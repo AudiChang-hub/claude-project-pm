@@ -2854,3 +2854,34 @@ test('an owner written with spaces or in another case is still found by every ch
 test('an owner written with spaces or in another case is still found, in English', { options: { language: 'en' } }, async ($, on) => {
   await ownerSpelling($, on)
 })
+
+// ── A verdict recorded with a change of owner: neither the old owner nor the new one may be its checker (follow-up 2) ──
+
+async function verdictWithNewOwner($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en') {
+  const files: Files = new Map()
+  const at = NOW - 3_600_000
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [{ id: 1, text: 'Export', owner: 'local_open', status: 'open', note: '', createdAt: at, updatedAt: at }], nextId: 2 }))
+  mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+  const ledger = async (input: object) => String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', ...input } as never)) as { result?: unknown }).result)
+  const saved = () => JSON.parse(files.get(PROJECT_FILE)!).ledger[0] as Record<string, unknown>
+  const refused = lang === 'zh' ? /^驗收者不能是負責人（local_open），這次沒有修改。/ : /^Whoever checks an item may not be its owner \(local_open\); nothing was changed\./
+
+  // The old owner hands the item on and passes its own work in the same update: refused, nothing changes.
+  expect(await ledger({ action: 'update', id: 1, owner: 'local_ask', qa: 'pass', qa_by: 'LOCAL_OPEN ' })).toMatch(refused)
+  expect(saved()).toMatchObject({ owner: 'local_open' })
+  expect(saved().qa).toBe(undefined)
+  // The new owner may not either; someone else may.
+  expect(await ledger({ action: 'update', id: 1, owner: 'local_ask', qa: 'pass', qa_by: 'local_ask' })).toMatch(lang === 'zh' ? /^驗收者不能是負責人（local_ask）/ : /^Whoever checks an item may not be its owner \(local_ask\)/)
+  await ledger({ action: 'update', id: 1, owner: 'local_ask', qa: 'pass', qa_by: 'agent:q1' })
+  expect(saved()).toMatchObject({ owner: 'local_ask', qa: { result: 'pass', by: 'agent:q1' } })
+}
+
+test('a verdict recorded with a change of owner is checked against both owners', ZH, async ($, on) => {
+  await verdictWithNewOwner($, on, 'zh')
+})
+
+test('a verdict recorded with a change of owner is checked against both owners, in English', { options: { language: 'en' } }, async ($, on) => {
+  await verdictWithNewOwner($, on, 'en')
+})
