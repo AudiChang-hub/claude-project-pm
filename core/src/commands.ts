@@ -131,7 +131,12 @@ COMMANDS.check = async args => {
   }
   const input = await readStdin()
   const ref = await resolveProject(process.cwd())
-  if (!ref) return 0
+  if (!ref) {
+    // Nowhere to keep it for the board, but never in silence.
+    process.stderr.write(`${ct('push.noProject')}\n`)
+
+    return 0
+  }
   // A push the PM cannot check goes through, said here and kept for the board (prePushHook).
   const out = await prePushHook(ref, input, run)
   if (out.stderr) process.stderr.write(`${out.stderr}\n`)

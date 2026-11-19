@@ -4,6 +4,7 @@
  * Needs attention until it is a week old (6.2).
  */
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
@@ -17,7 +18,7 @@ import { resolveProject } from '../src/project'
 import { paths } from '../src/store'
 import { boardTool, ledgerTool } from '../src/tools'
 import type { World } from './helpers'
-import { LANGS, git, hostWith, world } from './helpers'
+import { LANGS, git, hostWith, serverCommand, world } from './helpers'
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -75,6 +76,15 @@ for (const lang of LANGS) {
       const out = await prePushHook(ref, input, hostWith(), w.env, w.ctx().now())
       assert.equal(out.code, 1)
       assert.deepEqual(await pushProblems(ref, w.env, w.ctx().now()), [])
+    })
+
+    test('the program cannot tell which project it is in: the push goes through, but says so (T-37 QA2 5)', { timeout: 60_000 }, () => {
+      // Run where git finds no repository, as when git rev-parse does not answer in time.
+      const { command, args } = serverCommand('check', 'pre-push')
+      const out = spawnSync(command, args, { cwd: w.home, env: { ...w.env, PROJECT_PM_LANG: lang }, input, encoding: 'utf8', windowsHide: true })
+      assert.equal(out.status, 0, out.stderr)
+      assert.equal(out.stdout, '')
+      assert.ok(out.stderr.includes(ct('push.noProject')), out.stderr)
     })
   })
 }
