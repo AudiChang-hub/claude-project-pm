@@ -3,6 +3,8 @@
  * the stdio and the Streamable HTTP transports. Written by hand, without the SDK, so the single executable carries
  * no dependency: the server only answers initialize, ping, tools/list and tools/call.
  */
+import { fileURLToPath } from 'node:url'
+
 import { t } from '../../hooks/messages'
 import type { Ctx, ToolResult } from './context'
 import { newCtx } from './context'
@@ -118,13 +120,25 @@ const TOOLS: Record<string, (ctx: Ctx, input: Json) => Promise<ToolResult>> = { 
 export class McpSession {
   ctx: Ctx | null = null
   clientName = ''
+  /** How a request reaches the client (stdio); without it the server asks the client nothing (HTTP). */
+  send: ((message: JsonRpc) => void) | null = null
+  private canAskRoots = false
+  private rootsAsked: Promise<string[]> | null = null
+  private readonly waiting = new Map<string, (message: JsonRpc) => void>()
+  private asked = 0
   constructor(private readonly base: Partial<Ctx> = {}) {}
 
   /** The answer to one message, or null for a notification (and for an answer the client sent us). */
   async handle(message: JsonRpc): Promise<JsonRpc | null> {
     const id = message.id
     const isRequest = id !== undefined && id !== null && typeof message.method === 'string'
-    if (!isRequest) return null
+    if (!isRequest) {
+      if (message.method === undefined && id !== undefined && id !== null) this.waiting.get(String(id))?.(message)
+      // The client's folders changed: ask again when a call needs them.
+      else if (message.method === 'notifications/roots/list_changed') this.rootsAsked = null
+
+      return null
+    }
     try {
       const result = await this.answer(message.method!, message.params ?? {})
 
@@ -145,7 +159,29 @@ export class McpSession {
   private newContext(name: string): Ctx {
     const tool = toolName(name)
 
-    return newCtx({ ...this.base, tool, actor: this.base.actor ?? connectionActor(tool, this.base.env ?? process.env) })
+    return newCtx({ roots: () => this.roots(), ...this.base, tool, actor: this.base.actor ?? connectionActor(tool, this.base.env ?? process.env) })
+  }
+
+  /** The client's roots as folders (3.1): asked once, and again after it says they changed; none within 3 s is none. */
+  roots(): Promise<string[]> {
+    if (!this.canAskRoots || !this.send) return Promise.resolve([])
+    this.rootsAsked ??= new Promise<string[]>(resolve => {
+      const id = `project-pm-${++this.asked}`
+      const timer = setTimeout(() => {
+        this.waiting.delete(id)
+        resolve([])
+      }, 3_000)
+      timer.unref?.()
+      this.waiting.set(id, message => {
+        clearTimeout(timer)
+        this.waiting.delete(id)
+        const roots = ((message.result ?? {}) as { roots?: { uri?: unknown }[] }).roots ?? []
+        resolve(roots.flatMap(root => (typeof root.uri === 'string' && root.uri.startsWith('file:') ? [fileURLToPath(root.uri)] : [])))
+      })
+      this.send!({ jsonrpc: '2.0', id, method: 'roots/list' })
+    })
+
+    return this.rootsAsked
   }
 
   private async answer(method: string, params: Json): Promise<unknown> {
@@ -153,6 +189,8 @@ export class McpSession {
       case 'initialize': {
         const info = (params.clientInfo ?? {}) as { name?: string }
         this.clientName = info.name ?? ''
+        this.canAskRoots = !!(params.capabilities as { roots?: unknown } | undefined)?.roots
+        this.rootsAsked = null
         this.ctx = this.newContext(this.clientName)
         const asked = typeof params.protocolVersion === 'string' ? params.protocolVersion : ''
         const version = (PROTOCOL_VERSIONS as readonly string[]).includes(asked) ? asked : PROTOCOL_VERSIONS[0]
@@ -208,12 +246,25 @@ export async function handleText(session: McpSession, text: string): Promise<Jso
   return session.handle(parsed as JsonRpc)
 }
 
+/** Whether a line is an answer the client sent to a request of ours (no method, an id). */
+function isAnswer(line: string): boolean {
+  try {
+    const one = JSON.parse(line) as JsonRpc
+
+    return !!one && typeof one === 'object' && !Array.isArray(one) && one.method === undefined && one.id !== undefined && one.id !== null
+  } catch {
+    return false
+  }
+}
+
 /** The stdio transport: one JSON message per line in, one per line out; nothing else is ever written to stdout. */
 export function serveStdio(session: McpSession, input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stdout): Promise<void> {
   return new Promise(resolve => {
     let buffer = ''
     let pending = Promise.resolve()
     input.setEncoding?.('utf8')
+    session.send = message => output.write(`${JSON.stringify(message)}
+`)
     input.on('data', (chunk: string) => {
       buffer += chunk
       let at: number
@@ -221,6 +272,11 @@ export function serveStdio(session: McpSession, input: NodeJS.ReadableStream = p
         const line = buffer.slice(0, at).trim()
         buffer = buffer.slice(at + 1)
         if (!line) continue
+        // The client's answer to our own request (roots/list) is taken at once: a call queued below may wait for it.
+        if (isAnswer(line)) {
+          void handleText(session, line)
+          continue
+        }
         // Answers go out in the order the messages came in.
         pending = pending.then(async () => {
           const answer = await handleText(session, line)

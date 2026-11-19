@@ -18,6 +18,8 @@ export type Ctx = {
   run: Run
   now: () => number
   facts: Facts
+  /** The folders the MCP client says it works in (roots/list), when it says: they come before `cwd` (3.1). */
+  roots?: () => Promise<string[]>
 }
 
 /** What a tool answers: the words for the model, the same as JSON for programs, and whether the core itself failed. */
@@ -31,9 +33,16 @@ export function newCtx(part: Partial<Ctx> & { actor: string; tool: string }): Ct
   return { cwd: process.cwd(), env: process.env, facts: newFacts(run, now), ...part, run, now }
 }
 
-/** The project a call is about: its `project` folder, else the connection's. */
-export function projectOf(ctx: Ctx, input: Record<string, unknown>): Promise<ProjectRef | null> {
-  const folder = typeof input.project === 'string' && input.project.trim() ? input.project.trim() : ctx.cwd
+/**
+ * The project a call is about (3.1): its `project` folder; else the first of the client's roots that is in a git
+ * repository; else the folder the server runs in.
+ */
+export async function projectOf(ctx: Ctx, input: Record<string, unknown>): Promise<ProjectRef | null> {
+  if (typeof input.project === 'string' && input.project.trim()) return resolveProject(input.project.trim(), ctx.run)
+  for (const folder of (await ctx.roots?.()) ?? []) {
+    const ref = await resolveProject(folder, ctx.run)
+    if (ref) return ref
+  }
 
-  return resolveProject(folder, ctx.run)
+  return resolveProject(ctx.cwd, ctx.run)
 }

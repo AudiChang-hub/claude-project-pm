@@ -4,10 +4,12 @@
  */
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 
 import { t } from '../../hooks/messages'
 import { McpSession, isStructured } from '../src/mcp'
@@ -90,6 +92,30 @@ for (const lang of LANGS) {
       const out = await call('board', {})
       assert.equal(out.structuredContent, undefined)
       assert.ok(out.content[0]!.text.length > 0)
+    })
+
+    test('without a project, the client\'s roots name it; without roots, the folder the server started in (3.1)', { timeout: 60_000 }, async () => {
+      // Started outside any repository, as a tool may start its MCP servers from the home folder.
+      const { command, args } = serverCommand('mcp')
+      const transport = new StdioClientTransport({ command, args, cwd: w.home, env: { ...(w.env as Record<string, string>), PROJECT_PM_LANG: lang, CLAUDE_CODE_SESSION_ID: SESSION }, stderr: 'pipe' })
+      let roots = [{ uri: pathToFileURL(w.root).href, name: 'not a repository' }, { uri: pathToFileURL(w.repo).href, name: 'Acme shop' }]
+      client = new Client({ name: 'claude-code', version: '2.1.326' }, { capabilities: { roots: { listChanged: true } } })
+      client.setRequestHandler(ListRootsRequestSchema, async () => ({ roots }))
+      await client.connect(transport)
+      const added = await call('ledger', { action: 'add', text: 'Add the Acme coupon field' })
+      assert.equal(added.isError, false, added.content[0]!.text)
+      assert.ok(added.content[0]!.text.includes('T-01'))
+      // The roots change: the next call follows them.
+      roots = [{ uri: pathToFileURL(w.home).href, name: 'home' }]
+      await client.sendRootsListChanged()
+      const out = await call('board', {})
+      assert.equal(out.isError, true)
+    })
+
+    test('a client without roots: the folder the server started in', { timeout: 60_000 }, async () => {
+      await connect(w.repo)
+      const out = await call('ledger', { action: 'add', text: 'Add the Acme coupon field' })
+      assert.equal(out.isError, false, out.content[0]!.text)
     })
 
     test('an unknown tool is a protocol error', { timeout: 60_000 }, async () => {
