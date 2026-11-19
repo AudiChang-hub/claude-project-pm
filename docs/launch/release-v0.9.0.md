@@ -29,8 +29,8 @@ Then type `/pm` in a new session of your project.
 
 - **QA in the ledger.** New optional fields `criteria` and `qa` (pass, fail or skipped, who checked it, when, a note, and the project's HEAD commit at the time). The ledger tool takes `criteria`, `qa`, `qa_by` and `qa_note`. A new owner or a reopen voids the old verdict; a close refused for another reason keeps a verdict given with it and says so. Items written before keep reading and writing as they were. `force` with a note still closes an item when you say so.
 - **QA on the board and the pane.** *Needs attention* lists items awaiting QA (their owner has delivered, or is archived or gone) and items that failed it; each item shows its verdict and commit.
-- **CI blocks real data.** CI scans every tracked file for the terms in the repo secret `BLOCKED_TERMS`, one per line, and prints only the file and line, never the term. Add the secret under **Settings → Secrets and variables → Actions** to turn it on; without it the step is skipped.
-- **Platform support table** in the README: which features work where. Today everything runs in the Claude Code desktop app; the Claude Code CLI is planned for v1.0 (being tested), Codex, Copilot and Antigravity for v1.1, Cursor and Devin for v1.2. The table is updated with every release.
+- **CI blocks real data.** This repository's CI scans every tracked file for real data; the list lives in the repo secret `BLOCKED_TERMS`, never in the repo, and the output names only the file and line of each hit. It checks this repository only: a CI template for your own projects comes in v1.0.
+- **Platform support table** in the README: which features work where. Today they run in the Claude Code desktop app. The Claude Code CLI was tested on v0.9.0: `/pm` cannot start there (it gets no session id), so it waits for v1.0 and its shared core. Codex, Copilot and Antigravity are planned for v1.1, Cursor and Devin for v1.2, and the CI template for v1.0. The table is updated with every release.
 
 ## Changed
 

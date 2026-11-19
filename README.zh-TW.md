@@ -8,7 +8,7 @@
 **同時開很多個 Claude Code Session 和 Agent，你只跟一個 PM 說話，一件工作也不漏。**
 
 <p align="center">
-  <img src="docs/images/overview-zh-TW.png" alt="Project PM v0.9.0 一頁圖解：你只跟 PM 說話，PM 管看板和交辦清單，把工作交給 Session 或 Agent。兩者都要過 QA 關卡：驗收條件、push 前派獨立驗收 Agent、沒通過不能結案、CI 擋真實資料（名單只放在 secret）。每次派工的實測成本（等值輸入 tokens）：1 小時內有活動的既有 Session 1.8 萬、唯讀 Agent 6 萬、新 Session 7 萬、喚醒閒置的大 Session 84 萬。Agent 在獨立 worktree 工作，也不會 push。" width="100%">
+  <img src="docs/images/overview-zh-TW.png" alt="Project PM v0.9.0 一頁圖解：你只跟 PM 說話，PM 管看板和交辦清單，把工作交給 Session 或 Agent。兩者都要過 QA 關卡：驗收條件、push 前派獨立驗收 Agent、沒通過不能結案、CI 擋真實資料（名單只放在 secret）。每次派工的實測成本：1.8 萬到 84 萬等值輸入 tokens。Agent 在獨立 worktree 工作，也不會 push。" width="100%">
 </p>
 
 ## 解決什麼問題
@@ -43,16 +43,16 @@ Project PM 讓專案裡的一個 Session 擔任 PM。它即時掌握每個 Sessi
 | 文字看板 | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
 | 交辦清單 | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
 | QA 關卡 | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| 交付判斷（git、CI）³ | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| 即時追蹤 Session | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| Agent 派工 | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| 交付判斷（git、CI） | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| 即時追蹤 Session | ✅ | 🗓 v1.0 | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ |
+| Agent 派工 | ✅ | 🗓 v1.0 | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ |
 | 開發準則 | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| CI 真實資料掃描⁴ | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| CI 真實資料掃描³ | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 |
 
-¹ 實測中，結果出來後更新這一欄。v1.0：CLI、共用核心、網頁看板。
-² 各含 App 和 CLI（Copilot：VS Code 和 CLI；Cursor：編輯器和 CLI）。兩者有差異時會加註。
-³ CI 用已登入的 `gh` 查詢。
-⁴ 這個 repo 的 GitHub Actions 步驟，需設定 `BLOCKED_TERMS` secret。
+¹ v0.9.0 實測（Claude Code 2.1.326）：`/pm` 在 CLI 無法啟用（拿不到 Session id），所以看板、交辦清單、QA 關卡、Agent 派工都還不能用。v1.0 起由共用核心支援；即時追蹤和 Agent 派工在 v1.0 只做到部分。
+² 含 App（或編輯器）和 CLI，兩者有差異時會加註。
+³ v1.0 提供 GitHub Actions 範本，和用哪個 AI 工具無關。本 repo 自己的 CI 已經在用。
+⁴ Claude Code 桌面版以外只能做到部分：靠 hook 自動回報，看不到沒裝 hook 的 Session，也不能開新 Session。
 
 這張表每次推版都會更新。
 
@@ -60,9 +60,9 @@ Project PM 讓專案裡的一個 Session 擔任 PM。它即時掌握每個 Sessi
 
 - **QA 關卡。** 每個工作項目都有驗收條件。程式變更 push 前，PM 會派一個獨立的驗收 Agent，只給它 diff 和驗收條件；沒有 QA 通過（或附理由的略過），交辦清單不讓結案，驗收者也不能是負責人。看板會列出待 QA 和 QA 不通過的項目。
 - **額度優先派工。** 既有 Session 要 1 小時內有活動、還沒做很多輪，PM 才交給它（約 1.8 萬等值輸入 tokens）。喚醒閒置的大 Session 約要 84 萬，所以小事改開新 Session（7 萬）或 Agent（唯讀約 6 萬）。
-- **CI 擋真實資料。** CI 會用 repo secret `BLOCKED_TERMS`（一行一個詞）掃描所有追蹤的檔案，只印出檔名和行號，不印出詞本身。到 **Settings → Secrets and variables → Actions** 新增這個 secret 才會啟用；沒設定時這一步會略過。
+- **CI 擋真實資料。** 本 repo 的 CI 會掃描所有追蹤的檔案，找出真實資料；名單存在 secret，不進 repo。給你的專案用的 CI 範本在 v1.0 提供。
 
-v0.8.0 加入了 Agent：在獨立 worktree 背景工作、PM 驗收合併後才算完成，交辦清單和看板的輸出也大幅縮短（[發布說明](https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.8.0)）。
+v0.8.0 加入了 Agent：在獨立 worktree 背景工作，PM 合併後才算完成（[發布說明](https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.8.0)）。
 
 [CHANGELOG](CHANGELOG.md) · [QA 怎麼運作](docs/design/qa.md) · [Agent 怎麼運作](docs/design/agents.md)
 

@@ -8,7 +8,7 @@
 **Run many Claude Code sessions and agents at once. You talk to one PM, and nothing slips.**
 
 <p align="center">
-  <img src="docs/images/overview.png" alt="Project PM v0.9.0 at a glance: you talk to the PM, which keeps a board and a ledger and hands work to sessions or agents. Both pass a QA gate: acceptance criteria, an independent QA agent before each push, no close without a pass, and CI that blocks real data kept in a secret. Measured cost per hand-off in input-equivalent tokens: 18k for an open session active in the last hour, 60k for a read-only agent, 70k for a new session, 840k to wake a large idle one. Agents work in their own worktree and never push." width="100%">
+  <img src="docs/images/overview.png" alt="Project PM v0.9.0 at a glance: you talk to the PM, which keeps a board and a ledger and hands work to sessions or agents. Both pass a QA gate: acceptance criteria, an independent QA agent before each push, no close without a pass, and CI that blocks real data kept in a secret. Measured cost per hand-off: 18k to 840k input-equivalent tokens. Agents work in their own worktree and never push." width="100%">
 </p>
 
 ## Why
@@ -43,16 +43,16 @@ Needs the Claude Code desktop app (Code tab).
 | Text board | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
 | Ledger | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
 | QA gate | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| Delivery check (git, CI)³ | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| Live session tracking | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| Agent hand-off | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| Delivery check (git, CI) | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| Live session tracking | ✅ | 🗓 v1.0 | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ |
+| Agent hand-off | ✅ | 🗓 v1.0 | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ |
 | Development guidelines | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| CI real-data scan⁴ | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| CI real-data scan³ | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 |
 
-¹ Being tested; this column changes once the results are in. v1.0: the CLI, a shared core and a web board.
-² App and CLI each (Copilot: VS Code and CLI; Cursor: editor and CLI). A note will mark where they differ.
-³ CI is checked with a signed-in `gh`.
-⁴ A GitHub Actions step on this repository; needs the `BLOCKED_TERMS` secret.
+¹ Tested on v0.9.0 (Claude Code 2.1.326): `/pm` cannot start in the CLI (it gets no session id), so the board, ledger, QA gate and agent hand-off don't work there yet. From v1.0 the shared core supports it; live tracking and agent hand-off are partial in v1.0.
+² App (or editor) and CLI; a note will mark where they differ.
+³ v1.0 ships a GitHub Actions template, whatever AI tool you use. This repository's own CI already runs it.
+⁴ Partial outside the Claude Code desktop app: sessions report through hooks, so a session without the hook is not seen, and no new session can be started.
 
 This table is updated with every release.
 
@@ -60,9 +60,9 @@ This table is updated with every release.
 
 - **QA gate.** Each work item carries acceptance criteria. Before a code change is pushed, the PM sends an independent QA agent that sees only the diff and the criteria, and the ledger won't close an item without a QA pass (or a skip with its reason). Whoever checks it is never its owner. The board lists what awaits QA and what failed it.
 - **Quota-first hand-offs.** The PM reuses an open session only if it was active in the last hour and hasn't run many turns (about 18k input-equivalent tokens). Waking a large idle one costs about 840k, so a small thing goes to a new session (70k) or an agent (60k read-only) instead.
-- **CI blocks real data.** CI scans every tracked file for the terms in your `BLOCKED_TERMS` repo secret (one per line) and prints only the file and line, never the term. Add the secret under **Settings → Secrets and variables → Actions** to turn it on; without it the step is skipped.
+- **CI blocks real data.** This repository's CI scans every tracked file for real data; the list lives in a secret, never in the repo. A CI template for your own projects comes in v1.0.
 
-v0.8.0 brought agents: background work in its own worktree, merged only after the PM reviews it, with far shorter ledger and board output ([release notes](https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.8.0)).
+v0.8.0 brought agents: background work in its own worktree, merged after the PM reviews it ([release notes](https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.8.0)).
 
 [CHANGELOG](CHANGELOG.md) · [How QA works](docs/design/qa.md) · [How agents work](docs/design/agents.md)
 
