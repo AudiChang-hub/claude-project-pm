@@ -215,6 +215,9 @@ async function ledgerUpdate(ctx: Ctx, ref: ProjectRef, input: Record<string, unk
         rev: (now_.rev ?? 0) + 1,
       }
       if (!criteria) delete changed.criteria
+      // Handed over: the owner it leaves is kept, as v0.9.1's mod keeps it (hooks/actions.ts), so a session stopped
+      // mid-work that gave it up is not waited on (isHandedOff). Each owner once, the latest to leave last.
+      if (now_.owner && !isSameId(now_.owner, owner)) changed.formerOwners = [...(now_.formerOwners ?? []).filter(o => !isSameId(o, now_.owner!)), now_.owner.trim()]
       if (!qa) delete changed.qa
       if (commit && !(changed.commits ?? []).includes(commit)) changed.commits = [...(changed.commits ?? []), commit]
 

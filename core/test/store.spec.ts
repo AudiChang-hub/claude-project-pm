@@ -6,12 +6,15 @@ import { afterEach, beforeEach, describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
+import { isSameId } from '../../hooks/qa'
+import { isHandedOff } from '../../hooks/sessions'
+import type { ProjectRef } from '../src/project'
 import { resolveProject } from '../src/project'
 import { loadProject, mergeLegacy, paths } from '../src/store'
 import { ledgerTool } from '../src/tools'
 import type { CoreItem, CoreProject } from '../src/types'
 import type { World } from './helpers'
-import { world } from './helpers'
+import { LANGS, world } from './helpers'
 
 const item = (id: number, extra: Partial<CoreItem> = {}): CoreItem => ({ id, text: `Item ${id}`, owner: null, status: 'open', note: '', createdAt: 1, updatedAt: 1, ...extra })
 const project = (ledger: CoreItem[], extra: Partial<CoreProject> = {}): CoreProject => ({ key: 'k', name: 'acme-shop', path: '/acme-shop', pmId: null, isDismissed: false, ledger, nextId: ledger.length + 1, ...extra })
@@ -116,5 +119,123 @@ describe('many processes writing one project', () => {
     assert.equal(new Set(done.ledger.map(i => i.id)).size, 1000)
     assert.equal(done.nextId, 1001)
     assert.equal(done.revision, 1000)
+  })
+})
+
+for (const lang of LANGS) {
+  describe(`formerOwners, as v0.9.1's mod keeps them, in the core too (${lang})`, () => {
+    let w: World
+    let ref: ProjectRef
+    beforeEach(async () => {
+      w = world(lang, { legacy: true })
+      ref = (await resolveProject(w.repo))!
+    })
+    afterEach(() => w.done())
+
+    const coreFile = () => JSON.parse(readFileSync(paths(w.env).project(ref), 'utf8')) as CoreProject
+    const modFile = () => JSON.parse(readFileSync(paths(w.env).legacyProject(ref), 'utf8')) as CoreProject
+    const both = () => [coreFile().ledger[0]!, modFile().ledger[0]!]
+    /** The core writes, on its clock, after whatever the mod wrote. */
+    const core = async (input: Record<string, unknown>) => {
+      w.advance(10_000)
+      const out = await ledgerTool(w.ctx(), { action: 'update', id: 1, ...input })
+      assert.ok(!('error' in out.structured), out.text)
+    }
+    /**
+     * The desktop mod (v0.9.1) changes the item in its own file, later than the core: its ledger update, line for line
+     * (hooks/actions.ts, ledger 'update'), with `extra` for fields of a mod newer than this core.
+     */
+    const mod = async (change: { owner?: string | null; note?: string }, extra: Record<string, unknown> = {}) => {
+      await new Promise(resolve => setTimeout(resolve, 30))
+      const file = modFile()
+      const item = file.ledger[0]!
+      const owner = change.owner === undefined ? item.owner : change.owner
+      const changed: CoreItem & Record<string, unknown> = { ...item, owner, note: change.note ?? item.note, updatedAt: item.updatedAt + 1_000, ...extra }
+      if (item.owner && !isSameId(item.owner, owner)) changed.formerOwners = [...(item.formerOwners ?? []).filter(o => !isSameId(o, item.owner!)), item.owner.trim()]
+      file.ledger = file.ledger.map(i => (i.id === 1 ? changed : i))
+      writeFileSync(paths(w.env).legacyProject(ref), JSON.stringify(file, null, 2))
+    }
+
+    test('a core write keeps the formerOwners the mod wrote, and any field the core does not know', async () => {
+      await ledgerTool(w.ctx(), { action: 'add', text: 'Add the Acme coupon field', owner: 'local_acme_a' })
+      await mod({ owner: 'local_acme_b' }, { acmeLater: { kept: true } })
+      await core({ note: 'ACME10 takes 10% off' })
+      for (const one of both() as (CoreItem & { acmeLater?: unknown })[]) {
+        assert.equal(one.note, 'ACME10 takes 10% off')
+        assert.deepEqual(one.formerOwners, ['local_acme_a'])
+        assert.deepEqual(one.acmeLater, { kept: true })
+      }
+    })
+
+    test('the core records the owner an item leaves, as the mod does: once each, and only when it really changes', async () => {
+      await ledgerTool(w.ctx(), { action: 'add', text: 'Add the Acme coupon field', owner: 'claude-code:acme-a' })
+      // The same owner, spaced and cased otherwise, is no change.
+      await core({ owner: ' Claude-Code:ACME-A ' })
+      assert.equal(coreFile().ledger[0]!.formerOwners, undefined)
+      await core({ note: 'no owner given: no change' })
+      assert.equal(coreFile().ledger[0]!.formerOwners, undefined)
+      await core({ owner: 'claude-code:acme-b' })
+      assert.deepEqual(coreFile().ledger[0]!.formerOwners, ['Claude-Code:ACME-A'])
+      // A → B → A → B: each owner once, the latest to leave last.
+      await core({ owner: 'claude-code:acme-a' })
+      await core({ owner: 'claude-code:acme-b' })
+      for (const one of both()) assert.deepEqual(one.formerOwners, ['claude-code:acme-b', 'claude-code:acme-a'])
+      // Left with no owner: the one it leaves is kept; from no owner, nothing is.
+      await core({ owner: '' })
+      await core({ owner: 'claude-code:acme-c' })
+      for (const one of both()) assert.deepEqual(one.formerOwners, ['claude-code:acme-a', 'claude-code:acme-b'])
+    })
+
+    test('the mod and the core taking turns on one item lose nothing', async () => {
+      await ledgerTool(w.ctx(), { action: 'add', text: 'Add the Acme coupon field', owner: 'local_acme_a' })
+      await mod({ owner: 'local_acme_b' }, { acmeLater: 1 })
+      await core({ owner: 'claude-code:acme-c' })
+      await mod({ note: 'Acme review on Friday' })
+      await core({ criteria: 'ACME10 takes 10% off' })
+      await mod({ owner: 'local_acme_a' })
+      await core({ owner: 'local_acme_b' })
+      const loaded = (await loadProject(ref, w.env)).ledger[0]! as CoreItem & { acmeLater?: unknown }
+      for (const one of [...both(), loaded] as (CoreItem & { acmeLater?: unknown })[]) {
+        assert.equal(one.owner, 'local_acme_b')
+        // A → B (mod), B → C (core), C → A (mod), A → B (core): each once, the latest to leave last.
+        assert.deepEqual(one.formerOwners, ['local_acme_b', 'claude-code:acme-c', 'local_acme_a'])
+        assert.equal(one.note, 'Acme review on Friday')
+        assert.equal(one.criteria, 'ACME10 takes 10% off')
+        assert.equal(one.acmeLater, 1)
+        assert.ok(one.uid)
+      }
+      // The shared board (hooks/sessions isHandedOff) reads it: C handed it over; B, its owner again, still holds it.
+      const ledger = [loaded]
+      assert.equal(isHandedOff('claude-code:acme-c', ledger), true)
+      assert.equal(isHandedOff('local_acme_b', ledger), false)
+    })
+  })
+}
+
+describe('E1 merge: no field is lost, whichever copy stands', () => {
+  test('the mod\'s copy stands: every field the mod does not know comes back from the core\'s, and formerOwners from both', () => {
+    const ours = { ...item(1, { updatedAt: 10, uid: 'u1', formerOwners: ['local_acme_a'] }), acmeCoreLater: 'x' } as CoreItem
+    const theirs = item(1, { updatedAt: 20, owner: 'local_acme_c', formerOwners: ['local_acme_b'] })
+    const [one] = mergeLegacy(project([ours]), project([theirs]), true).ledger as (CoreItem & { acmeCoreLater?: string })[]
+    assert.equal(one!.owner, 'local_acme_c')
+    assert.equal(one!.acmeCoreLater, 'x')
+    assert.deepEqual(one!.formerOwners, ['local_acme_b', 'local_acme_a'])
+  })
+
+  test('the core\'s copy stands: a field only a newer mod knows, and its formerOwners, are kept', () => {
+    const ours = item(1, { updatedAt: 20, owner: 'local_acme_c', formerOwners: ['local_acme_a'] })
+    const theirs = { ...item(1, { updatedAt: 10, formerOwners: ['local_acme_b'] }), acmeModLater: 2 } as CoreItem
+    const [one] = mergeLegacy(project([ours]), project([theirs]), false).ledger as (CoreItem & { acmeModLater?: number })[]
+    assert.equal(one!.owner, 'local_acme_c')
+    assert.equal(one!.acmeModLater, 2)
+    assert.deepEqual(one!.formerOwners, ['local_acme_a', 'local_acme_b'])
+  })
+
+  test('what the core cleared on purpose is not brought back from the mod\'s older copy', () => {
+    const ours = item(1, { updatedAt: 20 })
+    const theirs = item(1, { updatedAt: 10, criteria: 'old', qa: { result: 'pass', by: 'agent:q', at: 5, note: '' } })
+    const [one] = mergeLegacy(project([ours]), project([theirs]), false).ledger
+    assert.equal(one!.criteria, undefined)
+    assert.equal(one!.qa, undefined)
   })
 })

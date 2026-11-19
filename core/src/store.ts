@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
+import { isSameId } from '../../hooks/qa'
 import { emptyProject } from '../../hooks/sessions'
 import type { Track } from '../../types'
 import { actorFile, dataHome, legacyHome } from './host'
@@ -132,6 +133,23 @@ function filled(ref: ProjectRef, file: Partial<CoreProject> | null): CoreProject
   return file ? { ...base, ...file, ledger: Array.isArray(file.ledger) ? file.ledger : [] } : base
 }
 
+/** The fields of a work item the mod writes, and may clear on purpose (criteria, a verdict): never brought back. */
+const MOD_FIELDS = ['id', 'text', 'owner', 'status', 'note', 'createdAt', 'updatedAt', 'criteria', 'qa', 'formerOwners']
+/** The fields the core writes, and may clear on purpose. */
+const CORE_FIELDS = ['uid', 'createdBy', 'updatedBy', 'rev', 'commits']
+
+/** Copies into `to` each field of `from` it lacks, but those the side `to` came from manages itself. */
+function carryOver(to: CoreItem, from: CoreItem, managed: string[]) {
+  const target = to as Record<string, unknown>
+  for (const [key, value] of Object.entries(from)) if (!managed.includes(key) && target[key] === undefined && value !== undefined) target[key] = value
+}
+
+/** formerOwners only ever grows: the owners either copy kept, each once (isSameId), the standing copy's first. */
+function withFormerOwners(to: CoreItem, from: CoreItem) {
+  const extra = (from.formerOwners ?? []).filter(o => !(to.formerOwners ?? []).some(mine => isSameId(mine, o)))
+  if (extra.length) to.formerOwners = [...(to.formerOwners ?? []), ...extra]
+}
+
 /**
  * The project as the core and the mod both left it (E1). Items are matched by id. The one updated later stands;
  * when that is the mod's copy, the fields the mod does not know are carried over from the core's copy, and the QA's
@@ -148,11 +166,17 @@ export function mergeLegacy(core: CoreProject, legacy: CoreProject, isLegacyNewe
       ledger.push({ ...old })
       continue
     }
-    if (!(old.updatedAt > ours.updatedAt)) continue
-    const merged: CoreItem = { ...old }
-    for (const key of ['uid', 'createdBy', 'commits'] as const) {
-      if (merged[key] === undefined && ours[key] !== undefined) (merged as Record<string, unknown>)[key] = ours[key]
+    if (!(old.updatedAt > ours.updatedAt)) {
+      // The core's copy stands. A field only a newer mod knows comes back from the mod's copy, and formerOwners from both.
+      const kept = ledger[ledger.findIndex(item => item.id === old.id)]!
+      carryOver(kept, old, [...MOD_FIELDS, ...CORE_FIELDS])
+      withFormerOwners(kept, old)
+      continue
     }
+    const merged: CoreItem = { ...old }
+    // Every field the mod does not know comes back from the core's copy (uid, createdBy, commits, and any later one).
+    carryOver(merged, ours, MOD_FIELDS)
+    withFormerOwners(merged, ours)
     if (merged.qa && ours.qa && merged.qa.at === ours.qa.at && ours.qa.byPerson && !merged.qa.byPerson) merged.qa = { ...merged.qa, byPerson: ours.qa.byPerson }
     merged.rev = (ours.rev ?? 0) + 1
     merged.updatedBy = { actor: 'desktop-mod' }
