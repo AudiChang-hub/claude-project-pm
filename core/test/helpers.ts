@@ -3,7 +3,7 @@
  * live under it), and the Acme demo shop as a git repository. Nothing touches the real ~/.project-pm or ~/.claude.
  */
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -104,4 +104,45 @@ export function serverCommand(...args: string[]): { command: string; args: strin
   const main = fileURLToPath(new URL('../src/main.ts', import.meta.url))
 
   return { command: process.execPath, args: ['--import', tsx, main, ...args] }
+}
+
+/**
+ * Claude Code's command line as init uses it (`--version`, `mcp get|add|remove|list`), without Claude Code: the
+ * user-scope MCP servers live in `<home>/.claude.json` as Claude Code keeps them, so a test sees what init left.
+ */
+export function fakeClaude(home: string, rest: Run = hostWith(), { installed = true } = {}): Run {
+  const file = join(home, '.claude.json')
+  const read = (): { mcpServers?: Record<string, { command: string; args: string[] }> } & Record<string, unknown> => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {})
+  const write = (data: Record<string, unknown>) => writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`)
+
+  return async (argv, cwd, timeoutMs) => {
+    if (argv[0] !== 'claude') return rest(argv, cwd, timeoutMs)
+    if (!installed) return null
+    const [, a, b, ...more] = argv
+    if (a === '--version') return '2.1.326 (Claude Code)'
+    if (a !== 'mcp') return null
+    const data = read()
+    const servers = data.mcpServers ?? {}
+    if (b === 'list') return Object.entries(servers).map(([name, s]) => `${name}: ${[s.command, ...s.args].join(' ')} - ✓ Connected`).join('\n')
+    if (b === 'get') return servers['project-pm'] ? `project-pm:\n  Scope: User config\n  Command: ${servers['project-pm'].command}` : null
+    if (b === 'remove') {
+      if (!servers['project-pm']) return null
+      delete servers['project-pm']
+      if (Object.keys(servers).length) data.mcpServers = servers
+      else delete data.mcpServers
+      write(data)
+
+      return 'Removed MCP server project-pm'
+    }
+    if (b === 'add') {
+      const at = more.indexOf('--')
+      const [command, ...args] = more.slice(at + 1)
+      data.mcpServers = { ...servers, 'project-pm': { command: command!, args } }
+      write(data)
+
+      return 'Added stdio MCP server project-pm'
+    }
+
+    return null
+  }
 }

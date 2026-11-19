@@ -1,0 +1,13 @@
+# project-pm:start v1 (Project PM's QA workflow: docs/design/v1-core.md 6.3; delete this file to remove it)
+name: Project PM QA
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4

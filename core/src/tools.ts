@@ -32,6 +32,7 @@ import type { Ctx, ToolResult } from './context'
 import { projectOf } from './context'
 import { checkCi, checkPush, heldCi } from './facts'
 import { GIT_TIMEOUT_MS } from './host'
+import { prePushInstalled, pushedUnchecked, withAttention } from './prepush'
 import { authorOf, uuidv7 } from './identity'
 import { ct } from './messages'
 import type { ProjectRef } from './project'
@@ -380,6 +381,8 @@ export type BoardJson = {
   revision: number
   sessionsError: string | null
   isCheckingCi: boolean
+  /** Commits pushed past the pre-push check (git push --no-verify), newest first. */
+  noPush: { branch: string; commits: string[] } | null
 }
 
 export async function boardTool(ctx: Ctx, input: Record<string, unknown>): Promise<ToolResult> {
@@ -467,6 +470,13 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     now,
     isIncludingDone,
   })
+  // Layer 1: commits that reached the remote past the pre-push check (6.2 point 5).
+  const hook = await prePushInstalled(ref, ctx.env)
+  const pushed = hook === null ? null : await pushedUnchecked(project, ref.path, ctx.run, hook.baseline)
+  if (pushed?.commits.length) {
+    const line = ct('board.noPush', { branch: pushed.branch, n: pushed.commits.length, sha: pushed.commits[0]!.slice(0, 7) })
+    text = withAttention(text, line, t('board.section.attention'), t('board.none'))
+  }
   if (sessionsError) text += `\n\n${ct('board.noSessionsRead', { error: sessionsError })}`
   if (isCheckingCi) text += `\n\n${ct('board.ciChecking')}`
   const url = await boardUrl(ctx, ref)
@@ -514,6 +524,7 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     revision: project.revision ?? 0,
     sessionsError,
     isCheckingCi,
+    noPush: pushed?.commits.length ? { branch: pushed.branch, commits: pushed.commits } : null,
   }
 
   return { text, json, project }
