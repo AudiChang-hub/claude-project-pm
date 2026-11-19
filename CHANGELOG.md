@@ -7,6 +7,9 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+### Changed
+- The PM's rule on choosing a session or an agent puts quota first, using measured costs: work goes to an open session only if it was active within the last hour and has not run many turns (about 18,000 input-equivalent tokens). Waking a session idle for over an hour, or a large one, writes its whole context into the cache again (a 650,000-token context measured at about 840,000), so a small thing goes to a new session (about 70,000) or an agent (about 60,000 read-only, 120,000 to 150,000 when it writes files).
+
 ## [0.8.0] - 2026-11-18
 
 ### Added
