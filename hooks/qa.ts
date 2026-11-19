@@ -22,7 +22,8 @@ const codeOf = (id: number) => `T-${String(id).padStart(2, '0')}`
 
 /**
  * Whether two ids name the same owner or checker: compared trimmed and in any case, so `LOCAL_OPEN` or ` agent:A1 `
- * is still the owner. Only for comparing; ids are kept as they were written.
+ * is still the owner. New owners are written trimmed; items written before may not be, and are found by this all the
+ * same.
  */
 export function isSameId(a: string | null | undefined, b: string | null | undefined): boolean {
   return !!a?.trim() && !!b?.trim() && a.trim().toLowerCase() === b.trim().toLowerCase()
