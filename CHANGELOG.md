@@ -7,6 +7,8 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-19
+
 ### Added
 - v1.0's cross-platform core, `core/` (docs/design/v1-core.md, plan in docs/design/v1-plan.md): one program, `project-pm`, that serves the PM's tools over MCP so Claude Code's command line can use the PM without the desktop app. `project-pm mcp` speaks MCP over stdio, written by hand with no runtime dependency, and offers `board`, `ledger`, `report` and a new `pm` tool (`claim`, `release`, `status`). Every tool takes an optional `project` folder; without it, the first of the MCP client's roots that is a git repository (Claude Code 2.1.326 offers its working folder), else the folder the server runs in. A root the server cannot read (`file:///C:/acme%2Fshop`, or `file://host/path` on Linux and macOS), or roots that are not a list, are left out instead of stopping the server, and one message that goes wrong never stops the ones after it. A session is named after Claude Code's own session id when the server can see it (`claude-code:<id>`), so its tools and its hooks meet on the board. The data lives in `~/.project-pm/` (`PROJECT_PM_HOME` moves it). Every write takes a lock, reads the file again and renames a temporary file over it, and adds one to the project's `revision`. New work items carry `uid` (UUID v7), `createdBy`, `updatedBy` and `rev` for v1.1's sharing; items written before keep their fields until they change. `ledger` takes `qa_sha` (the commit a verdict checked, full length) and `commit` (a commit of the item). `report` writes the session's record and a detail file, and outside a git repository it says so instead of claiming success.
 - `project-pm hook claude-code <event>`: Claude Code's UserPromptSubmit, PreToolUse, PostToolUse and Stop hooks keep each terminal session's last instruction, task list (TodoWrite, and TaskCreate and TaskUpdate as of 2.1.326), background commands and last words, so the board knows where a session stands without it reporting. With a PM, UserPromptSubmit hands each other session the delivery ask and the development guidelines, and PreToolUse keeps the guidelines file from being edited unless the person asked about it. A project's `.project-pm.json` may name only a file inside the repository that git tracks and that is not in `.git/`, checked both for the name and for the file a link really leads to, so neither an untracked `.env` nor `.git/config` is read, even through a committed link (`RULES.md -> .env`); any path is open to the person's own `~/.project-pm/config.json`.
@@ -20,6 +22,7 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 - While the desktop mod still runs (migration E1), the core reads a project from `~/.project-pm/` first and the mod's `~/.claude/project-pm/` second, and writes both, losing no field either way: when the mod changed an item later, every field the mod does not write comes back from the core's copy; when the core did, a field only a newer mod writes is kept; and `formerOwners` is the union of both. What either side clears on purpose (criteria, a verdict) is not brought back. Like v0.9.1's mod, the core records the owner an item is handed over from in `formerOwners` (once each, only when the owner really changes), so the shared board does not wait on a session that gave its work up. The mod itself is unchanged.
 - The core's MCP tools answer in words only by default, without `structuredContent` or `outputSchema`: Claude Code 2.1.326 hands the model the JSON instead of the words when both are there (measured 2026-11-19; design 3.1). `PROJECT_PM_STRUCTURED=1` turns the JSON back on; the web board's `/api/board` and `project-pm board --json` always have it.
 - A QA verdict written by the core records the checked commit in full (40 characters); the mod's 7-character ones still match.
+- The desktop mod (`.claude-plugin/plugin.json`) and the core share one version from 1.0.0 on (D7), so the mod is 1.0.0 too; the mod itself is unchanged since 0.9.1.
 
 ## [0.9.1] - 2026-11-19
 
@@ -186,6 +189,8 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 - A band above the prompt in projects without a PM, offering to start a PM session or make the current one the PM.
 - Notifications to the PM when a session starts waiting on the person or stops with steps left.
 
+[Unreleased]: https://github.com/AudiChang-hub/claude-project-pm/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v1.0.0
 [0.9.1]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.9.1
 [0.9.0]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.9.0
 [0.8.0]: https://github.com/AudiChang-hub/claude-project-pm/releases/tag/v0.8.0

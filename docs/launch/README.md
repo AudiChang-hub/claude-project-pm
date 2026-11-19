@@ -2,11 +2,12 @@
 
 Drafts and steps for making the repository public-facing. Each step is a public action, run only
 after the owner has approved it. Steps 1–3 are done (v0.9.0 is the latest release); v0.9.1 (step 4)
-is prepared, not released; the posts have not been made.
+and v1.0.0 (step 5) are prepared, not released; the posts have not been made.
 
 | File | What it is | Status |
 | --- | --- | --- |
 | [repo-metadata.md](repo-metadata.md) | Repository description, topics and the `gh` command that sets them | Applied 2026-10-19 |
+| [release-v1.0.0.md](release-v1.0.0.md) | Release notes for `v1.0.0`: the core, for Claude Code's command line; the same text `.github/release-notes.md` gives the release | Ready, not released |
 | [release-v0.9.1.md](release-v0.9.1.md) | Release notes for `v0.9.1`: sessions a usage limit stopped need attention, and the PM picks them up | Ready, not released |
 | [release-v0.9.0.md](release-v0.9.0.md) | Release notes for `v0.9.0`: a QA gate, quota-first hand-offs and a CI real-data scan | Published 2026-11-19 |
 | [release-v0.8.0.md](release-v0.8.0.md) | Release notes for `v0.8.0`: the PM hands work to agents, and spends far fewer tokens | Published 2026-11-18 |
@@ -43,10 +44,25 @@ is prepared, not released; the posts have not been made.
    For later releases: bump `.claude-plugin/plugin.json`, write `docs/launch/release-v<version>.md`,
    and run the same command with that version.
 
-5. **r/ClaudeAI**: the English interface the draft mentions shipped in `v0.5.0`, so it can go out
+5. **Release `v1.0.0`** by pushing its tag, not with `gh release create`: from v1.0.0 on,
+   `.github/workflows/release.yml` builds the five programs on a `v*` tag, tests them, and publishes
+   the release with `SHA256SUMS` and the text of `.github/release-notes.md` (the same as
+   [release-v1.0.0.md](release-v1.0.0.md)). It stops when the tag is not the version of both
+   `core/package.json` and `.claude-plugin/plugin.json` (D7). Before the tag:
+   - Try a build by hand first (Actions → Release → Run workflow): it publishes nothing, and its
+     artifacts are the programs to download and allow as a person would (SmartScreen).
+   - Set the `NPM_TOKEN` repository secret, or the npm job is skipped and
+     `npx -y project-pm@1.0.0`, which the READMEs and the release text offer, will not work.
+
+   ```bash
+   git push origin main
+   git tag v1.0.0 && git push origin v1.0.0
+   ```
+
+6. **r/ClaudeAI**: the English interface the draft mentions shipped in `v0.5.0`, so it can go out
    now. Fill in the two `[In your own words: …]` spots in [reddit-claudeai.md](reddit-claudeai.md), check the subreddit's rules and flair, then post by hand.
 
-6. **awesome-claude-code**, on or after **2026-10-31** (14 days after the first commit, 2026-10-17):
+7. **awesome-claude-code**, on or after **2026-10-31** (14 days after the first commit, 2026-10-17):
    the owner fills in the web form by hand; pull requests and `gh` submissions are not accepted.
    See [awesome-claude-code.md](awesome-claude-code.md).
 

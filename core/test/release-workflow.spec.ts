@@ -56,4 +56,11 @@ describe('the release workflow (T-37: a build to try before publishing)', () => 
     const tested = build.steps.find(s => /--version/.test(s.run ?? ''))
     assert.ok(tested?.run?.includes('package.json'), tested?.run)
   })
+
+  test('a tag must match the core\'s version and the mod\'s, which are one (D7)', () => {
+    const check = flow.jobs.build!.steps.find(s => /GITHUB_REF_NAME/.test(s.run ?? '') && /package\.json/.test(s.run ?? ''))
+    assert.ok(check?.run?.includes('.claude-plugin/plugin.json'), check?.run)
+    const read = (path: string) => (JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')) as { version: string }).version
+    assert.equal(read('../../.claude-plugin/plugin.json'), read('../package.json'))
+  })
 })

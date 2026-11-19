@@ -37,11 +37,13 @@ jobs:
         with:
           node-version: 24
       - run: npm ci
-      - name: The tag is the package's version
+      - name: The tag is the package's version, and the mod's (D7)
         if: github.ref_type == 'tag'
         run: |
           version="$(node -p 'require("./package.json").version')"
           [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "::error::tag $GITHUB_REF_NAME, package.json $version"; exit 1; }
+          mod="$(node -p 'require("../.claude-plugin/plugin.json").version')"
+          [ "v$mod" = "$GITHUB_REF_NAME" ] || { echo "::error::tag $GITHUB_REF_NAME, .claude-plugin/plugin.json $mod"; exit 1; }
       - name: Typecheck and test the source
         run: npm run typecheck && npm test
       - name: Build the bundle and the single executable
