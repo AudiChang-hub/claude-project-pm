@@ -8,7 +8,7 @@
 **Run many Claude Code sessions and agents at once. You talk to one PM, and nothing slips.**
 
 <p align="center">
-  <img src="docs/images/overview.png" alt="Project PM v0.9.0 at a glance: you talk to the PM, which hands work to sessions or agents; a QA gate (acceptance criteria, an independent QA agent before each push, no close without a pass) and the measured cost of each hand-off." width="100%">
+  <img src="docs/images/overview.png" alt="Project PM v1.0.0 at a glance: you talk to the PM from the Claude Code desktop app or the CLI, both on one shared core; the PM hands work to sessions or agents; a QA gate before anything closes or is pushed; new in v1.0, a web board, a CI template and a single executable; and the measured cost of each hand-off." width="100%">
 </p>
 
 ## Why
@@ -17,21 +17,32 @@ With several sessions open on one project, work slips: a question waits an hour 
 
 Project PM makes one session the project's PM. It keeps a live board of every session and agent and a ledger of everything you asked for, and it won't call work done while anything is waiting on you, unfinished, waiting on CI, or not yet pushed or released.
 
-## Quick start
+## New in v1.0
 
-Needs the Claude Code desktop app (Code tab).
+- **The CLI works too.** One shared core serves the PM's tools over MCP, so Claude Code's command line gets the board, the ledger and the QA gate. It shares one ledger with the desktop app.
+- **QA before the push.** A git pre-push hook holds commits no QA passed; `git pm skip "<reason>"` lets one through on the record.
+- **A CI template for your projects.** `init --ci` adds GitHub Actions: your tests, leaked keys, risky packages and words you keep private.
+- **One program, no Node.js.** A single executable for Windows, macOS and Linux (or npx). `init` lists every change before making it; `uninstall` puts every file back.
+- **A web board** in your browser, read only and on your own computer.
 
-1. Install:
+v0.9.x (QA gate, quota-first hand-offs): [CHANGELOG](CHANGELOG.md)
 
-   ```
-   /plugin install project-pm --marketplace AudiChang-hub/claude-project-pm
-   ```
+## Install
 
-   In the desktop app: **+** next to the prompt box → **Plugins** → **Add marketplace** → `AudiChang-hub/claude-project-pm` → **Add plugin**.
+**Claude Code desktop app** (Code tab):
 
-2. Open a new session in your project and type `/pm`. It becomes the PM, opens the board and tells you what is waiting on you.
-3. Talk to the PM: *"Is anything slipping?"*, *"Find the pages with no meta description."*, *"Which sessions are waiting on me?"*
-4. Keep it updated. Claude Code doesn't update third-party plugins on its own: in a terminal, run `claude` → `/plugin` → **Marketplaces** → `claude-project-pm` → **Enable auto-update**, or update by hand with `claude plugin update project-pm@claude-project-pm`.
+```
+/plugin install project-pm --marketplace AudiChang-hub/claude-project-pm
+```
+
+Or **+** next to the prompt box → **Plugins** → **Add marketplace** → `AudiChang-hub/claude-project-pm` → **Add plugin**. Then open a new session in your project and type `/pm`. To keep it updated: `claude` → `/plugin` → **Marketplaces** → `claude-project-pm` → **Enable auto-update**.
+
+**Claude Code CLI**, either way:
+
+- **Program:** download the file for your computer from [Releases](https://github.com/AudiChang-hub/claude-project-pm/releases) and run it with `init` in your project's folder. It changes nothing until you add `--yes`.
+- **npm** (Node.js 20+): `npx -y project-pm@1.0.0 init`
+
+Step by step, and what to do when Windows or macOS warns you: [core/README.md](core/README.md).
 
 ## Platform support
 
@@ -39,29 +50,22 @@ Needs the Claude Code desktop app (Code tab).
 
 | Feature | Claude Code desktop | Claude Code CLI¹ | Codex² | Copilot² | Antigravity² | Cursor² | Devin² |
 | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| Board pane | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| Text board | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| Ledger | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| QA gate | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| Delivery check (git, CI) | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| Live session tracking | ✅ | 🗓 v1.0 ◐ | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ |
-| Agent hand-off | ✅ | 🗓 v1.0 ◐ | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.1⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ |
-| Development guidelines | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
-| CI real-data scan³ | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 | 🗓 v1.0 |
+| Board | ✅ | ✅ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
+| Ledger | ✅ | ✅ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
+| QA gate | ✅ | ✅ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
+| Delivery check (git, CI) | ✅ | ◐ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
+| Live session tracking | ✅ | ◐ | 🗓 v1.2⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ | 🗓 v1.3⁴ | 🗓 v1.3⁴ |
+| Agent hand-off | ✅ | ◐ | 🗓 v1.2⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ | 🗓 v1.3⁴ | 🗓 v1.3⁴ |
+| Development guidelines | ✅ | ✅ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
+| CI template³ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Team sync | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 |
 
-¹ Tested on v0.9.0 (Claude Code 2.1.326): `/pm` cannot start in the CLI (it gets no session id), so the board, ledger, QA gate and agent hand-off don't work there yet. From v1.0 the shared core supports it; live tracking and agent hand-off are partial in v1.0.
+¹ Tested with Claude Code 2.1.326. The board is the web board and `project-pm board`. Partial: CI status (git is checked), sessions seen only through hooks, and no automatic agent set-up.
 ² App (or editor) and CLI; a note will mark where they differ.
-³ v1.0 ships a GitHub Actions template, whatever AI tool you use. This repository's own CI already runs it.
-⁴ Partial outside the Claude Code desktop app: sessions report through hooks, so a session without the hook is not seen, and no new session can be started.
+³ GitHub Actions, whatever AI tool you use. No other platform's AI has been tried with it.
+⁴ Partial outside the desktop app: sessions report through hooks, so one without the hook is not seen, and no new session can be started.
 
-This table is updated with every release.
-
-## New in v0.9.0
-
-- **QA gate.** A work item can carry acceptance criteria. Before a code change is pushed, the PM sends an independent QA agent that sees only the diff and the criteria, and the ledger won't close an item without a QA pass (or a skip with its reason), and refuses a verdict recorded under the owner's name. The board lists what awaits QA and what failed it.
-- **Quota-first hand-offs.** The PM reuses an open session only if it was active in the last hour and hasn't run many turns (about 18k input-equivalent tokens). Waking a large idle one (a 650k context) costs about 840k, so a small thing goes to a new session (70k) or an agent (60k read-only) instead.
-
-[CHANGELOG](CHANGELOG.md) · [How QA works](docs/design/qa.md) · [How agents work](docs/design/agents.md)
+Updated with every release.
 
 ## What the PM guards
 
@@ -83,7 +87,7 @@ This table is updated with every release.
 
 Every status, how delivery is judged, development guidelines and what the mod keeps on disk: [How it works](docs/how-it-works.md).
 
-## Commands
+## Commands (desktop app)
 
 | Command | What it does |
 | --- | --- |
@@ -93,13 +97,14 @@ Every status, how delivery is judged, development guidelines and what the mod ke
 | `/pm lang en` · `zh-TW` · `auto` | Board and PM language; `auto` follows your system. |
 | `/pm guidelines <file>` · `off` | Gives the PM and its sessions your development rules. |
 
+In the CLI, ask Claude to be the PM; `project-pm open` shows the board.
+
 ## Requirements
 
-- The **Claude Code desktop app** (Code tab): the PM uses its built-in session tools.
-- A Claude Code version with function-hook mods; tested with 2.1.317.
+- The Claude Code desktop app (mod, tested with 2.1.317), or Claude Code's CLI (core, tested with 2.1.326).
 - Optional: the [GitHub CLI](https://cli.github.com/), signed in, so the PM can check CI.
-- Agents that change files need a git repository. They run inside the PM's process, so restarting Claude Code interrupts them; the board marks them *interrupted*.
+- Agents that change files need a git repository. In the desktop app they run inside the PM's process, so restarting Claude Code interrupts them; the board marks them *interrupted*.
 
 ## License
 
-[MIT](LICENSE). Tests: `claude plugin validate .` and `claude plugin test .`, no login needed.
+[MIT](LICENSE). Tests: `claude plugin test .` and, in `core/`, `npm test`.

@@ -8,9 +8,12 @@ real session or `~/.claude/project-pm/`.
 | `overview.html?lang=en` · `?lang=zh-TW` | `overview.png` · `overview-zh-TW.png` | The top of each README |
 | `board.html?lang=…&theme=light` · `&theme=dark` | `board-light.png`, `board-dark.png` and their `-zh-TW` versions | *See the board*, chosen by GitHub's light or dark theme (`<picture>`) |
 
-- `overview.html` is the v0.9.0 one-page overview: the v0.8.0 sessions-and-agents diagram with the
-  QA layer (`docs/design/qa.md`) below it. Its four costs are the T-30 quota measurements in
-  input-equivalent tokens (PM rule 10 in `hooks/messages.ts`).
+- `overview.html` is the v1.0.0 one-page overview: the two ways in (the desktop app through the mod,
+  the CLI through the core's MCP server and hooks) on one shared core, the v0.8.0 sessions-and-agents
+  diagram, the QA layer (`docs/design/qa.md`) with the pre-push hook, and the core's three new pieces
+  (web board, CI template, single executable). Its four costs are the T-30 quota measurements in
+  input-equivalent tokens (PM rule 10 in `hooks/messages.ts`, which the core's PM gets too); it shows
+  no other number.
 - `board.html` is the PM's pane for a made-up project ("Acme Storefront"). Its marks (ring, status
   dots, agent diamonds, step bars) and colors are copied from `hooks/view.tsx` and
   `hooks/sessions.ts`, its words from `hooks/messages.ts` (only the keys the pane uses), and its

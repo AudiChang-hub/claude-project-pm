@@ -1,8 +1,10 @@
 <!doctype html>
 <!--
-  The v0.9.0 one-page overview at the top of the READMEs, as a static page to capture.
-  Built on the v0.8.0 design canvas "Project PM v0.8.0 一頁圖解", with the QA layer (v0.9.0) added
-  below the sessions and agents.
+  The v1.0.0 one-page overview at the top of the READMEs, as a static page to capture.
+  Built on the v0.8.0 design canvas "Project PM v0.8.0 一頁圖解" and the v0.9.0 QA layer. v1.0 adds the
+  two ways in (the desktop app through the mod, the CLI through the core's MCP server and hooks, both on
+  one shared store: docs/design/v1-core.md) and the core's three new pieces: the web board, the CI
+  template for your own projects and the single executable.
 
   Views:  overview.html?lang=en      docs/images/overview.png
           overview.html?lang=zh-TW   docs/images/overview-zh-TW.png
@@ -11,7 +13,8 @@
   The four costs are the T-30 quota measurements (CHANGELOG 0.9.0, PM rule 10), in
   input-equivalent tokens: an open session active in the last hour 18k, a read-only Explore agent 60k,
   a new session 70k, waking a large idle session (a 650k context) 840k. The QA layer is
-  docs/design/qa.md; the CI real-data scan is left out, as it runs in this repository's own CI only.
+  docs/design/qa.md. The core's PM gets the same rule 10 (role.text), so the costs hold in the CLI too.
+  No other number is shown: nothing else here was measured.
 -->
 <html lang="en">
 <head>
@@ -27,6 +30,7 @@
     --blue: #6aa8ff; --blue-bg: #142443; --blue-chip: #1e3460;
     --gold: #ffd84a; --gold-bg: #2a2610; --gold-chip: #3d3712;
     --green: #5ee0a8; --green-bg: #0f2a22; --green-chip: #164034; --red: #ff8f7a;
+    --violet: #b49cff; --violet-bg: #1f1a3a;
     --sans: "Inter", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
     --num: "Space Grotesk", var(--sans);
   }
@@ -93,6 +97,32 @@
   .stat.hot b { color: var(--red); }
   .stat.hot .tag { color: var(--red); border-color: rgba(255, 143, 122, .45); }
 
+  /* v1.0: the two ways in, and the core's new pieces. */
+  .ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px; width: 760px; }
+  .way { background: var(--panel); border: 2px solid var(--line); border-radius: 18px; padding: 16px 22px; display: flex; align-items: center; gap: 16px; }
+  .way b { display: block; font-size: 24px; font-weight: 700; }
+  .way small { display: block; font-size: 18px; color: var(--ink-2); margin-top: 4px; }
+  .way.new { border-color: var(--violet); }
+  .way b .badge { margin-left: 10px; vertical-align: 3px; }
+  .badge { font: 700 13px/1 var(--num); letter-spacing: .1em; color: var(--violet); border: 1.5px solid rgba(180, 156, 255, .5); border-radius: 6px; padding: 6px 8px 5px; white-space: nowrap; }
+  :lang(zh-TW) .badge { font: 700 14px/1 var(--sans); letter-spacing: .04em; padding: 6px 8px; }
+  /* You → the two ways in → the PM: a stem, then a bracket whose ends meet each box at its middle (columns 400px apart). */
+  .fork, .join { display: flex; width: 400px; height: 22px; }
+  .fork i, .join i { flex: 1; }
+  .fork i:first-child { border-top: 4px solid var(--ink); border-left: 4px solid var(--ink); border-top-left-radius: 16px; }
+  .fork i:last-child { border-top: 4px solid var(--ink); border-right: 4px solid var(--ink); border-top-right-radius: 16px; }
+  .join i:first-child { border-bottom: 4px solid var(--ink); border-left: 4px solid var(--ink); border-bottom-left-radius: 16px; }
+  .join i:last-child { border-bottom: 4px solid var(--ink); border-right: 4px solid var(--ink); border-bottom-right-radius: 16px; }
+  .stem.short { height: 22px; }
+  .nowrap { white-space: nowrap; }
+  .core { display: flex; flex-direction: column; gap: 16px; }
+  .core h2 { margin: 0; display: flex; align-items: center; gap: 12px; font-size: 22px; font-weight: 700; color: var(--ink-2); }
+  .three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+  .piece { background: var(--violet-bg); border: 2px solid rgba(180, 156, 255, .55); border-radius: 20px; padding: 24px 22px; display: flex; flex-direction: column; gap: 10px; }
+  .piece b { font-size: 26px; font-weight: 800; }
+  .piece code { font: 500 17px/1 var(--num); color: var(--violet); }
+  .piece p { margin: 0; font-size: 19px; line-height: 1.45; color: var(--ink-2); }
+
   .four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
   .stat { background: var(--panel); border-radius: 20px; padding: 26px 22px; display: flex; flex-direction: column; gap: 10px; }
   .stat b { font: 700 52px/1 var(--num); color: var(--gold); letter-spacing: -.01em; }
@@ -116,17 +146,25 @@ const COPY = {
   en: {
     title: 'You only talk to the PM',
     you: 'You',
-    pm: 'Board · Ledger',
+    ways: [
+      ['Claude Code desktop', 'Board pane · the mod', ''],
+      ['Claude Code CLI', 'MCP server · hooks', 'NEW'],
+    ],
+    pm: 'One shared core · Board · Ledger',
     session: ['Remembers', 'Follow-ups', 'Push · CI'],
     agent: ['One-off', 'Read-heavy', 'Background'],
-    noteSession: 'One-line report + detail file',
-    noteAgent: 'Own worktree → PM review → merge',
     qaTitle: 'QA gate',
     qaSub: 'by default, an item closes only after QA',
     qa: [
       ['Acceptance criteria', 'A work item can carry them'],
       ['Independent QA agent', 'Before each push; sees only the diff'],
-      ['No pass, no close', 'The ledger refuses to close it'],
+      ['No pass, no close', 'The ledger won’t close it; git’s <span class="nowrap">pre-push hook</span> holds the push'],
+    ],
+    coreTitle: 'New in v1.0',
+    pieces: [
+      ['Web board', 'project-pm open', 'Read-only, on your own computer. Phone to desktop, light or dark.'],
+      ['CI template', 'init --ci', 'GitHub Actions for your project: tests, leaked keys, risky packages, private words.'],
+      ['Single executable', 'Windows · macOS · Linux', 'No Node.js needed (or npx). init lists every change first; uninstall puts files back.'],
     ],
     costsTitle: 'Quota first · cost per hand-off, input-equivalent tokens',
     stats: [
@@ -135,28 +173,30 @@ const COPY = {
       ['70k', 'New<br>session', 'measured'],
       ['840k', 'Waking a large idle<br>session (650k context)', 'measured'],
     ],
-    guards: [
-      ['No collisions', 'Each agent in its own worktree'],
-      ['Reviewed first', 'Done once the PM merges'],
-      ['Ledger locked', 'Agents can only read it'],
-      ['No pushing', 'Agents never push or release'],
-    ],
     foot: 'Active in the last hour → that session　·　Else → a new session or an agent',
   },
   'zh-TW': {
     title: '你只跟 PM 說話',
     you: '你',
-    pm: '看板 · 交辦清單',
+    ways: [
+      ['Claude Code 桌面版', '看板面板 · mod', ''],
+      ['Claude Code CLI', 'MCP server · hook', '新'],
+    ],
+    pm: '共用核心 · 看板 · 交辦清單',
     session: ['要記憶', '會追問', 'push · CI'],
     agent: ['做完就走', '大量讀取', '背景執行'],
-    noteSession: '一行回報＋詳細檔',
-    noteAgent: '獨立 worktree → PM 驗收 → 合併',
     qaTitle: 'QA 關卡',
     qaSub: '預設要過 QA 才能結案',
     qa: [
       ['驗收條件', '工作項目可以附上'],
       ['獨立驗收 Agent', 'push 前派出，只看 diff'],
-      ['沒通過不能結案', '交辦清單拒絕結案'],
+      ['沒通過不能結案', '交辦清單拒絕結案，git 的 <span class="nowrap">pre-push hook</span> 擋下 push'],
+    ],
+    coreTitle: 'v1.0 新增',
+    pieces: [
+      ['網頁看板', 'project-pm open', '唯讀，只在你自己的電腦上。手機到桌面、淺色深色都能看。'],
+      ['CI 範本', 'init --ci', '給你的專案用的 GitHub Actions：測試、外洩的金鑰、有風險的套件、不能公開的詞。'],
+      ['單一執行檔', 'Windows · macOS · Linux', '不用裝 Node.js（也可用 npx）。init 先列出要改的檔，uninstall 會還原。'],
     ],
     costsTitle: '額度優先 · 每次派工的成本（等值輸入 tokens）',
     stats: [
@@ -164,12 +204,6 @@ const COPY = {
       ['6 萬', '唯讀的<br>Explore Agent', '實測'],
       ['7 萬', '開一個<br>新 Session', '實測'],
       ['84 萬', '喚醒閒置的大 Session<br>（65 萬上下文）', '實測'],
-    ],
-    guards: [
-      ['各改各的', 'worktree 隔離'],
-      ['驗收才合併', 'PM 合併後才算完成'],
-      ['清單鎖定', 'Agent 只能讀'],
-      ['公開等你', 'Agent 不 push、不發布'],
     ],
     foot: '1 小時內有活動 → 交給它　·　否則 → 開新 Session 或 Agent',
   },
@@ -184,13 +218,20 @@ const svg = (size, stroke, width, body) =>
 const ICON = {
   person: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21c1-4.5 4.4-7 8-7s7 2.5 8 7"></path>',
   clipboard: '<rect x="5" y="4" width="14" height="17" rx="2"></rect><path d="M9 3h6v3H9z"></path><path d="M9 11h6M9 15h4"></path>',
-  up: '<path d="M12 19V5M5 12l7-7 7 7"></path>',
-  branch: '<path d="M6 3v12"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="6" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path>',
+  ways: [
+    '<rect x="3" y="4" width="18" height="13" rx="2"></rect><path d="M8 21h8M12 17v4"></path><path d="M14 4v13"></path>',
+    '<rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="m7 9 3 3-3 3M12 15h5"></path>',
+  ],
   shield: '<path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"></path><path d="m8.5 12 2.5 2.5 4.5-5"></path>',
   qa: [
     '<rect x="5" y="4" width="14" height="17" rx="2"></rect><path d="M9 3h6v3H9z"></path><path d="m9 13 2 2 4-4"></path>',
     '<circle cx="11" cy="11" r="6"></circle><path d="m20 20-4.5-4.5"></path>',
     '<rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path>',
+  ],
+  pieces: [
+    '<rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18M9 9v11"></path>',
+    '<circle cx="6" cy="6" r="2.5"></circle><circle cx="6" cy="18" r="2.5"></circle><circle cx="18" cy="12" r="2.5"></circle><path d="M6 8.5v7M8.5 6h3a4 4 0 0 1 4 4M8.5 18h3a4 4 0 0 0 4-4"></path>',
+    '<path d="M12 3 4 7v10l8 4 8-4V7z"></path><path d="m4 7 8 4 8-4M12 11v10"></path>',
   ],
   stats: [
     '<circle cx="12" cy="12" r="3"></circle><circle cx="12" cy="12" r="8"></circle>',
@@ -198,17 +239,11 @@ const ICON = {
     '<circle cx="12" cy="12" r="8"></circle><path d="M12 8v8M8 12h8"></path>',
     '<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"></path><circle cx="12" cy="12" r="3.5"></circle>',
   ],
-  guards: [
-    '<rect x="3" y="3" width="8" height="8" rx="1.5"></rect><rect x="13" y="13" width="8" height="8" rx="1.5"></rect><path d="M11 7h4a2 2 0 0 1 2 2v4"></path>',
-    '<path d="M20 6 9 17l-5-5"></path>',
-    '<rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path>',
-    '<path d="M12 3v12M7 8l5-5 5 5"></path><path d="M5 21h14"></path>',
-  ],
 }
 document.getElementById('poster').innerHTML = `
   <div class="row head">
     <div>
-      <div class="eyebrow">PROJECT PM · v0.9.0</div>
+      <div class="eyebrow">PROJECT PM · v1.0.0</div>
       <h1>${c.title}</h1>
     </div>
     <div class="row legend"><span><i class="dot"></i>Session</span><span><i class="diamond"></i>Agent</span></div>
@@ -216,16 +251,16 @@ document.getElementById('poster').innerHTML = `
 
   <div class="flow">
     <div class="row you">${svg(56, '#eef1f8', 1.8, ICON.person)}${c.you}</div>
-    <div class="stem"></div>
+    <div class="stem short"></div>
+    <div class="fork"><i></i><i></i></div>
+    <div class="ways">${c.ways.map(([b, t, tag], i) => `<div class="way${tag ? ' new' : ''}">${svg(40, tag ? '#b49cff' : '#eef1f8', 1.8, ICON.ways[i])}<div><b>${b}${tag ? `<span class="badge">${tag}</span>` : ''}</b><small>${dot(t)}</small></div></div>`).join('')}</div>
+    <div class="join"><i></i><i></i></div>
+    <div class="stem short"></div>
     <div class="row pm">${svg(64, '#0e1322', 1.8, ICON.clipboard)}<div><b>PM</b><small>${dot(c.pm)}</small></div></div>
     <div class="branch"><i></i><i></i></div>
     <div class="two">
       <div class="kind session"><div class="row title"><i class="dot"></i>Session</div><div class="chips">${c.session.map(s => `<span>${dot(s)}</span>`).join('')}</div></div>
       <div class="kind agent"><div class="row title"><i class="diamond"></i>Agent</div><div class="chips">${c.agent.map(s => `<span>${s}</span>`).join('')}</div></div>
-    </div>
-    <div class="two" style="margin-top:18px">
-      <div class="row note">${svg(34, '#6aa8ff', 2, ICON.up)}${c.noteSession}</div>
-      <div class="row note">${svg(34, '#ffd84a', 2, ICON.branch)}${c.noteAgent}</div>
     </div>
     <div class="merge" style="margin-top:14px"><i></i><i></i></div>
     <div class="stem qa"></div>
@@ -235,12 +270,15 @@ document.getElementById('poster').innerHTML = `
     </div>
   </div>
 
+  <div class="core">
+    <h2><span class="badge">v1.0</span>${c.coreTitle}</h2>
+    <div class="three">${c.pieces.map(([b, code, t], i) => `<div class="piece">${svg(44, '#b49cff', 1.8, ICON.pieces[i])}<b>${b}</b><code>${dot(code)}</code><p>${t}</p></div>`).join('')}</div>
+  </div>
+
   <div class="costs">
     <h2>${dot(c.costsTitle)}</h2>
     <div class="four">${c.stats.map(([n, t, tag], i) => `<div class="stat${i === 3 ? ' hot' : ''}"><div class="top">${svg(44, i === 3 ? '#ff8f7a' : '#ffd84a', 1.8, ICON.stats[i])}${tag ? `<span class="tag">${tag}</span>` : ''}</div><b>${n}</b><p>${t}</p></div>`).join('')}</div>
   </div>
-
-  <div class="four">${c.guards.map(([b, t], i) => `<div class="guard">${svg(48, '#eef1f8', 1.8, ICON.guards[i])}<b>${b}</b><p>${t}</p></div>`).join('')}</div>
 
   <div class="row foot"><div>${c.foot}</div><div class="repo">AudiChang-hub/claude-project-pm</div></div>`
 </script>
