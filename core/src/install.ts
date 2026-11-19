@@ -7,8 +7,9 @@
  */
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, rmdir, unlink } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import type { Run } from './host'
 import { ct } from './messages'
@@ -374,7 +375,7 @@ export async function undo(done: Done, ie: InstallEnv): Promise<string | void> {
         await rm(done.file, { force: true })
       } catch (err) {
         // Windows will not delete a program while it runs: this very one, when uninstall runs from the copy.
-        if (isThisProgram(done.file) && deleteAfterExit(done.file)) return ct('uninstall.deleteLater', { file: done.file })
+        if (isThisProgram(done.file) && deleteAfterExit(done.file, ie.env)) return ct('uninstall.deleteLater', { file: done.file })
         throw err
       }
       await removeEmptyDirs(dirname(done.file), done.root ?? dirname(done.file))
@@ -579,17 +580,60 @@ function isThisProgram(file: string): boolean {
 }
 
 /**
- * Windows: deletes `file` (and its folder, when empty) a few seconds after this program ends, from a hidden cmd that
- * outlives it. False when that cannot be started.
+ * The script that deletes the program once it ends (Windows). Its paths come in as arguments, so no path is ever parsed
+ * as part of the script: %1 the program, %2 its folder, %3 the note that says it failed, %4 how many tries, %5 whether
+ * to open that note. One try a second; when the last fails the note is opened, so the user knows the file is still there.
  */
-function deleteAfterExit(file: string): boolean {
+const DELETE_SCRIPT = [
+  '@echo off',
+  'setlocal',
+  'set tried=0',
+  ':again',
+  'ping -n 2 127.0.0.1 >nul',
+  'del /f /q "%~1" >nul 2>nul',
+  'if not exist "%~1" goto gone',
+  'set /a tried+=1',
+  'if %tried% lss %4 goto again',
+  'if "%5"=="1" start "" notepad.exe "%~3"',
+  'goto end',
+  ':gone',
+  'rmdir "%~2" >nul 2>nul',
+  'del /f /q "%~3" >nul 2>nul',
+  ':end',
+  '(goto) 2>nul & del /f /q "%~f0"',
+  '',
+].join('\r\n')
+
+/** Whether `file` is inside `folder` (not the folder itself), however either is written. */
+function isInside(file: string, folder: string): boolean {
+  const norm = (path: string) => (process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path))
+  const rel = relative(norm(folder), norm(file))
+
+  return !!rel && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+/**
+ * Windows: deletes `file` (and its folder, when empty) once this program ends, from a hidden cmd that outlives it: it
+ * tries once a second, `tries` times, and if the file is still there then, opens a note that says so. Only ever a file
+ * in the data folder's bin. Null when it is not, or the script cannot be started.
+ */
+export function deleteAfterExit(file: string, env: NodeJS.ProcessEnv, { tries = 60, show = true } = {}): { script: string; note: string } | null {
+  if (!isInside(file, paths(env).bin)) return null
+  const stamp = `project-pm-delete-${process.pid}-${Date.now()}`
+  const script = join(tmpdir(), `${stamp}.cmd`)
+  const note = join(tmpdir(), `${stamp}.txt`)
   try {
-    const line = `"ping -n 4 127.0.0.1 >nul & del /f /q "${file}" & rmdir "${dirname(file)}" 2>nul"`
+    writeFileSync(script, DELETE_SCRIPT)
+    writeFileSync(note, ct('uninstall.deleteFailed', { file }))
+    const line = `""${script}" "${file}" "${dirname(file)}" "${note}" ${Math.max(1, Math.floor(tries))} ${show ? 1 : 0}"`
     const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', line], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true })
     child.unref()
 
-    return true
+    return { script, note }
   } catch {
-    return false
+    rmSync(script, { force: true })
+    rmSync(note, { force: true })
+
+    return null
   }
 }

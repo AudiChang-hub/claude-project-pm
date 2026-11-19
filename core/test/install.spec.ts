@@ -4,15 +4,18 @@
  * command line is stood in for (fakeClaude), so nothing touches the person's real settings.
  */
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import type { ChildProcess } from 'node:child_process'
+import { spawn } from 'node:child_process'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
 import type { InstallEnv } from '../src/install'
-import { AGENTS_LIMIT, END, binPath, mcpLauncher, SECTION_LIMIT, START, agentsSection, init, readLog, shCommand, skillText, uninstall, withBlock, withoutBlock } from '../src/install'
+import { AGENTS_LIMIT, END, binPath, deleteAfterExit, mcpLauncher, SECTION_LIMIT, START, agentsSection, init, readLog, shCommand, skillText, uninstall, withBlock, withoutBlock } from '../src/install'
 import { ct } from '../src/messages'
 import type { ProjectRef } from '../src/project'
 import { resolveProject } from '../src/project'
+import { paths } from '../src/store'
 import type { World } from './helpers'
 import { LANGS, fakeClaude, git, hostWith, world } from './helpers'
 
@@ -312,5 +315,63 @@ describe('how Claude Code starts the server from npm', () => {
     assert.deepEqual(mcpLauncher(['npx', '-y', 'project-pm@1.0.0'], 'win32'), ['cmd', '/c', 'npx', '-y', 'project-pm@1.0.0'])
     assert.deepEqual(mcpLauncher(['npx', '-y', 'project-pm@1.0.0'], 'linux'), ['npx', '-y', 'project-pm@1.0.0'])
     assert.deepEqual(mcpLauncher(['C:\Acme\project-pm-1.0.0.exe'], 'win32'), ['C:\Acme\project-pm-1.0.0.exe'])
+  })
+})
+
+describe('deleting the running program once it ends (T-37 QA2 2)', () => {
+  const onWindows = { skip: process.platform !== 'win32' && 'Windows only: elsewhere a running program can be deleted', timeout: 90_000 }
+  let w: World
+  let running: ChildProcess | null = null
+  beforeEach(() => {
+    w = world('en')
+  })
+  afterEach(() => {
+    running?.kill()
+    running = null
+    w.done()
+  })
+  /** A program in the bin folder, kept running for `seconds` (a copy of Windows' ping, which holds its own file). */
+  const runFromBin = (seconds: number) => {
+    const bin = paths(w.env).bin
+    mkdirSync(bin, { recursive: true })
+    const file = join(bin, 'project-pm-1.0.0.exe')
+    copyFileSync(join(process.env.SystemRoot ?? 'C:\Windows', 'System32', 'PING.EXE'), file)
+    running = spawn(file, ['-n', String(seconds + 1), '127.0.0.1'], { stdio: 'ignore', windowsHide: true })
+
+    return { bin, file, ended: new Promise(resolve => running!.on('exit', resolve)) }
+  }
+  const until = async (done: () => boolean, ms: number) => {
+    for (const end = Date.now() + ms; !done() && Date.now() < end; ) await new Promise(resolve => setTimeout(resolve, 200))
+
+    return done()
+  }
+
+  test('a file outside the data folder\'s bin is never scheduled, however its path is written', () => {
+    const bin = paths(w.env).bin
+    mkdirSync(bin, { recursive: true })
+    const outside = join(w.repo, 'acme.exe')
+    writeFileSync(outside, 'Acme')
+    for (const file of [outside, join(bin, '..', 'acme.exe'), bin, w.home]) assert.equal(deleteAfterExit(file, w.env), null, file)
+    assert.ok(existsSync(outside))
+  })
+
+  test('it waits for the program to end, longer than a few seconds, then deletes it and its empty folder', onWindows, async () => {
+    const { bin, file, ended } = runFromBin(6)
+    const scheduled = deleteAfterExit(file, w.env, { show: false })
+    assert.ok(scheduled)
+    await ended
+    assert.ok(await until(() => !existsSync(file), 15_000), 'the program is still there')
+    assert.ok(await until(() => !existsSync(bin), 5_000), 'its folder is still there')
+    assert.ok(await until(() => !existsSync(scheduled.note), 5_000), 'the note for a failure was left behind')
+  })
+
+  test('when it never can, it stops trying and says so', onWindows, async () => {
+    const { file } = runFromBin(60)
+    const scheduled = deleteAfterExit(file, w.env, { tries: 2, show: false })
+    assert.ok(scheduled)
+    assert.ok(await until(() => !existsSync(scheduled.script), 20_000), 'it is still trying')
+    assert.ok(existsSync(file))
+    assert.equal(readFileSync(scheduled.note, 'utf8'), ct('uninstall.deleteFailed', { file }))
+    rmSync(scheduled.note, { force: true })
   })
 })
