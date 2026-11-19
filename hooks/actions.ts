@@ -1267,7 +1267,8 @@ async function ownerBlocker($: EngineInterface, written: string): Promise<string
   if (isAgentId(written)) {
     await checkAgents($)
     const one = agentRecords().find(a => isSameId(`${AGENT_OWNER}${a.id}`, written))
-    if (!one) return t('blocker.agentGone', { id: written.trim() })
+    // No record left (let go past AGENTS_KEPT): it has delivered, as the board counts it, and does not hold the close.
+    if (!one) return null
 
     return one.state === 'done' ? null : t('blocker.agent', { name: agentName(one), why: t(`agent.state.${one.state}`) })
   }

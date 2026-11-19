@@ -2906,6 +2906,10 @@ async function prunedAgentOwner($: Parameters<TestBody>[0], on: On, lang: 'zh' |
   } as never)
   expect(await ui.find({ type: 'Text', text: lang === 'zh' ? '1 項待 QA' : '1 awaiting QA' })).toBeDefined()
   await ui.unmount()
+  // Delivered for the close as well: once it passes QA it closes, with no force needed.
+  const closed = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, qa: 'pass', qa_by: 'agent:q1', status: 'done' } as never)) as { result?: unknown }).result)
+  expect(closed).toMatch(lang === 'zh' ? /^已更新工作項目 T-01。/ : /^Updated work item T-01\./)
+  expect(JSON.parse(files.get(PROJECT_FILE)!).ledger[0]).toMatchObject({ status: 'done', qa: { result: 'pass' } })
 }
 
 test("an agent owner whose record was pruned has delivered: its item awaits QA", ZH, async ($, on) => {
