@@ -4,3 +4,5 @@
 *.log
 .DS_Store
 Thumbs.db
+core/node_modules/
+core/dist/
