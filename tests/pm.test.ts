@@ -5,7 +5,7 @@ import type { On } from 'claude-code'
 import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isDeliveredAgent, isDeliveredStatus, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, statusOf, undeliveredOf } from '../hooks/sessions'
 import type { Status } from '../hooks/sessions'
 import { closesBoard } from '../hooks/actions'
-import { isQaDescription, qaAttention, qaBlocker, qaShown, qaUpdate } from '../hooks/qa'
+import { isQaDescription, qaAttention, qaBlocker, qaBrief, qaShown, qaUpdate } from '../hooks/qa'
 import { commitOfLine, isSettledAgent, itemOf, noticesOf, settledAgentState, stateOf } from '../hooks/agents'
 import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hooks/messages'
 import type { Lang, MessageKey } from '../hooks/messages'
@@ -2931,6 +2931,62 @@ test('a board that holds no agent records takes no agent owner for delivered', (
       expect(boardText({ ...input, agents: [] })).toMatch(/\[(待 QA|Awaiting QA)\] T-01/)
       // A board without the PM's agents (another project, a session that is not the PM) cannot tell.
       expect(boardText(input)).not.toMatch(/\[(待 QA|Awaiting QA)\] T-01/)
+    }
+  } finally {
+    setLang(was)
+  }
+})
+
+// ── Tests are not weakened to pass (T-36): the PM's rule and the QA checklist, in both languages ──
+
+const NO_WEAKER_TESTS = {
+  'zh-TW': {
+    rule: ['測試失敗就改程式，不改測試', '派工時把這句寫進 brief', '逐項說明理由，經你同意才算數', '就退回'],
+    check: ['git diff <範圍> -- <測試檔>', 'git log -p', '被刪除的測試案例或斷言', '改掉的預期值', '反例或邊界案例被換成比較容易通過的值', 'skip、only、todo', '放寬的門檻或容許誤差', '檔案和行號', '一律判 fail', '「被修改或刪除的測試」', '「無」'],
+    swapped: '反例或邊界案例被換成比較容易通過的值',
+  },
+  en: {
+    rule: ['When a test fails, fix the code, not the test', 'Say so in every brief', 'gives the reason for each one in its report and you agree', 'send the work back'],
+    check: ['git diff <range> -- <test files>', 'git log -p', 'deleted test case or assertion', 'changed expected value', 'counter-example or edge case swapped for one easier to pass', 'skip, only or todo', 'loosened threshold or tolerance', 'file and line', 'is a fail', '"Tests changed or deleted"', '"None"'],
+    swapped: 'counter-example or edge case swapped for one easier to pass',
+  },
+} as const
+
+test('the PM is told, and the QA agent checks, that a failing test is fixed in the code, not weakened', () => {
+  const was = getLang()
+  try {
+    for (const lang of ['zh-TW', 'en'] as const) {
+      setLang(lang)
+      const words = NO_WEAKER_TESTS[lang]
+      const role = t('role.text', { project: 'Acme', path: PROJECT, board: 'board', ledger: 'ledger' })
+      for (const phrase of words.rule) expect(role).toContain(phrase)
+      const { checklist } = qaBrief('T-12')
+      for (const phrase of words.check) expect(checklist).toContain(phrase)
+    }
+  } finally {
+    setLang(was)
+  }
+})
+
+test('the QA checklist covers a counter-example swapped for one that passes, as in c7f5078', () => {
+  // c7f5078 replaced the counter-example 'T-13 QA-free lookup' (which the code wrongly took for QA) with 'T-12 QAfix'
+  // (which it did not), so the test passed without the code being fixed.
+  const diff = [
+    "-  expect(['T-12 QAX', 'T-13 QA-free lookup', 'QA T-12'].map(isQaDescription)).toEqual([false, false, false])",
+    "+  expect(['T-12 QAX', 'T-12 QAfix', 'QA T-12'].map(isQaDescription)).toEqual([false, false, false])",
+  ]
+  const removed = diff.filter(line => line.startsWith('-')).join('\n')
+  const added = diff.filter(line => line.startsWith('+')).join('\n')
+  // The change is the kind the checklist names: a counter-example gone, another in its place, the expectation unchanged.
+  expect([removed.includes("'T-13 QA-free lookup'"), added.includes("'T-13 QA-free lookup'"), added.includes("'T-12 QAfix'")]).toEqual([true, false, true])
+  const was = getLang()
+  try {
+    for (const lang of ['zh-TW', 'en'] as const) {
+      setLang(lang)
+      const { checklist } = qaBrief('T-31')
+      expect(checklist).toContain(NO_WEAKER_TESTS[lang].swapped)
+      // …and finding it without a reason is a fail.
+      expect(checklist).toContain(lang === 'zh-TW' ? '沒有說明理由或理由不成立的，一律判 fail' : 'one with no reason given, or a reason that does not hold, is a fail')
     }
   } finally {
     setLang(was)
