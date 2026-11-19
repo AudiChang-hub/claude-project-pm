@@ -210,6 +210,8 @@ export async function planInstall(ref: ProjectRef, ie: InstallEnv, options: { ci
   const override = (await textOf(join(ref.path, 'AGENTS.override.md'))) ?? ''
   const isShort = Buffer.byteLength(agents + override) + SECTION_LIMIT > AGENTS_LIMIT
   if (isShort) notes.push(ct('init.agentsLong'))
+  // 2.1: the PM keeps nothing in the project, but a .project-pm/ folder someone made there must not reach git.
+  if (existsSync(join(ref.path, '.project-pm')) && (await ie.run(['git', 'check-ignore', '-q', '.project-pm/'], ref.path)) === null) notes.push(ct('init.gitignoreHint'))
   changes.push({ kind: 'text', file: agentsFile, block: agentsSection(isShort) })
   const claudeFile = join(ref.path, 'CLAUDE.md')
   const claudeMd = await textOf(claudeFile)

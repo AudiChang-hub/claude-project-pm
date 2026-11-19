@@ -261,6 +261,22 @@ for (const lang of LANGS) {
       assert.ok(!existsSync(copy))
     })
 
+    test('a .project-pm/ folder in the project that git would commit gets a reminder, and .gitignore is left alone (2.1)', async () => {
+      write(join(w.repo, '.project-pm', 'notes.json'), '{"acme":"draft"}')
+      let out = await init(ref, ie(), { yes: false, ci: false }, say)
+      assert.ok(out.notes.includes(ct('init.gitignoreHint')), out.notes.join('\n'))
+      assert.ok(!existsSync(join(w.repo, '.gitignore')))
+      write(join(w.repo, '.gitignore'), 'node_modules/\n.project-pm/\n')
+      out = await init(ref, ie(), { yes: false, ci: false }, say)
+      assert.ok(!out.notes.includes(ct('init.gitignoreHint')))
+      assert.equal(readFileSync(join(w.repo, '.gitignore'), 'utf8'), 'node_modules/\n.project-pm/\n')
+    })
+
+    test('no .project-pm/ folder in the project: no reminder', async () => {
+      const out = await init(ref, ie(), { yes: false, ci: false }, say)
+      assert.ok(!out.notes.some(note => note.includes('.gitignore')))
+    })
+
     test('uninstall without --yes only lists', async () => {
       await init(ref, ie(), { yes: true, ci: false }, say)
       const after = snapshot(w.home, w.repo)
