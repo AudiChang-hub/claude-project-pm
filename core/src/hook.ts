@@ -263,8 +263,9 @@ export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = p
       // A link committed in the repository may lead anywhere: where it really goes must be inside too, and not in .git.
       const real = await realpath(named).catch(() => named)
       const repo = await realpath(ref.path).catch(() => ref.path)
-      // Only what the project keeps in git: never a .env or another file the person keeps beside the code.
-      if (isInside(real, repo) && !isInGit(real, repo) && (await isTracked(named, ref.path, run))) file = named
+      // Only what the project keeps in git: never a .env or another file the person keeps beside the code. Both the
+      // name and the file it really is: a committed link (RULES.md -> .env) is tracked, the file it leads to may not be.
+      if (isInside(real, repo) && !isInGit(real, repo) && (await isTracked(named, ref.path, run)) && (await isTracked(real, repo, run))) file = named
     }
   }
   if (!file) {
