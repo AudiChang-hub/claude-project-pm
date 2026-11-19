@@ -18,7 +18,8 @@ import { ciTemplate } from '../src/templates'
 import { LANGS, git } from './helpers'
 
 type Step = { name?: string; id?: string; if?: string; uses?: string; run?: string; env?: Record<string, string> }
-type Workflow = { name: string; on: Record<string, unknown>; permissions: Record<string, string>; jobs: { qa: { env: Record<string, string>; steps: Step[] } } }
+type Job = { env?: Record<string, string>; steps: Step[] }
+type Workflow = { name: string; on: Record<string, unknown>; permissions: Record<string, string>; jobs: Record<string, Job> }
 
 /** git's own bash on Windows (not WSL's), bash elsewhere. */
 function bashPath(): string {
@@ -39,7 +40,8 @@ for (const lang of LANGS) {
     })
     afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-    const step = (name: string) => flow.jobs.qa.steps.find(s => s.name === name || s.id === name)!
+    const jobOf = (name: string) => Object.values(flow.jobs).find(job => job.steps.some(s => s.name === name || s.id === name))!
+    const step = (name: string) => jobOf(name).steps.find(s => s.name === name || s.id === name)!
     /** An Acme project with these files, committed. */
     const project = (files: Record<string, string>) => {
       const dir = join(root, 'acme-shop')
@@ -64,7 +66,7 @@ for (const lang of LANGS) {
       writeFileSync(summary, '')
       writeFileSync(output, '')
       const env: NodeJS.ProcessEnv = { ...process.env, GITHUB_STEP_SUMMARY: summary, GITHUB_OUTPUT: output, RUNNER_TEMP: temp }
-      for (const [key, value] of Object.entries({ ...flow.jobs.qa.env, ...(s.env ?? {}) })) env[key] = String(value).startsWith('${{') ? (values[key] ?? '') : String(value)
+      for (const [key, value] of Object.entries({ ...(Object.values(flow.jobs).find(job => job.steps.includes(s))!.env ?? {}), ...(s.env ?? {}) })) env[key] = String(value).startsWith('${{') ? (values[key] ?? '') : String(value)
       const script = join(temp, 'step.sh')
       writeFileSync(script, s.run!)
       const out = spawnSync(bashPath(), ['--noprofile', '--norc', '-eo', 'pipefail', script], { cwd: dir, env, encoding: 'utf8', windowsHide: true })
@@ -77,13 +79,25 @@ for (const lang of LANGS) {
       assert.ok(!ciTemplate().includes('{{pm:'))
       assert.deepEqual(flow.permissions, { contents: 'read' })
       assert.ok('pull_request' in flow.on)
-      const uses = flow.jobs.qa.steps.filter(s => s.uses).map(s => s.uses!)
+      const uses = Object.values(flow.jobs).flatMap(job => job.steps).filter(s => s.uses).map(s => s.uses!)
       assert.ok(uses.length >= 3)
       for (const one of uses) assert.match(one, /^[\w-]+\/[\w-]+@[0-9a-f]{40}$/)
       assert.ok(ciTemplate().includes(ct('ci.tests.why')))
       for (const name of ['ci.tests.step', 'ci.secrets.step', 'ci.terms.step', 'ci.deps.step'] as const) assert.ok(step(ct(name)), name)
       // Every check after the tests runs even when the tests fail.
-      for (const name of ['ci.secrets.step', 'ci.terms.step', 'ci.deps.step'] as const) assert.equal(step(ct(name)).if, '${{ !cancelled() }}')
+      for (const name of ['ci.secrets.step', 'ci.deps.step'] as const) assert.equal(step(ct(name)).if, '${{ !cancelled() }}')
+    })
+
+    test('the private words are read in a job of their own, where no package is installed', () => {
+      // A package's install script runs with the job's rights; it must never share a job with the BLOCKED_TERMS secret.
+      const jobs = Object.entries(flow.jobs)
+      const seeing = jobs.filter(([, job]) => JSON.stringify(job).includes('secrets.BLOCKED_TERMS'))
+      assert.equal(seeing.length, 1, seeing.map(([name]) => name).join(', '))
+      const [, job] = seeing[0]!
+      for (const s of job.steps) {
+        if (s.uses) assert.match(s.uses, /^actions\/checkout@/, `${s.uses} in the job that reads BLOCKED_TERMS`)
+        assert.doesNotMatch(s.run ?? '', /\b(npm|npx|pnpm|yarn|corepack|pip|pytest|python)\b/, `an install or a test run in the job that reads BLOCKED_TERMS: ${s.name}`)
+      }
     })
 
     test('finds npm, pnpm, yarn and pytest, and no tests where there are none', () => {

@@ -1,7 +1,8 @@
 # project-pm:start v1 (Project PM's QA workflow, docs/design/v1-core.md 6.3. Delete this file to remove it.)
 # Four checks on every pull request and every push to main: the automated tests, passwords and keys (gitleaks),
-# words that must stay private (the BLOCKED_TERMS secret), and package security (osv-scanner). Each one that fails
-# marks the lines it found and adds a row in plain words to the run's summary. It reads the code and nothing else.
+# package security (osv-scanner), and, in a job of its own, words that must stay private (the BLOCKED_TERMS secret).
+# Each one that fails marks the lines it found and adds a row in plain words to the run's summary. It reads the code
+# and nothing else.
 name: Project PM QA
 
 on:
@@ -14,13 +15,68 @@ permissions:
   contents: read
 
 jobs:
+  # The private words get a job of their own: the secret never shares a machine with a package's install script,
+  # which could otherwise read it from a later step (a job's steps run as one user on one runner).
+  private-words:
+    name: {{pm:ci.terms.step}}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PASS: {{pm:ci.pass}}
+      FAIL: {{pm:ci.fail}}
+      SKIP: {{pm:ci.skip}}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Summary
+        env:
+          TITLE: {{pm:ci.summaryTitle}}
+          HEAD: {{pm:ci.summaryHead}}
+        run: |
+          printf '%s\n\n%s\n| --- | --- | --- | --- | --- |\n' "$TITLE" "$HEAD" >> "$GITHUB_STEP_SUMMARY"
+
+      # The repository secret BLOCKED_TERMS, one word per line; never printed.
+      - name: {{pm:ci.terms.step}}
+        env:
+          BLOCKED_TERMS: ${{ secrets.BLOCKED_TERMS }}
+          STEP: {{pm:ci.terms.step}}
+          PASSED: {{pm:ci.terms.passed}}
+          FAILED: {{pm:ci.terms.failed}}
+          HIT: {{pm:ci.terms.hit}}
+          NONE: {{pm:ci.terms.none}}
+          WHY: {{pm:ci.terms.why}}
+          FIX: {{pm:ci.terms.fix}}
+        run: |
+          row() { printf '| %s | %s | %s | %s | %s |\n' "$STEP" "$1" "$2" "$WHY" "$3" >> "$GITHUB_STEP_SUMMARY"; }
+          terms="$RUNNER_TEMP/blocked-terms"
+          # Trimmed, without blank lines: an empty pattern would match every line.
+          printf '%s\n' "${BLOCKED_TERMS:-}" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' > "$terms"
+          if [ ! -s "$terms" ]; then
+            rm -f "$terms"
+            echo "$NONE"
+            row "$SKIP" "$NONE" "-"
+            exit 0
+          fi
+          hits="$(git grep -n -I -i -F -f "$terms" | cut -d: -f1,2 || true)"
+          rm -f "$terms"
+          if [ -z "$hits" ]; then
+            row "$PASS" "$PASSED" "-"
+            exit 0
+          fi
+          count=$(printf '%s\n' "$hits" | wc -l | tr -d ' ')
+          printf '%s\n' "$hits" | while IFS=: read -r file line; do
+            echo "::error file=$file,line=$line,title=$STEP::$HIT"
+          done
+          row "$FAIL" "$(printf "$FAILED" "$count")" "$FIX"
+          exit 1
+
+
   qa:
     name: {{pm:ci.name}}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      # Whether the BLOCKED_TERMS secret is set: a step's `if` cannot read secrets, only this.
-      HAS_BLOCKED_TERMS: ${{ secrets.BLOCKED_TERMS != '' }}
       PASS: {{pm:ci.pass}}
       FAIL: {{pm:ci.fail}}
       SKIP: {{pm:ci.skip}}
@@ -122,43 +178,7 @@ jobs:
           row "$FAIL" "$FAILED" "$FIX"
           exit 1
 
-      # ── 3. Words that must stay private: the repository secret BLOCKED_TERMS, one per line; never printed ──
-      - name: {{pm:ci.terms.step}}
-        if: ${{ !cancelled() }}
-        env:
-          BLOCKED_TERMS: ${{ secrets.BLOCKED_TERMS }}
-          STEP: {{pm:ci.terms.step}}
-          PASSED: {{pm:ci.terms.passed}}
-          FAILED: {{pm:ci.terms.failed}}
-          HIT: {{pm:ci.terms.hit}}
-          NONE: {{pm:ci.terms.none}}
-          WHY: {{pm:ci.terms.why}}
-          FIX: {{pm:ci.terms.fix}}
-        run: |
-          row() { printf '| %s | %s | %s | %s | %s |\n' "$STEP" "$1" "$2" "$WHY" "$3" >> "$GITHUB_STEP_SUMMARY"; }
-          terms="$RUNNER_TEMP/blocked-terms"
-          # Trimmed, without blank lines: an empty pattern would match every line.
-          printf '%s\n' "${BLOCKED_TERMS:-}" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' > "$terms"
-          if [ ! -s "$terms" ]; then
-            rm -f "$terms"
-            echo "$NONE"
-            row "$SKIP" "$NONE" "-"
-            exit 0
-          fi
-          hits="$(git grep -n -I -i -F -f "$terms" | cut -d: -f1,2 || true)"
-          rm -f "$terms"
-          if [ -z "$hits" ]; then
-            row "$PASS" "$PASSED" "-"
-            exit 0
-          fi
-          count=$(printf '%s\n' "$hits" | wc -l | tr -d ' ')
-          printf '%s\n' "$hits" | while IFS=: read -r file line; do
-            echo "::error file=$file,line=$line,title=$STEP::$HIT"
-          done
-          row "$FAIL" "$(printf "$FAILED" "$count")" "$FIX"
-          exit 1
-
-      # ── 4. Package security: osv-scanner (Apache-2.0) reads the lockfiles; only high risk (CVSS 7 or more) fails ──
+      # ── 3. Package security: osv-scanner (Apache-2.0) reads the lockfiles; only high risk (CVSS 7 or more) fails ──
       - name: {{pm:ci.deps.step}}
         if: ${{ !cancelled() }}
         env:
