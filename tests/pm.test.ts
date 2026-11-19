@@ -2885,3 +2885,50 @@ test('a verdict recorded with a change of owner is checked against both owners',
 test('a verdict recorded with a change of owner is checked against both owners, in English', { options: { language: 'en' } }, async ($, on) => {
   await verdictWithNewOwner($, on, 'en')
 })
+
+// ── An agent owner whose record is gone (pruned past AGENTS_KEPT) has delivered: its item awaits QA (follow-up 3) ──
+
+async function prunedAgentOwner($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en') {
+  const files: Files = new Map()
+  mock.clock(on, { now: NOW })
+  agentWorld(on, files, () => null)
+  const at = NOW - 3_600_000
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [{ id: 1, text: 'Export', owner: 'agent:pruned1', status: 'open', note: '', createdAt: at, updatedAt: at }], nextId: 2 }))
+  await $.session.start(START)
+  const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(board).toMatch(lang === 'zh' ? /- \[待 QA\] T-01「Export」：Agent agent:pruned1（找不到紀錄）已交付/ : /- \[Awaiting QA\] T-01 "Export": its owner agent agent:pruned1 \(no record\) has delivered/)
+  const ui = await $.ui.mount({
+    plugin: 'project-pm',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: 'project-pm',
+    props: { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 80 } },
+  } as never)
+  expect(await ui.find({ type: 'Text', text: lang === 'zh' ? '1 項待 QA' : '1 awaiting QA' })).toBeDefined()
+  await ui.unmount()
+}
+
+test("an agent owner whose record was pruned has delivered: its item awaits QA", ZH, async ($, on) => {
+  await prunedAgentOwner($, on, 'zh')
+})
+
+test("an agent owner whose record was pruned has delivered, in English", { options: { language: 'en' } }, async ($, on) => {
+  await prunedAgentOwner($, on, 'en')
+})
+
+test('a board that holds no agent records takes no agent owner for delivered', () => {
+  const was = getLang()
+  try {
+    for (const lang of ['zh-TW', 'en'] as const) {
+      setLang(lang)
+      const item = { id: 1, text: 'Export', owner: 'agent:a9', status: 'open' as const, note: '', createdAt: NOW, updatedAt: NOW }
+      const input = { project: { name: 'Acme', path: PROJECT }, sessions: [], tracks: {}, words: {}, ledger: [item], now: NOW, isIncludingDone: false }
+      // The PM's own board, which holds its agents: one it no longer has a record of has delivered.
+      expect(boardText({ ...input, agents: [] })).toMatch(/\[(待 QA|Awaiting QA)\] T-01/)
+      // A board without the PM's agents (another project, a session that is not the PM) cannot tell.
+      expect(boardText(input)).not.toMatch(/\[(待 QA|Awaiting QA)\] T-01/)
+    }
+  } finally {
+    setLang(was)
+  }
+})

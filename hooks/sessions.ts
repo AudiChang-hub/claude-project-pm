@@ -1221,14 +1221,15 @@ export function boardText(input: BoardInput): string {
   }
   /**
    * Whether an owner has handed its work over: a session ended, waiting to release or on CI, or no longer listed
-   * (archived or gone: it has nothing left to do); an agent done or to verify.
+   * (archived or gone: it has nothing left to do); an agent done or to verify, or no longer recorded (pruned past
+   * AGENTS_KEPT) on a board that holds the PM's agents. A board without them cannot tell.
    */
   const isDelivered = (id: string | null) => {
     if (!id) return false
     if (isAgentId(id)) {
       const agent = agentOf(id)
 
-      return !!agent && isDeliveredAgent(agent.state)
+      return agent ? isDeliveredAgent(agent.state) : input.agents !== undefined
     }
     const one = sessionOf(id)
 

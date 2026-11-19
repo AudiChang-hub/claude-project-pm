@@ -1251,7 +1251,8 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
         ci,
         push,
         ledger: files[p.key]?.ledger ?? [],
-        agents: self?.isPm && p.key === self.projectKey ? agentRecords() : [],
+        // Only the PM's own project's board holds its agents; any other cannot tell an agent owner's state.
+        agents: self?.isPm && p.key === self.projectKey ? agentRecords() : undefined,
         now,
         isIncludingDone,
       }),

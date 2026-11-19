@@ -198,26 +198,27 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const items = shown.flatMap(project => (files[project.key]?.ledger ?? []).filter(i => i.status !== 'dropped'))
   const itemsDone = items.filter(i => i.status === 'done').length
   const unassigned = ledgers.filter(({ item }) => !item.owner).length
-  /**
-   * An item's QA: its verdict, or awaiting once its owner has delivered (a session ended, to release or on CI, or no
-   * longer listed; an agent done or to verify).
-   */
   // An owner is found however its id was spaced or cased (items written before ids were trimmed).
   const agentOwner = (id: string | null) => (isAgentId(id) ? myAgents.find(a => isSameId(`agent:${a.id}`, id)) : undefined)
   const sessionOwner = (id: string | null) => (id && !isAgentId(id) ? state.list.find(s => isSameId(s.id, id)) : undefined)
-  const qaOfItem = (item: LedgerItem): QaShown | null => {
+  /**
+   * An item's QA: its verdict, or awaiting once its owner has delivered (a session ended, to release or on CI, or no
+   * longer listed; an agent done or to verify, or no longer recorded, in the PM's own project, where its agents are).
+   */
+  const qaOfItem = (item: LedgerItem, project: Project): QaShown | null => {
     if (!item.owner) return qaShown(item, false)
     if (isAgentId(item.owner)) {
       const agent = agentOwner(item.owner)
+      const holdsAgents = !!self?.isPm && project.key === self.projectKey
 
-      return qaShown(item, !!agent && isDeliveredAgent(agent.state))
+      return qaShown(item, agent ? isDeliveredAgent(agent.state) : holdsAgents)
     }
     const owner = sessionOwner(item.owner)
 
     return qaShown(item, !owner || isDeliveredStatus(statusOfOne(owner)))
   }
-  const qaAwaiting = ledgers.filter(({ item }) => qaOfItem(item) === 'awaiting').length
-  const qaFailed = ledgers.filter(({ item }) => qaOfItem(item) === 'fail').length
+  const qaAwaiting = ledgers.filter(({ item, project }) => qaOfItem(item, project) === 'awaiting').length
+  const qaFailed = ledgers.filter(({ item, project }) => qaOfItem(item, project) === 'fail').length
   const steps = everyone.flatMap(one => all[one.id]?.plan ?? [])
   const stepsDone = steps.filter(s => s.status === 'completed').length
   const isByItems = items.length > 0
@@ -496,7 +497,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
           ? t('pane.owner', { title: owner.title, status: STATUS[statusOfOne(owner)].label, elsewhere })
           : t('pane.ownerGone')
     const isKnown = !!owner || !!agent
-    const qa = qaOfItem(item)
+    const qa = qaOfItem(item, project)
 
     return (
       <Box key={`ledger:${project.key}:${item.id}`} flexDirection="row" columnGap="sm" alignItems="flex-start" paddingY="xs">
