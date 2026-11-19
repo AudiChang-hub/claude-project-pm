@@ -29,7 +29,7 @@ Download it only from that page. To make sure the file is the real one, compare 
 
 **Why your computer warns you:** the program has no code-signing certificate. Those cost money every year, and this project is free, so we do not buy one. The warning does not mean the program is harmful; it means the system does not know who made it. That is why step 1 matters.
 
-- **Windows.** Your browser may say the file "isn't commonly downloaded": choose **Keep**. If you open it from File Explorer and see "Windows protected your PC", click **More info**, then **Run anyway**. Running it from a terminal may not show this at all.
+- **Windows.** Your browser may say the file "isn't commonly downloaded": choose **Keep**. If you open it from File Explorer and see "Windows protected your PC", click **More info**, then **Run anyway**. Running it from a terminal may not show this at all. *These Windows steps have not been tried yet with a file downloaded from the web; the program itself has been run on Windows.*
   - If **Smart App Control** is on, Windows may block the program with no button to allow it. In that case use the npm version below (it needs Node.js). Do not turn Smart App Control off for this.
 - **Mac.** You may see that Apple "cannot check it for malicious software". Open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**. Or, in Terminal, run `xattr -d com.apple.quarantine project-pm-macos-arm64`, which removes the "downloaded from the internet" mark from that one file. *These Mac steps have not been tried on a real Mac yet.*
 - **Linux.** There is no warning, but the file is not executable yet: `chmod +x project-pm-linux-x64`.
@@ -79,5 +79,6 @@ The settings it writes start the server with `npx -y project-pm@1.0.0`.
 ## Known limits of 1.0
 
 - The programs are not code-signed (see above). With Windows Smart App Control on, use the npm version.
+- The Windows steps to allow a program downloaded from the web (SmartScreen) have not been checked yet. The program itself, built on Windows, has been run there.
 - The Mac steps to allow the program have not been checked on a real Mac. The Mac programs themselves are built and tested on GitHub's Mac machines.
 - Only Claude Code's command line has been tested. Codex, GitHub Copilot, Antigravity, Cursor, Devin and other AI tools have not been tried at all, and `init` does not set them up; that comes in later versions.

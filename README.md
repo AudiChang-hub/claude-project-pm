@@ -42,7 +42,7 @@ Or **+** next to the prompt box → **Plugins** → **Add marketplace** → `Aud
 - **Program:** download the file for your computer from [Releases](https://github.com/AudiChang-hub/claude-project-pm/releases) and run it with `init` in your project's folder. It changes nothing until you add `--yes`.
 - **npm** (Node.js 20+): `npx -y project-pm@1.0.0 init`
 
-Step by step, and what to do when Windows or macOS warns you: [core/README.md](core/README.md).
+Step by step, and what to do when Windows or macOS warns you (those steps are not yet checked on a real download): [core/README.md](core/README.md).
 
 ## Platform support
 

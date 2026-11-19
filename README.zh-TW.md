@@ -42,7 +42,7 @@ v0.9.x（QA 關卡、額度優先派工）：[CHANGELOG](CHANGELOG.md)
 - **執行檔：** 從 [Releases](https://github.com/AudiChang-hub/claude-project-pm/releases) 下載你電腦用的檔，在專案資料夾裡加上 `init` 執行。沒加 `--yes` 之前不會改任何東西。
 - **npm**（要有 Node.js 20 以上）：`npx -y project-pm@1.0.0 init`
 
-逐步說明，以及 Windows 或 macOS 跳出警告時怎麼辦：[core/README.zh-TW.md](core/README.zh-TW.md)。
+逐步說明，以及 Windows 或 macOS 跳出警告時怎麼辦（放行步驟還沒實際驗證）：[core/README.zh-TW.md](core/README.zh-TW.md)。
 
 ## 支援平台
 
