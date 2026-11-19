@@ -54,11 +54,11 @@ The part I didn't expect: most of the fixes came from actually using it, on itse
 Each time, the PM handed the fix to a sub-session, then checked the board again before closing the
 item.
 
-The latest version (v0.8.0) changed two things for me. Small, self-contained work no longer needs a
-session of its own: the PM can hand it to a background agent, and an agent that changes files works
-in its own git worktree, merged only after the PM has checked it. And the PM got much cheaper to
-run: a ledger change now answers with one line instead of the whole list, and full write-ups go to
-files instead of into the conversation.
+The latest version (v0.9.0) changed two things for me. Work isn't done on the developer's word any
+more: before a change is pushed, the PM sends an independent QA agent that sees only the diff and the
+acceptance criteria, and the ledger won't close the item without a pass. And the PM picks where work
+goes by measured cost: an open session only while it is warm and small, otherwise a new session or a
+background agent (v0.8.0 added those, each in its own git worktree).
 
 [In your own words: one honest sentence about what it's been like, e.g. what changed in how you
 work, or what still bugs you.]
@@ -109,7 +109,7 @@ rule of only N at a time? Curious what works for other people.
 
 每次都是 PM 把修正交給子 Session，修完再回看板確認，才把那一項結案。
 
-最新版（v0.8.0）對我來說有兩個改變。一是小而獨立的工作不用再特地開一個 Session：PM 可以交給背景 agent 去做；會改檔案的 agent 在自己的 git worktree 裡作業，PM 驗收過才合併。二是 PM 省了很多 Token：清單有變動時只回一行，不再整份重列；完整的說明寫進檔案，不塞進對話裡。
+最新版（v0.9.0）對我來說有兩個改變。一是工作不再只憑開發者一句話就算完成：push 前 PM 會派一個獨立的驗收 agent，只給它 diff 和驗收條件，沒通過的項目交辦清單不讓結案。二是 PM 照實測的成本決定派給誰：既有 Session 要還熱、還不大才交給它，不然就開新 Session 或背景 agent（agent 是 v0.8.0 加入的，各在自己的 git worktree 裡作業）。
 
 [用你自己的話：一句誠實的話講使用感受，例如工作方式有什麼改變，或還有什麼讓你困擾。]
 
