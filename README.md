@@ -33,6 +33,29 @@ Needs the Claude Code desktop app (Code tab).
 3. Talk to the PM: *"Is anything slipping?"*, *"Find the pages with no meta description."*, *"Which sessions are waiting on me?"*
 4. Keep it updated. Claude Code doesn't update third-party plugins on its own: in a terminal, run `claude` → `/plugin` → **Marketplaces** → `claude-project-pm` → **Enable auto-update**, or update by hand with `claude plugin update project-pm@claude-project-pm`.
 
+## Platform support
+
+✅ available · ◐ partial · 🗓 planned · — not supported
+
+| Feature | Claude Code desktop | Claude Code CLI¹ | Codex² | Copilot² | Antigravity² | Cursor² | Devin² |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| Board pane | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| Text board | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| Ledger | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| QA gate | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| Delivery check (git, CI)³ | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| Live session tracking | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| Agent hand-off | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| Development guidelines | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| CI real-data scan⁴ | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+
+¹ Being tested; this column changes once the results are in. v1.0: the CLI, a shared core and a web board.
+² App and CLI each (Copilot: VS Code and CLI; Cursor: editor and CLI). A note will mark where they differ.
+³ CI is checked with a signed-in `gh`.
+⁴ A GitHub Actions step on this repository; needs the `BLOCKED_TERMS` secret.
+
+This table is updated with every release.
+
 ## New in v0.9.0
 
 - **QA gate.** Each work item carries acceptance criteria. Before a code change is pushed, the PM sends an independent QA agent that sees only the diff and the criteria, and the ledger won't close an item without a QA pass (or a skip with its reason). Whoever checks it is never its owner. The board lists what awaits QA and what failed it.

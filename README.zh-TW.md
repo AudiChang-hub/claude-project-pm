@@ -33,6 +33,29 @@ Project PM 讓專案裡的一個 Session 擔任 PM。它即時掌握每個 Sessi
 3. 直接跟 PM 說話：「有沒有漏掉的工作？」「找出沒有頁面描述的頁面。」「哪些 Session 在等我回覆？」
 4. 保持更新。第三方 Plugin，Claude Code 不會自己更新：在終端機執行 `claude` → `/plugin` → **Marketplaces** → `claude-project-pm` → **Enable auto-update**，或手動執行 `claude plugin update project-pm@claude-project-pm`。
 
+## 支援平台
+
+✅ 可用 · ◐ 部分 · 🗓 規劃中 · — 不支援
+
+| 功能 | Claude Code 桌面版 | Claude Code CLI¹ | Codex² | Copilot² | Antigravity² | Cursor² | Devin² |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| 看板面板 | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| 文字看板 | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| 交辦清單 | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| QA 關卡 | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| 交付判斷（git、CI）³ | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| 即時追蹤 Session | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| Agent 派工 | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| 開發準則 | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+| CI 真實資料掃描⁴ | ✅ | 🗓 v1.0 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.2 | 🗓 v1.2 |
+
+¹ 實測中，結果出來後更新這一欄。v1.0：CLI、共用核心、網頁看板。
+² 各含 App 和 CLI（Copilot：VS Code 和 CLI；Cursor：編輯器和 CLI）。兩者有差異時會加註。
+³ CI 用已登入的 `gh` 查詢。
+⁴ 這個 repo 的 GitHub Actions 步驟，需設定 `BLOCKED_TERMS` secret。
+
+這張表每次推版都會更新。
+
 ## v0.9.0 亮點
 
 - **QA 關卡。** 每個工作項目都有驗收條件。程式變更 push 前，PM 會派一個獨立的驗收 Agent，只給它 diff 和驗收條件；沒有 QA 通過（或附理由的略過），交辦清單不讓結案，驗收者也不能是負責人。看板會列出待 QA 和 QA 不通過的項目。
