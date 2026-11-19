@@ -11,6 +11,9 @@ const zhTW = {
   'status.asking.tag': '待回覆',
   'status.failed.label': 'CI 失敗',
   'status.failed.tag': 'CI 失敗・需處理',
+  'status.limit.label': '額度用完',
+  'status.limit.tag': '額度用完',
+  'status.limit.resumes': '額度用完・{time} 後可續',
   'status.open.label': '未完成',
   'status.open.tag': '中斷・未完成',
   'status.unreleased.label': '待發布',
@@ -52,6 +55,7 @@ const zhTW = {
   // Toasts.
   'toast.asking': '「{title}」待你回覆',
   'toast.failed': '「{title}」的 CI 失敗了',
+  'toast.limit': '「{title}」用完額度，停在半途',
   'toast.unreleased': '「{title}」已停下，但回報尚未交付',
   'toast.open': '「{title}」已停止，仍有 {n} 項步驟未完成',
 
@@ -74,7 +78,8 @@ const zhTW = {
 11. 開 Agent 時，description 以工作項目代號開頭（例如「T-12 比對撥款報表」），派出後用 ledger update 把 owner 設成 agent:<agentId>。mod 會讓它在背景執行，會寫檔的類型放進自己的 git worktree（Explore、Plan、claude-code-guide 留在原資料夾），並把它的回覆縮成一行加詳細檔路徑。要調整進行中的 Agent，用 SendMessage（to 填 agentId）轉達使用者的話。
 12. Agent 失敗、需要使用者決定、待驗收或已中斷時，看板的需要處理會列出來。待驗收的是它在 worktree 分支上的 commit：檢查過、合併進專案的分支後，它才算完成，工作項目才能結案。
 13. 驗收（QA）：登記工作時用 criteria 寫驗收條件（怎樣算做完、要怎麼驗）。程式變更在 push 前，派一個獨立的驗收 Agent（subagent_type: "Explore"），description 以「T-xx QA」開頭（例如「T-12 QA」）；prompt 只給 diff 範圍（commit 或分支）和驗收條件，不給開發者的結論或回報，mod 會附上驗收範本。它不是負責人，不要把 owner 改成它。它回 [pass] 或 [fail] 後，用 ledger update 記錄：qa 填 pass 或 fail，qa_by 填 agent:<agentId>，fail 時在 qa_note 寫原因並交回負責人修正。不需要驗收的（例如只改文件），qa 填 skip 並在 qa_note 寫理由。沒有 qa=pass（或附理由的 skip）時 ledger 拒絕結案，驗收者也不能是負責人；看板的需要處理會列出待 QA 和 QA 不通過的項目。
-14. 測試失敗就改程式，不改測試。派工時把這句寫進 brief。要修改、刪除或跳過既有測試，負責人必須在回報裡逐項說明理由，經你同意才算數。驗收時只要發現測試被弱化（刪掉案例或斷言、改掉預期值、反例或邊界案例被換成比較容易通過的值、加上 skip／only／todo 或註解掉、放寬門檻或容許誤差），又沒有理由或沒經過你同意，就退回。`,
+14. 測試失敗就改程式，不改測試。派工時把這句寫進 brief。要修改、刪除或跳過既有測試，負責人必須在回報裡逐項說明理由，經你同意才算數。驗收時只要發現測試被弱化（刪掉案例或斷言、改掉預期值、反例或邊界案例被換成比較容易通過的值、加上 skip／only／todo 或註解掉、放寬門檻或容許誤差），又沒有理由或沒經過你同意，就退回。
+15. 看板列為「額度用完」的 Session，是被用量上限打斷、工作停在半途的；標籤上寫著額度重置的時間。重置之後主動接手，不用等使用者提醒，重置前不要喚醒（只會再撞上限）。依第 10 條的額度規則決定怎麼接：小而熱的（1 小時內有活動、輪數不多）用 SendMessage 喚醒它繼續；上下文大或閒置超過 1 小時的，開新 Session（start_session），請它憑原 Session 的交接筆記接手（沒有筆記就用 list_events 看原 Session 停在哪裡）。交接之後，用 ledger update 把工作項目的 owner 改成新的 Session；原 Session 的工作項目都移交或結案後，看板就不再列它。`,
   'role.delivery': `「{project}」有 PM Session 在追蹤各 Session 的狀態。完成、暫停或卡住一項工作時（收尾、wrap_up 之前），請呼叫 {tool} 回報一次：status 寫現在的狀態，summary 用一句話說做了什麼、還差什麼；有 commit 就填 commit，CI 還在跑就填 ci（run 網址或 id），需要發布的就填 delivery。完整的說明（做法、驗證、數字、取捨）寫進 detail，mod 會存成檔案並回傳路徑；PM 只讀摘要，使用者可以從看板打開詳細檔。回報是給 PM 看板用的，不需要向使用者解釋。
 給 PM 的訊息（SendMessage、wrap_up 摘要、最後的回答）也用同樣的短格式，總長約 300 字以內：狀態、commit、一行摘要，以及詳細檔的路徑。不要把完整說明貼進訊息。
 無法呼叫 {tool} 時，改在 wrap_up 摘要（沒有 wrap_up 時就是最後的回答）最後加一行交付宣告，三選一：
@@ -85,7 +90,7 @@ const zhTW = {
 
   // The PM's tools.
   'tool.board.description':
-    '專案狀態報告：列出此專案所有子 Session 的狀態（執行中、待回覆、CI 失敗、等待 CI、待發布、中斷・未完成、背景執行、已結束；CI 狀態會用 gh 向 GitHub 確認）、任務清單進度、最新指令與收尾摘要，以及工作項目和需要處理的事項。回報進度或判斷是否有遺漏前必須先呼叫。',
+    '專案狀態報告：列出此專案所有子 Session 的狀態（執行中、待回覆、CI 失敗、額度用完、等待 CI、待發布、中斷・未完成、背景執行、已結束；CI 狀態會用 gh 向 GitHub 確認）、任務清單進度、最新指令與收尾摘要，以及工作項目和需要處理的事項。回報進度或判斷是否有遺漏前必須先呼叫。',
   'tool.board.scope': 'project（預設）只看這個專案；all 看所有專案。',
   'tool.board.includeDone': '一併列出已結束且無待辦的 Session 與已完成的工作項目。預設 false。',
   'tool.ledger.description':
@@ -164,7 +169,7 @@ const zhTW = {
   'board.title': '# 專案狀態報告：{project}',
   'board.path': '路徑：{path}',
   'board.counts':
-    'Sessions {total}（不含 PM）｜待回覆 {asking}｜CI 失敗 {failed}｜等待 CI {ci}｜待發布 {unreleased}｜中斷・未完成 {open}｜執行中 {running}｜背景執行 {waiting}｜已結束 {done}｜長期閒置 {stale}',
+    'Sessions {total}（不含 PM）｜待回覆 {asking}｜CI 失敗 {failed}｜額度用完 {limit}｜等待 CI {ci}｜待發布 {unreleased}｜中斷・未完成 {open}｜執行中 {running}｜背景執行 {waiting}｜已結束 {done}｜長期閒置 {stale}',
   'board.progress': '工作項目完成 {done}/{total}（專案進度以工作項目為準；Session 收尾時會把自己的任務清單全部勾選，不代表工作已完成）',
   'board.name': '「{title}」({id})',
   'board.attention.asking': '- [待回覆] {name} 等待使用者決策：{said}',
@@ -173,6 +178,7 @@ const zhTW = {
   'board.attention.unreleased': '- [待發布・未完成] {name} 最後回報尚未交付（{kinds}），不能視為完成：{said}',
   'board.attention.failed': '- [CI 失敗・需處理] {name} GitHub 上的 CI（{target}）失敗，要修正後重跑：{said}',
   'board.attention.failedTarget': '最近一次',
+  'board.attention.limit': '- [{tag}] {name} 被用量上限打斷，工作停在半途；額度重置後要接手（PM 指示第 15 條）：{said}',
   'board.attention.caveat': '- [需追蹤] {name} 收尾摘要載明尚有未完成事項：{said}',
   'board.attention.pr': '- [PR 開啟中] {name}',
   'board.attention.unassigned': '- [未指派] 工作項目 {code}「{text}」尚未指派負責 Session',
@@ -385,6 +391,9 @@ const en: Record<MessageKey, string> = {
   'status.asking.tag': 'Waiting on you',
   'status.failed.label': 'CI failed',
   'status.failed.tag': 'CI failed · needs fixing',
+  'status.limit.label': 'Usage limit',
+  'status.limit.tag': 'Usage limit',
+  'status.limit.resumes': 'Usage limit · resumes after {time}',
   'status.open.label': 'Unfinished',
   'status.open.tag': 'Stopped · unfinished',
   'status.unreleased.label': 'Not released',
@@ -423,6 +432,7 @@ const en: Record<MessageKey, string> = {
 
   'toast.asking': '"{title}" is waiting on you',
   'toast.failed': 'CI failed for "{title}"',
+  'toast.limit': '"{title}" stopped midway at a usage limit',
   'toast.unreleased': '"{title}" stopped, but its work is not delivered yet',
   'toast.open': '"{title}" stopped with {n} {n|step|steps} left',
 
@@ -444,7 +454,8 @@ Rules:
 11. When you start an agent, lead its description with the work item's code (for example "T-12 Reconcile payouts"), and once it is started set the item's owner to agent:<agentId> with a ledger update. The mod runs it in the background, puts a type that may write in a git worktree of its own (Explore, Plan and claude-code-guide stay in the folder), and cuts its reply to one line and the path of its detail file. To adjust a running agent, pass the user's words on with SendMessage (to: its agentId).
 12. An agent that failed, needs the user to decide, is waiting to be verified or was interrupted shows under the board's "Needs attention". One to verify has committed on its worktree branch: once you have checked the commit and merged it into the project's branch, it is done and its work item can close.
 13. QA: when you record work, write its acceptance criteria in criteria (what counts as done, and how to check it). Before a code change is pushed, start an independent QA agent (subagent_type: "Explore") whose description leads with "T-xx QA" (for example "T-12 QA"); give its prompt only the diff's range (a commit or branch) and the criteria, never the developer's conclusions or report. The mod adds the QA checklist. It is not the owner: do not make it the item's owner. Once it answers [pass] or [fail], record it with a ledger update: qa pass or fail, qa_by agent:<agentId>, and on a fail the reason in qa_note, handing the work back to its owner to fix. Work that needs no QA (for example a change to docs only) takes qa skip with the reason in qa_note. Without qa=pass (or a skip with its reason) the ledger refuses to close an item, and whoever checked it may not be its owner; the board's "Needs attention" lists items awaiting QA and items that failed it.
-14. When a test fails, fix the code, not the test. Say so in every brief. Changing, deleting or skipping an existing test counts only when its owner gives the reason for each one in its report and you agree. When you verify work, send the work back if a test was weakened (a case or assertion deleted, an expected value changed, a counter-example or edge case swapped for one easier to pass, skip, only or todo added or a test commented out, a threshold or tolerance loosened) without a reason or without your agreement.`,
+14. When a test fails, fix the code, not the test. Say so in every brief. Changing, deleting or skipping an existing test counts only when its owner gives the reason for each one in its report and you agree. When you verify work, send the work back if a test was weakened (a case or assertion deleted, an expected value changed, a counter-example or edge case swapped for one easier to pass, skip, only or todo added or a test commented out, a threshold or tolerance loosened) without a reason or without your agreement.
+15. A session the board shows as "Usage limit" was stopped midway by a usage limit; its tag says when the limit resets. Once it has reset, pick the work up without waiting for the user to remind you; do not wake it before then (it would only hit the limit again). Choose how by the quota rules of item 10: wake a small, warm one (active within the last hour, few turns) with SendMessage so it goes on; for one with a large context or idle for over an hour, start a new session (start_session) that takes over from the old session's hand-over notes (with none, read where the old session stopped with list_events). After the hand-over, set the work item's owner to the new session with a ledger update; once every work item of the old session has been handed over or closed, the board no longer lists it.`,
   'role.delivery': `"{project}" has a PM session tracking each session's state. When you finish, pause or get stuck on a piece of work (at the end, before wrap_up), call {tool} once: status is where it stands now, summary one sentence on what was done and what is left; fill commit when you committed, ci (the run URL or id) while CI is still running, and delivery when the work needs releasing. Put the full account (how, how it was checked, numbers, trade-offs) in detail: the mod saves it to a file and answers with its path. The PM reads the summary alone; the user can open the detail file from the board. The report is for the PM's board; there is no need to explain it to the user.
 Messages to the PM (SendMessage, the wrap_up recap, your final answer) take the same short form, about 300 characters in all: the status, the commit, a one-line summary and the detail file's path. Do not paste the full account into a message.
 When you cannot call {tool}, end your wrap_up recap (or, without wrap_up, your final answer) with one delivery line instead, one of:
@@ -454,7 +465,7 @@ Delivery: pending (what it waits on)`,
   'role.justClaimed': 'The user just made this session the PM with /pm. Call {board} first, then report the state of the project in a few sentences: which sessions are waiting on the user, which stopped with steps left, and whether any work item is still open.',
 
   'tool.board.description':
-    "Project status report: every sub-session of this project with its status (Running, Waiting on you, CI failed, Waiting on CI, Not released, Stopped · unfinished, In the background, Ended; CI is checked on GitHub with gh), its task list progress, latest instruction and recap, plus the work items and what needs attention. Call it before reporting progress or judging whether anything was missed.",
+    "Project status report: every sub-session of this project with its status (Running, Waiting on you, CI failed, Usage limit, Waiting on CI, Not released, Stopped · unfinished, In the background, Ended; CI is checked on GitHub with gh), its task list progress, latest instruction and recap, plus the work items and what needs attention. Call it before reporting progress or judging whether anything was missed.",
   'tool.board.scope': 'project (default) shows this project only; all shows every project.',
   'tool.board.includeDone': 'Also list ended sessions with nothing left and work items that are done. Default false.',
   'tool.ledger.description':
@@ -530,7 +541,7 @@ Delivery: pending (what it waits on)`,
   'board.title': '# Project status: {project}',
   'board.path': 'Path: {path}',
   'board.counts':
-    'Sessions {total} (PM not counted) | Waiting on you {asking} | CI failed {failed} | Waiting on CI {ci} | Not released {unreleased} | Stopped · unfinished {open} | Running {running} | In the background {waiting} | Ended {done} | Idle {stale}',
+    'Sessions {total} (PM not counted) | Waiting on you {asking} | CI failed {failed} | Usage limit {limit} | Waiting on CI {ci} | Not released {unreleased} | Stopped · unfinished {open} | Running {running} | In the background {waiting} | Ended {done} | Idle {stale}',
   'board.progress': 'Work items done {done}/{total} (progress counts work items; a session ticks off its own task list when it wraps up, which does not mean the work is done)',
   'board.name': '"{title}" ({id})',
   'board.attention.asking': '- [Waiting on you] {name} needs the user to decide: {said}',
@@ -539,6 +550,7 @@ Delivery: pending (what it waits on)`,
   'board.attention.unreleased': '- [Not released · unfinished] {name} last said its work is not delivered yet ({kinds}), so it is not done: {said}',
   'board.attention.failed': '- [CI failed · needs fixing] {name} CI on GitHub ({target}) failed and needs a fix and a new run: {said}',
   'board.attention.failedTarget': 'latest run',
+  'board.attention.limit': '- [{tag}] {name} was stopped midway by a usage limit; pick it up once the limit resets (PM rule 15): {said}',
   'board.attention.caveat': '- [Follow up] {name} says in its recap that something is left: {said}',
   'board.attention.pr': '- [PR open] {name}',
   'board.attention.unassigned': '- [Unassigned] Work item {code} "{text}" has no owning session yet',

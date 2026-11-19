@@ -6,7 +6,7 @@ import type { ElementConstructor, EngineInterface, RenderInputOf, RenderSurface,
 
 import type { AgentRecord, AgentState, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Step, Track } from '../types'
 import { agentName } from './agents'
-import { STATUS, agentTime, ago, caveatOf, clip, groupProjects, isActive, isDeliveredAgent, isDeliveredStatus, itemCode, liveTracks, openSteps, projectKey, settledAt, shownAgents, statusOf } from './sessions'
+import { STATUS, agentTime, ago, caveatOf, clip, groupProjects, isActive, isDeliveredAgent, isDeliveredStatus, isHandedOff, itemCode, limitOf, liveTracks, openSteps, projectKey, settledAt, shownAgents, statusOf, statusText } from './sessions'
 import { isAgentId, isSameId, qaShown, qaText } from './qa'
 import type { QaShown } from './qa'
 import type { Project, Status } from './sessions'
@@ -179,7 +179,9 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   // Every project's ledger: an owner may work from another project's folder.
   const allItems = Object.values(files).flatMap(file => file.ledger)
   const settled = (id: string) => settledAt(id, allItems)
-  const statusOfOne = (one: Session) => statusOf(one, all[one.id], words[one.id], now, ci[one.id], push[one.id], settled(one.id))
+  const statusOfOne = (one: Session) => statusOf(one, all[one.id], words[one.id], now, ci[one.id], push[one.id], settled(one.id), isHandedOff(one.id, allItems))
+  /** A status as the pane reads it: a usage limit with when it resets. */
+  const labelOf = (one: Session, status: Status) => statusText(status, status === 'limit' ? limitOf(one, all[one.id], words[one.id]) : null, 'label')
   const caveatOfOne = (one: Session) => (settled(one.id) === undefined ? caveatOf(all[one.id], push[one.id]) : null)
   const groups = groupProjects(state.list)
   const isAll = view === 'all' || !self || self.isScratch
@@ -292,7 +294,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
       <Box flexDirection="row">
         {metric('kpi:running', count('running') + count('waiting') + runningAgents, t('pane.kpiRunning'), 'success', runningAgents ? t('pane.kpiAgents', { n: runningAgents }) : undefined)}
         {metric('kpi:asking', count('asking') + agentCount('decide'), t('pane.kpiAsking'), 'warning')}
-        {metric('kpi:open', count('open') + count('ci') + count('failed') + count('unreleased') + agentCount('verify', 'failed', 'lost'), t('pane.kpiOpen'), 'claude')}
+        {metric('kpi:open', count('open') + count('ci') + count('failed') + count('limit') + count('unreleased') + agentCount('verify', 'failed', 'lost'), t('pane.kpiOpen'), 'claude')}
       </Box>
     </Box>
   )
@@ -419,7 +421,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
         </Box>
         <Text size="caption" wrap="truncate-end">
           <Text color={look.color} weight="medium">
-            {look.label}
+            {labelOf(one, status)}
           </Text>
           {meta.length > 0 && <Text dimColor>{`　·　${meta.join('　·　')}`}</Text>}
         </Text>
@@ -494,7 +496,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
       : agent
         ? t('pane.ownerAgent', { name: agentName(agent).replace(/^\s*T-\d+\s*/i, ''), status: t(`agent.state.${agent.state}`) })
         : owner
-          ? t('pane.owner', { title: owner.title, status: STATUS[statusOfOne(owner)].label, elsewhere })
+          ? t('pane.owner', { title: owner.title, status: labelOf(owner, statusOfOne(owner)), elsewhere })
           : t('pane.ownerGone')
     const isKnown = !!owner || !!agent
     const qa = qaOfItem(item, project)

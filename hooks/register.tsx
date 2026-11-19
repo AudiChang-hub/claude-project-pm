@@ -366,6 +366,9 @@ export const register: Register = (on, options) => {
         ...t,
         lastAnswer: clip(e.answer, 800),
         turnAt: now,
+        // How it ended: a usage limit or an API error ends a turn with `error`, its words (if any) in the answer.
+        endedInError: e.reason === 'error',
+        errorText: e.reason === 'error' && e.answer.trim() ? clip(e.answer, 300) : undefined,
         ...((t.recapAt ?? 0) > t.turnAt ? {} : { recap: null, ask: null }),
         // Likewise a report: one made in an earlier turn no longer says where this turn left the work.
         ...((t.reportAt ?? 0) > t.turnAt ? {} : { report: undefined, reportAt: undefined }),

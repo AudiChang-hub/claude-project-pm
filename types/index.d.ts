@@ -23,6 +23,8 @@ export type LastWord = {
   /** The session's lastActivityAt when this was read: a newer one reads again. */
   activity: string
   error: string | null
+  /** The transcript ends on a turn that ended in error (its `[result] error` line): `said` is then the error's words. */
+  isError?: boolean
 }
 
 export type StepStatus = 'pending' | 'in_progress' | 'completed'
@@ -57,6 +59,13 @@ export type Track = {
   reportAt?: number
   /** The version of the update messages this session's mod takes in (session.receive); absent before it could. */
   inbox?: number
+  /**
+   * Whether the last turn ended on an error (turn.complete's reason `error`: a usage limit, an API error), set at every
+   * turn's end; absent in a track an older mod wrote.
+   */
+  endedInError?: boolean
+  /** That error's words, when the turn's end carried any (its answer); else the transcript holds them. */
+  errorText?: string
 }
 
 /** Where a session's work stands, as it says itself. */
@@ -158,6 +167,8 @@ export type LedgerItem = {
   criteria?: string
   /** Its latest QA verdict; a new one replaces it. Absent until one is recorded. */
   qa?: QaRecord
+  /** The sessions or agents it was handed over from, oldest first: a session stopped mid-work that gave it up is not waited on. */
+  formerOwners?: string[]
 }
 
 /** One QA verdict on a work item: who checked it (never its owner), when, and why it failed or was skipped. */

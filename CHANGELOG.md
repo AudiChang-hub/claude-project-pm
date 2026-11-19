@@ -7,6 +7,9 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+### Fixed
+- A session a usage limit stopped midway (its last turn ended in error, with words like "You've hit your 5-hour limit · resets 3pm") showed as *Ended*, so nobody came back to it once the limit reset. The mod never looked at how a turn ended: a turn that ends in error carries no answer, the limit's words are only in the transcript, and with its steps ticked the session read as finished. Each session's mod now keeps whether its last turn ended in error (`turn.complete`'s `reason`), the board reads the transcript's `[result] error` line and the words before it, and a new status, *Usage limit · resumes after <time>* (額度用完・<time> 後可續; *Usage limit* when the words give no time), lists it under *Needs attention*, in the counts and on the pane. Only the words of a usage limit (5-hour, weekly, usage limit, out of extra usage, 用量上限) count; any other error (an API failure, a rate limit, the context limit) does not. A session running again, or whose later turn ended otherwise, is no longer listed, nor is one whose work items have all been handed to another owner or closed: a work item now keeps the owners it was handed over from (`formerOwners`). A new PM rule (15) has the PM pick such a session up once the limit resets, without being reminded: by the quota rules of rule 10, wake a small, warm one, or start a new session that takes over from the hand-over notes, then make the new session the work item's owner.
+
 ## [0.9.0] - 2026-11-19
 
 ### Added

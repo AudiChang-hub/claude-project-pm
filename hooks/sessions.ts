@@ -6,19 +6,20 @@ import { agentName, isSettledAgent } from './agents'
 import { t } from './messages'
 import { isAgentId, isSameId, qaAttention, qaShown, qaText } from './qa'
 
-export type Status = 'running' | 'asking' | 'failed' | 'open' | 'unreleased' | 'ci' | 'waiting' | 'done' | 'stale'
+export type Status = 'running' | 'asking' | 'failed' | 'limit' | 'open' | 'unreleased' | 'ci' | 'waiting' | 'done' | 'stale'
 
 /** How each status looks: `color` is a theme key (drawn right in light and dark), `hex` the same hue for SVG marks. */
 const LOOK: Record<Status, { color: string; hex: string; rank: number }> = {
   asking: { color: 'warning', hex: '#f59e0b', rank: 0 },
   failed: { color: 'error', hex: '#ef4444', rank: 1 },
-  open: { color: 'claude', hex: '#d97757', rank: 2 },
-  unreleased: { color: 'planMode', hex: '#0d9488', rank: 3 },
-  ci: { color: 'permission', hex: '#8b5cf6', rank: 4 },
-  running: { color: 'success', hex: '#22c55e', rank: 5 },
-  waiting: { color: 'suggestion', hex: '#3b82f6', rank: 6 },
-  done: { color: 'inactive', hex: '#9ca3af', rank: 7 },
-  stale: { color: 'subtle', hex: '#6b7280', rank: 8 },
+  limit: { color: 'warning', hex: '#ea580c', rank: 2 },
+  open: { color: 'claude', hex: '#d97757', rank: 3 },
+  unreleased: { color: 'planMode', hex: '#0d9488', rank: 4 },
+  ci: { color: 'permission', hex: '#8b5cf6', rank: 5 },
+  running: { color: 'success', hex: '#22c55e', rank: 6 },
+  waiting: { color: 'suggestion', hex: '#3b82f6', rank: 7 },
+  done: { color: 'inactive', hex: '#9ca3af', rank: 8 },
+  stale: { color: 'subtle', hex: '#6b7280', rank: 9 },
 }
 
 /**
@@ -42,6 +43,71 @@ export const STATUS = Object.fromEntries(
 
 export function isActive(status: Status): boolean {
   return status !== 'done' && status !== 'stale'
+}
+
+// ── A turn a usage limit ended ──
+
+/**
+ * The words of a usage limit (the plan's 5-hour or weekly limit, extra usage run out), not of any error: not a
+ * rate limit the engine retries, the context or output limit, an overloaded or failing API.
+ */
+const USAGE_LIMIT =
+  /\b(?:hit|reached|hitting)\s+(?:your|the)\s+(?:(?!context|token|size|output|length|rate)[\w-]+\s+){0,3}?limit\b|\b(?:5|five)[- ]hour\s+limit\b|\b(?:weekly|daily|monthly|session|usage|plan|opus|sonnet)\s+(?:usage\s+)?limit\b|\bout of (?:extra )?usage\b|用量上限|使用上限|使用量上限|額度(?:已)?(?:用完|用盡|耗盡)/i
+/** When the limit resets, as its words give it: resets 3pm (Asia/Taipei), will reset at 3pm, 將於 15:00 重置. */
+const RESETS = /\b(?:resets?|will reset)\s+(?:at\s+|on\s+|in\s+)?([^\n·∙•|]+)|(?:將於|將在|於)\s*([^，。,；;\n]+?)\s*(?:重置|恢復|重新計算)/i
+
+/** A usage limit that ended a turn: its words, and when it resets (null when they do not say). */
+export type UsageLimit = { said: string; resets: string | null }
+
+/** The usage limit the words of an error tell of, or null for any other error. */
+export function usageLimitOf(text: string): UsageLimit | null {
+  if (!USAGE_LIMIT.test(text)) return null
+  const m = RESETS.exec(text)
+  const resets = (m?.[1] ?? m?.[2] ?? '').trim().replace(/[.。\s]+$/, '')
+
+  return { said: text.trim(), resets: resets ? clip(resets, 40) : null }
+}
+
+/**
+ * The usage limit the session's last turn ended on, or null: its track's own word on how that turn ended, then the
+ * transcript read at its last activity (an older mod's track says nothing of it, nor does the turn's end give the
+ * limit's words). A later turn that ended otherwise, or the session running again, ends it.
+ */
+export function limitOf(one: Session, track: Track | undefined, word: LastWord | undefined): UsageLimit | null {
+  if (one.isRunning || track?.endedInError === false) return null
+  const own = track?.endedInError ? usageLimitOf(track.errorText ?? '') : null
+  if (own) return own
+  const isRead = !!word && word.isError === true && !word.error && word.activity === one.lastActivityAt
+
+  return isRead ? usageLimitOf(word.said) : null
+}
+
+/**
+ * Whether a track leaves how its last turn ended to the transcript: one that ended in error without its words, or
+ * one an older mod wrote with nothing said (as a turn a usage limit ended leaves it).
+ */
+export function needsTranscript(track: Track): boolean {
+  if (track.endedInError === false || usageLimitOf(track.errorText ?? '')) return false
+
+  return !track.lastAnswer && !track.recap && !track.report && !track.ask
+}
+
+/**
+ * Whether the session's work in the ledger has all left it: it has had work items (owned or handed over from it),
+ * and none open is its own now. A session the usage limit stopped is then not waited on.
+ */
+export function isHandedOff(id: string, ledger: LedgerItem[]): boolean {
+  const owned = ledger.filter(item => isSameId(item.owner, id))
+  if (owned.some(item => item.status === 'open')) return false
+
+  return owned.length > 0 || ledger.some(item => (item.formerOwners ?? []).some(former => isSameId(former, id)))
+}
+
+/** A status as people read it: the pane's `label` or the board's `tag`, a usage limit with when it resets. */
+export function statusText(status: Status, limit: UsageLimit | null, kind: 'label' | 'tag'): string {
+  if (status === 'limit' && limit?.resets) return t('status.limit.resumes', { time: limit.resets })
+
+  return STATUS[status][kind]
 }
 
 /** A ledger id as people read it: T-01. */
@@ -333,8 +399,9 @@ export function liveTracks(list: Session[], tracks: Record<string, Track>, words
     const track = tracks[one.id]
     const word = words[one.id]
     if (!track || !isBehind(one, track) || !word || word.error || !word.said || word.activity !== one.lastActivityAt) continue
-    // Its background list missed the notifications those turns got too.
-    live[one.id] = { ...track, recap: null, recapAt: undefined, ask: word.isAsking ? word.said : null, lastAnswer: word.said, background: [] }
+    // Its background list missed the notifications those turns got too; how its last turn ended is the transcript's.
+    const ended = word.isError ? { endedInError: true, errorText: word.said } : { endedInError: false, errorText: undefined }
+    live[one.id] = { ...track, recap: null, recapAt: undefined, ask: word.isAsking ? word.said : null, lastAnswer: word.said, background: [], ...ended }
   }
 
   return live
@@ -898,8 +965,12 @@ export function statusOf(
   ci?: CiCheck,
   push?: PushCheck,
   settled?: number,
+  isHandedOver = false,
 ): Status {
   if (one.isRunning) return 'running'
+  // Stopped by a usage limit mid-turn: whatever its task list or words say, the turn did not end where it meant to.
+  // Not once its work items have all left it (handed over, closed: isHandedOff).
+  if (!isHandedOver && limitOf(one, track, word)) return 'limit'
   const minutes = (now - (Date.parse(one.lastActivityAt) || 0)) / 60000
   // The person closed its work (settledAt) after its last report or turn: what its words leave is theirs to judge, and
   // they judged it. Running, asking, CI and background work still show: they are what is happening, not a reading.
@@ -1034,6 +1105,9 @@ export function parseLastWord(text: string, activity: string): LastWord {
   const last = entries.filter(e => e.role !== 'result').at(-1)
   const isLast = !!said && last === said
   const isAsking = isLast && /[?？]\s*$/.test(said.body)
+  // The turn ended in error (`[result] error …`) right after these words: they are the error's (a usage limit's).
+  const end = entries.at(-1)
+  const isError = isLast && end?.role === 'result' && /^error/i.test(end.body)
 
   return {
     said: said ? clip(said.body, 140) : '',
@@ -1041,6 +1115,7 @@ export function parseLastWord(text: string, activity: string): LastWord {
     isWaiting: isLast && !isAsking && WAITING.test(reportedText(said.body)),
     activity,
     error: null,
+    ...(isError ? { isError } : {}),
   }
 }
 
@@ -1136,8 +1211,10 @@ export function boardText(input: BoardInput): string {
   const ci = input.ci ?? {}
   const push = input.push ?? {}
   const settled = (id: string) => settledAt(id, ledger)
+  const handedOff = (id: string) => isHandedOff(id, ledger)
   const rows = sessions
-    .map(one => ({ one, track: tracks[one.id], word: words[one.id], status: statusOf(one, tracks[one.id], words[one.id], now, ci[one.id], push[one.id], settled(one.id)) }))
+    .map(one => ({ one, track: tracks[one.id], word: words[one.id], status: statusOf(one, tracks[one.id], words[one.id], now, ci[one.id], push[one.id], settled(one.id), handedOff(one.id)) }))
+    .map(r => ({ ...r, limit: r.status === 'limit' ? limitOf(r.one, r.track, r.word) : null }))
     .sort((a, b) => STATUS[a.status].rank - STATUS[b.status].rank)
   const lines: string[] = []
   lines.push(t('board.title', { project: project.name }), t('board.path', { path: project.path }))
@@ -1147,6 +1224,7 @@ export function boardText(input: BoardInput): string {
       total: rows.length,
       asking: count('asking'),
       failed: count('failed'),
+      limit: count('limit'),
       ci: count('ci'),
       unreleased: count('unreleased'),
       open: count('open'),
@@ -1181,8 +1259,9 @@ export function boardText(input: BoardInput): string {
       const target = ci[r.one.id]?.target || t('board.attention.failedTarget')
       attention.push(t('board.attention.failed', { name, target, said: clip(quoteOf(r.track, r.word), QUOTE) }))
     }
+    if (r.status === 'limit') attention.push(t('board.attention.limit', { tag: statusText('limit', r.limit, 'tag'), name, said: clip(r.limit?.said ?? '', QUOTE) }))
     const caveat = caveatOf(r.track, push[r.one.id])
-    if (caveat && settled(r.one.id) === undefined && !['running', 'ci', 'failed', 'unreleased'].includes(r.status)) attention.push(t('board.attention.caveat', { name, said: clip(caveat, QUOTE) }))
+    if (caveat && settled(r.one.id) === undefined && !['running', 'ci', 'failed', 'limit', 'unreleased'].includes(r.status)) attention.push(t('board.attention.caveat', { name, said: clip(caveat, QUOTE) }))
     if (r.one.hasOpenPr && r.status !== 'running') attention.push(t('board.attention.pr', { name }))
   }
   const openLedger = ledger.filter(item => item.status === 'open')
@@ -1199,7 +1278,7 @@ export function boardText(input: BoardInput): string {
   // An owner is found however its id was spaced or cased (items written before ids were trimmed).
   const agentOf = (id: string) => agents.find(a => isSameId(`agent:${a.id}`, id))
   const sessionOf = (id: string) => everyone.find(s => isSameId(s.id, id))
-  const statusOfOwner = (one: Session) => statusOf(one, tracks[one.id], words[one.id], now, ci[one.id], push[one.id], settled(one.id))
+  const statusOfOwner = (one: Session) => statusOf(one, tracks[one.id], words[one.id], now, ci[one.id], push[one.id], settled(one.id), handedOff(one.id))
   for (const item of openLedger) {
     if (!item.owner) attention.push(t('board.attention.unassigned', { code: itemCode(item.id), text: item.text }))
     // An agent owner is accounted for by its own record (above, and in the owner's words below).
@@ -1217,7 +1296,10 @@ export function boardText(input: BoardInput): string {
     const one = sessionOf(id)
     if (!one) return t('board.owner.gone', { id: id.trim() })
 
-    return t('board.owner.status', { title: one.title, tag: STATUS[statusOfOwner(one)].tag, elsewhere: inProject.has(one.id) ? '' : t('board.owner.elsewhere') })
+    const status = statusOfOwner(one)
+    const tag = statusText(status, status === 'limit' ? limitOf(one, tracks[one.id], words[one.id]) : null, 'tag')
+
+    return t('board.owner.status', { title: one.title, tag, elsewhere: inProject.has(one.id) ? '' : t('board.owner.elsewhere') })
   }
   /**
    * Whether an owner has handed its work over: a session ended, waiting to release or on CI, or no longer listed
@@ -1268,7 +1350,7 @@ export function boardText(input: BoardInput): string {
     if (!input.isIncludingDone && !isActive(r.status) && !isCaveat && !r.one.hasOpenPr && !isOwner) continue
     listed += 1
     const flags = [r.one.hasOpenPr ? t('board.flag.pr') : '', r.one.isPinned ? t('board.flag.pinned') : ''].filter(Boolean).join(t('list.joiner'))
-    lines.push(`### [${STATUS[r.status].tag}] ${r.one.title} (${r.one.id})`)
+    lines.push(`### [${statusText(r.status, r.limit, 'tag')}] ${r.one.title} (${r.one.id})`)
     lines.push(t('board.lastActive', { ago: ago(r.one.lastActivityAt, now), flags: flags ? t('board.flags', { flags }) : '' }))
     if (r.track) {
       if (r.track.plan.length) {

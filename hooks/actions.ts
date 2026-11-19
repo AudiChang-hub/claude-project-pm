@@ -31,6 +31,7 @@ import {
   hasReport,
   isBehind,
   isCiPending,
+  isHandedOff,
   isPushedContent,
   isScratch,
   itemCode,
@@ -40,6 +41,7 @@ import {
   ledgerRow,
   ledgerText,
   liveTracks,
+  needsTranscript,
   quoteOf,
   settledAt,
   openSteps,
@@ -431,11 +433,14 @@ export async function readTracks($: EngineInterface, list: Session[]) {
   })
 }
 
-/** Reads the last word of sessions untracked, or tracked but behind, that did something since they were last read. */
+/**
+ * Reads the last word of sessions untracked, tracked but behind, or whose track leaves how its last turn ended to the
+ * transcript (a usage limit's words are there alone), that did something since they were last read.
+ */
 export async function catchUp($: EngineInterface, list: Session[], asked = list) {
   const known = await read($, lastWords)
   const tracked = await read($, tracks)
-  const isUnread = (one: Session) => !tracked[one.id] || isBehind(one, tracked[one.id]!)
+  const isUnread = (one: Session) => !tracked[one.id] || isBehind(one, tracked[one.id]!) || needsTranscript(tracked[one.id]!)
   const stale = asked.filter(one => isUnread(one) && known[one.id]?.activity !== one.lastActivityAt).slice(0, WORDS_PER_ROUND)
   if (stale.length === 0) return
   const fresh: Record<string, LastWord> = {}
@@ -699,7 +704,7 @@ export async function announce($: EngineInterface) {
   const now_ = new Map<string, Status>()
   for (const one of state.list) {
     if (projectKey(one.cwd) !== self.projectKey) continue
-    now_.set(one.id, statusOf(one, all[one.id], words[one.id], now, ci[one.id], push[one.id], settledAt(one.id, items)))
+    now_.set(one.id, statusOf(one, all[one.id], words[one.id], now, ci[one.id], push[one.id], settledAt(one.id, items), isHandedOff(one.id, items)))
   }
   const before = statusesBefore
   statusesBefore = now_
@@ -709,6 +714,7 @@ export async function announce($: EngineInterface) {
     const title = state.list.find(s => s.id === id)?.title ?? id
     if (status === 'asking') $.ui.toast(t('toast.asking', { title }))
     if (status === 'failed') $.ui.toast(t('toast.failed', { title }))
+    if (status === 'limit') $.ui.toast(t('toast.limit', { title }))
     if (status === 'unreleased') $.ui.toast(t('toast.unreleased', { title }))
     if (status === 'open') $.ui.toast(t('toast.open', { title, n: openSteps(all[id]).length }))
   }
@@ -1380,6 +1386,8 @@ export async function ledger($: EngineInterface, input: Record<string, unknown>)
       ...(qa ? { qa } : {}),
     }
     if (!criteria) delete changed.criteria
+    // Handed over: the owner it leaves is kept, so a session stopped mid-work that gave it up is not waited on (isHandedOff).
+    if (item.owner && !isSameId(item.owner, owner)) changed.formerOwners = [...(item.formerOwners ?? []).filter(o => !isSameId(o, item.owner!)), item.owner.trim()]
     // A verdict for another owner, or from before a reopen, goes.
     if (!qa) delete changed.qa
     const list = project.ledger.map(i => (i.id === id ? changed : i))

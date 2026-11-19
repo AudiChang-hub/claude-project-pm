@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isDeliveredAgent, isDeliveredStatus, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, statusOf, undeliveredOf } from '../hooks/sessions'
+import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isDeliveredAgent, isDeliveredStatus, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, statusOf, undeliveredOf, usageLimitOf } from '../hooks/sessions'
 import type { Status } from '../hooks/sessions'
 import { closesBoard } from '../hooks/actions'
 import { isQaDescription, qaAttention, qaBlocker, qaBrief, qaShown, qaUpdate } from '../hooks/qa'
@@ -2987,6 +2987,225 @@ test('the QA checklist covers a counter-example swapped for one that passes, as 
       expect(checklist).toContain(NO_WEAKER_TESTS[lang].swapped)
       // …and finding it without a reason is a fail.
       expect(checklist).toContain(lang === 'zh-TW' ? '沒有說明理由或理由不成立的，一律判 fail' : 'one with no reason given, or a reason that does not hold, is a fail')
+    }
+  } finally {
+    setLang(was)
+  }
+})
+
+// ── A session a usage limit stopped (T-38) ──
+
+/** A turn a usage limit ended, as the app writes it into the transcript: the limit's words, then the turn's error. */
+const limitTranscript = (said: string) => `[user] 繼續\n[assistant] ${said}\n[result] error (success), 2 turns`
+const HIT_LIMIT = "You've hit your 5-hour limit · resets 3pm (Asia/Taipei)"
+/**
+ * The track the session's mod (0.9.0) left when a usage limit ended its turn, as local_3bf6b9da… left it on
+ * 2026-11-19: every step ticked, no answer and no recap, the turn's end at its last activity.
+ */
+const limitTrack = () =>
+  track('local_open', {
+    plan: [{ content: '寫設計文件', status: 'completed' }, { content: '記錄決定', status: 'completed' }],
+    lastPrompt: '<task-notification> 背景作業結束 </task-notification>',
+  })
+
+const LIMIT_WORDS = {
+  zh: {
+    attention: /- \[額度用完・3pm \(Asia\/Taipei\) 後可續\] 「商品列表頁」\(local_open\) .*You've hit your 5-hour limit/,
+    heading: /### \[額度用完・3pm \(Asia\/Taipei\) 後可續\] 商品列表頁 \(local_open\)/,
+    count: /額度用完 1/,
+    label: '額度用完・3pm (Asia/Taipei) 後可續',
+    bare: /- \[額度用完\] 「商品列表頁」\(local_open\)/,
+    any: /\[額度用完/,
+    ended: /### \[已結束\] 商品列表頁 \(local_open\)/,
+  },
+  en: {
+    attention: /- \[Usage limit · resumes after 3pm \(Asia\/Taipei\)\] "商品列表頁" \(local_open\) .*You've hit your 5-hour limit/,
+    heading: /### \[Usage limit · resumes after 3pm \(Asia\/Taipei\)\] 商品列表頁 \(local_open\)/,
+    count: /Usage limit 1/,
+    label: 'Usage limit · resumes after 3pm (Asia/Taipei)',
+    bare: /- \[Usage limit\] "商品列表頁" \(local_open\)/,
+    any: /\[Usage limit/,
+    ended: /### \[Ended\] 商品列表頁 \(local_open\)/,
+  },
+} as const
+
+/**
+ * The PM's board with local_open stopped as above, its transcript `transcript`, and the ledger `ledger`: `board()`
+ * reads it again, `ledger()` calls the ledger tool.
+ */
+async function limitBoard($: Parameters<TestBody>[0], on: On, transcript: string, ledger: object[]) {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger, nextId: ledger.length + 1 }))
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(limitTrack()))
+  const clock = mock.clock(on, { now: NOW })
+  on('mcp.call', { tool: 'list_events' }, ($, e, next) =>
+    e.args?.session_id === 'local_open' ? { value: { content: [{ type: 'text' as const, text: transcript }], isError: false } } : next(e),
+  )
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+  await clock.advance(400)
+  const board = async () => String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  const ledgerCall = async (input: object) => String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', ...input } as never)) as { result?: unknown }).result)
+
+  return { files, clock, board, ledger: ledgerCall }
+}
+
+const limitItem = (id: number, owner: string, status = 'open') => ({ id, text: `v1 設計定案 ${id}`, owner, status, note: '', createdAt: NOW - 7_200_000, updatedAt: NOW - 7_200_000 })
+
+async function usageLimitStop($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en') {
+  const words = LIMIT_WORDS[lang]
+  const { board } = await limitBoard($, on, limitTranscript(HIT_LIMIT), [limitItem(1, 'local_open')])
+  const shown = await board()
+  // Needs attention, with the time it can go on; its own heading and the counts say the same.
+  expect(shown).toMatch(words.attention)
+  expect(shown).toMatch(words.heading)
+  expect(shown).toMatch(words.count)
+  expect(shown).not.toMatch(words.ended)
+
+  const ui = await $.ui.mount({
+    plugin: 'project-pm',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: 'project-pm',
+    props: { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 40 } },
+  } as never)
+  expect(await ui.find({ key: 'card:local_open' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: words.label })).toBeDefined()
+  await ui.unmount()
+}
+
+test('a session a usage limit stopped needs attention, with the time it can go on (T-38)', ZH, async ($, on) => {
+  await usageLimitStop($, on, 'zh')
+})
+
+test('a session a usage limit stopped needs attention, in English (T-38)', { options: { language: 'en' } }, async ($, on) => {
+  await usageLimitStop($, on, 'en')
+})
+
+async function usageLimitOthers($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en', which: 'noTime' | 'otherError' | 'saidOnly') {
+  const words = LIMIT_WORDS[lang]
+  const transcript = {
+    // The limit with no time to read: the status alone.
+    noTime: limitTranscript("You've hit your weekly limit"),
+    // An ordinary error ended the turn: not a usage limit.
+    otherError: limitTranscript('API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}'),
+    // The words of a limit, in a turn that ended well: someone talking about one, not stopped by it.
+    saidOnly: `[assistant] ${HIT_LIMIT}\n[result] done (success), 2 turns`,
+  }[which]
+  const shown = await (await limitBoard($, on, transcript, [limitItem(1, 'local_open')])).board()
+  if (which === 'noTime') expect(shown).toMatch(words.bare)
+  else {
+    expect(shown).not.toMatch(words.any)
+    expect(shown).toMatch(words.ended)
+  }
+}
+
+for (const [lang, opts] of [['zh', ZH], ['en', { options: { language: 'en' } }]] as const) {
+  test(`a usage limit with no time to read shows as the limit alone (${lang})`, opts, async ($, on) => {
+    await usageLimitOthers($, on, lang, 'noTime')
+  })
+  test(`an ordinary error is no usage limit (${lang})`, opts, async ($, on) => {
+    await usageLimitOthers($, on, lang, 'otherError')
+  })
+  test(`the words of a limit in a turn that ended well are no usage limit (${lang})`, opts, async ($, on) => {
+    await usageLimitOthers($, on, lang, 'saidOnly')
+  })
+  test(`a session stopped by a usage limit leaves the board once its work has a new owner (${lang})`, opts, async ($, on) => {
+    const words = LIMIT_WORDS[lang]
+    const { board, ledger } = await limitBoard($, on, limitTranscript(HIT_LIMIT), [limitItem(1, 'local_open'), limitItem(2, 'local_open')])
+    expect(await board()).toMatch(words.attention)
+    // T-01 handed over to a new session: T-02 is still its own, so it still needs attention.
+    await ledger({ action: 'update', id: 1, owner: 'local_ask' })
+    expect(await board()).toMatch(words.attention)
+    // T-02 handed over too: nothing of the PM's is left with it.
+    await ledger({ action: 'update', id: 2, owner: 'local_ask' })
+    const handed = await board()
+    expect(handed).not.toMatch(words.any)
+    // Ended with nothing of its own left: folded away with the other ended sessions, named nowhere on the board.
+    expect(handed).not.toMatch(/\(local_open\)/)
+  })
+  test(`a session stopped by a usage limit whose work is closed is not listed (${lang})`, opts, async ($, on) => {
+    const words = LIMIT_WORDS[lang]
+    const { board } = await limitBoard($, on, limitTranscript(HIT_LIMIT), [limitItem(1, 'local_open', 'done')])
+    expect(await board()).not.toMatch(words.any)
+  })
+}
+
+async function usageLimitTurns($: Parameters<TestBody>[0], on: On) {
+  const files: Files = new Map()
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_me', files)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start(START)
+  const kept = () => JSON.parse(files.get(`${DIR}/sessions/local_me.json`)!)
+  const idle = (at: number) => ({ id: 'local_me', title: '我', cwd: PROJECT, isRunning: false, lastActivityAt: new Date(at).toISOString(), isPinned: false, hasOpenPr: false })
+
+  // The limit ends the turn: no answer of the model's, the limit's words in the transcript alone.
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'error' } as never)
+  const word = parseLastWord(limitTranscript(HIT_LIMIT), new Date(NOW).toISOString())
+  expect(statusOf(idle(NOW), kept(), word, NOW + 60_000)).toBe('limit')
+  // The same turn, ended by an ordinary error: not a usage limit.
+  const other = parseLastWord(limitTranscript('API Error: 529 Overloaded'), new Date(NOW).toISOString())
+  expect(statusOf(idle(NOW), kept(), other, NOW + 60_000)).toBe('done')
+  // Running again: running, whatever its last turn was.
+  expect(statusOf({ ...idle(NOW), isRunning: true }, kept(), word, NOW + 60_000)).toBe('running')
+
+  // The person resumes it after the reset and its turn ends well: the limit is over, though the transcript was last read at the stop.
+  await clock.advance(3 * 3_600_000)
+  await $.turn.complete({ answer: '已修好。', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' } as never)
+  const later = NOW + 3 * 3_600_000
+  expect(statusOf(idle(later), kept(), word, later + 60_000)).toBe('done')
+
+  // An engine that gives the limit's words as the answer: the track alone tells.
+  await clock.advance(60_000)
+  await $.turn.complete({ answer: "You've hit your weekly limit · resets Nov 21, 9am (Asia/Taipei)", durationMs: 1, isAborted: false, turnId: 't3', reason: 'error' } as never)
+  expect(statusOf(idle(later + 60_000), kept(), undefined, later + 120_000)).toBe('limit')
+}
+
+test('a turn a usage limit ended is kept as such, and a later turn ends it (T-38)', ZH, async ($, on) => {
+  await usageLimitTurns($, on)
+})
+
+test('a usage limit is read however it is worded, and with when it resets; other errors are not one (T-38)', () => {
+  const resets = (text: string) => usageLimitOf(text)?.resets
+  // A limit, with the time it resets as its words give it.
+  expect(resets("You've hit your 5-hour limit · resets 3pm (Asia/Taipei)")).toBe('3pm (Asia/Taipei)')
+  expect(resets("You've hit your weekly limit · resets Nov 21, 9am (Asia/Taipei)")).toBe('Nov 21, 9am (Asia/Taipei)')
+  expect(resets('5-hour limit reached ∙ resets 1am')).toBe('1am')
+  expect(resets('Claude usage limit reached. Your limit will reset at 3pm (Asia/Taipei).')).toBe('3pm (Asia/Taipei)')
+  expect(resets("You're out of extra usage · resets 4pm")).toBe('4pm')
+  expect(resets("You've hit your limit · resets 11pm")).toBe('11pm')
+  expect(resets('已達用量上限，將於 15:00 重置。')).toBe('15:00')
+  // A limit that does not say when: the limit alone.
+  for (const text of ["You've hit your usage limit", 'Opus weekly limit reached', "You've hit your weekly limit"]) {
+    expect(usageLimitOf(text)).toEqual({ said: text, resets: null })
+  }
+  // Errors that are not a usage limit: an API that failed or is overloaded, a rate limit retried, the context or output limit.
+  const others = [
+    'API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}',
+    'API Error: 529 Overloaded',
+    'API Error: Request rejected (429) · rate limit exceeded, retry in 30s',
+    'Prompt is too long',
+    'Context limit reached · /compact or /clear to continue',
+    "You've hit the context limit",
+    "Claude's response exceeded the 32000 output token maximum",
+    'Credit balance is too low',
+    'Request timed out',
+  ]
+  expect(others.filter(text => usageLimitOf(text) !== null)).toEqual([])
+})
+
+test('the PM is told to pick up a session the usage limit stopped once it resets, by the quota rules (T-38)', () => {
+  const was = getLang()
+  const phrases = {
+    'zh-TW': ['15. 看板列為「額度用完」的 Session', '重置之後主動接手', '依第 10 條的額度規則', '小而熱的', '用 SendMessage 喚醒它繼續', '上下文大或閒置超過 1 小時的，開新 Session', '交接筆記', '把工作項目的 owner 改成新的 Session'],
+    en: ['15. A session the board shows as "Usage limit"', 'Once it has reset, pick the work up', 'the quota rules of item 10', 'small, warm one', 'with SendMessage so it goes on', 'a large context or idle for over an hour, start a new session', 'hand-over notes', "set the work item's owner to the new session"],
+  } as const
+  try {
+    for (const lang of ['zh-TW', 'en'] as const) {
+      setLang(lang)
+      const role = t('role.text', { project: 'Acme', path: PROJECT, board: 'board', ledger: 'ledger' })
+      for (const phrase of phrases[lang]) expect(role).toContain(phrase)
     }
   } finally {
     setLang(was)
