@@ -10,9 +10,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 import { t } from '../../hooks/messages'
+import { McpSession, isStructured } from '../src/mcp'
 import { VERSION } from '../src/version'
 import type { World } from './helpers'
-import { LANGS, serverCommand, world } from './helpers'
+import { LANGS, hostWith, serverCommand, world } from './helpers'
 
 const SESSION = '1f0ba5e3-d73c-4a06-ab9f-283b7537d1be'
 
@@ -101,4 +102,40 @@ for (const lang of LANGS) {
 test('the version is the package\'s', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
   assert.equal(VERSION, pkg.version)
+})
+
+describe('the structuredContent switch (3.1, decided 2026-11-19)', () => {
+  let w: World
+  beforeEach(() => {
+    w = world('en')
+  })
+  afterEach(() => w.done())
+  const callBoard = async (env: NodeJS.ProcessEnv) => {
+    const session = new McpSession({ cwd: w.repo, env, run: hostWith() })
+    await session.handle({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', clientInfo: { name: 'claude-code' } } })
+    const listed = (await session.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' }))!.result as { tools: { outputSchema?: unknown }[] }
+    const called = (await session.handle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'board', arguments: {} } }))!.result as Called
+
+    return { listed, called }
+  }
+
+  test('unset, or anything but 1, is off: words only, no output schema', async () => {
+    const { PROJECT_PM_STRUCTURED: _, ...rest } = w.env
+    for (const env of [rest, { ...rest, PROJECT_PM_STRUCTURED: '0' }, { ...rest, PROJECT_PM_STRUCTURED: 'true' }]) {
+      assert.equal(isStructured(env), false)
+      const { listed, called } = await callBoard(env)
+      assert.ok(listed.tools.every(tool => tool.outputSchema === undefined))
+      assert.equal(called.structuredContent, undefined)
+      assert.ok(called.content[0]!.text.includes('acme-shop'))
+    }
+  })
+
+  test('PROJECT_PM_STRUCTURED=1 is on: the same words, plus the JSON and the output schema', async () => {
+    const env = { ...w.env, PROJECT_PM_STRUCTURED: '1' }
+    assert.equal(isStructured(env), true)
+    const { listed, called } = await callBoard(env)
+    assert.ok(listed.tools.every(tool => (tool.outputSchema as { type?: string } | undefined)?.type === 'object'))
+    assert.equal((called.structuredContent!.project as { name: string }).name, 'acme-shop')
+    assert.ok(called.content[0]!.text.includes('acme-shop'))
+  })
 })

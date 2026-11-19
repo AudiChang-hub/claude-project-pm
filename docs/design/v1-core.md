@@ -309,6 +309,7 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 
 - server 名稱用 `project-pm`，所以在 Claude Code 裡工具名稱仍是 `mcp__project-pm__board`、`mcp__project-pm__ledger`、`mcp__project-pm__report`，PM 的指示文字和現有測試的語意都不用改。
 - 每個工具同時回 `content`（給模型看的文字，和現在一字不差的格式）和 `structuredContent`（給網頁看板、測試、其他程式用的 JSON），並附 `outputSchema`。
+  - **2026-11-19 實測後改為預設只回文字（A 案，PM 依設計本意決定）。** 實測：Claude Code CLI 2.1.326 在工具同時回 `content` 和 `structuredContent` 時，交給模型的是 JSON，不是文字；看板、交辦清單、結案被擋的說明都是寫給模型讀的文字，換成 JSON 就失去「模型照著說明修」的設計本意。決定：MCP 的工具預設只回 `content`、`tools/list` 不附 `outputSchema`；環境變數 `PROJECT_PM_STRUCTURED=1` 才同時回 `structuredContent` 並附 `outputSchema`（其他值、沒設都視為關閉），給需要 JSON 的用戶端用。同一份 JSON 照樣在網頁看板的 `/api/board` 和 `project-pm board --json` 提供，不受開關影響。測試涵蓋開關打開和關閉兩種情況（`core/test/mcp.spec.ts`）。
 - 錯誤分兩種：參數錯或關卡擋下時 `isError: false`、文字說明原因和怎麼補（現在的行為，模型才會照著修）；核心本身壞了（寫不了檔、資料損毀）時 `isError: true`。不再有 CLI 實測看到的「假成功」。
 - 每次呼叫 10 秒內回。gh、git 的結果有快取，過期時先回快取並標「（CI 狀態查詢中）」，背景再查。
 - 每個工具都接受選填的 `project`（資料夾路徑）。沒給時用 MCP 的 roots，再沒有就用行程的 cwd。
