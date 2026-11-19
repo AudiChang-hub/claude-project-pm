@@ -54,6 +54,8 @@
 - git 的 `pre-push` hook（每次 `git push` 之前 git 會先執行的檢查）：commit 驗收過才能 push。`git pm skip "<理由>"` 可以明確略過這一次，理由會記在看板上。
 - 選填（`--ci`）：`.github/workflows/project-pm-qa.yml`。
 
+如果你在 GitHub 上設了分支保護，要求檢查通過才能 merge，請把這份 workflow 加的**兩個**檢查都設成必要：**Project PM 品質檢查**和**不能公開的詞**（掃描你放在 `BLOCKED_TERMS` secret 裡的詞）。這是兩個分開的檢查，只把第一個設成必要的話，詞的掃描沒過還是能 merge。（workflow 是英文版時，名稱是 **Project PM QA** 和 **Words that must stay private**。）
+
 每一項都記在 `~/.project-pm/install-log.json`。
 
 ## 移除

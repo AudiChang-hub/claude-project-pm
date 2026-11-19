@@ -54,6 +54,8 @@ In a terminal, go to your project's folder (a git repository) and run:
 - A git `pre-push` hook (a check git runs before every `git push`): a push waits until its commits are checked. `git pm skip "<reason>"` lets a push through on purpose; the reason shows on the board.
 - Optional (`--ci`): `.github/workflows/project-pm-qa.yml`.
 
+If you protect a branch on GitHub so that a pull request merges only when its checks pass, make **both** checks this workflow adds required: **Project PM QA** and **Words that must stay private** (the scan for words you keep in the `BLOCKED_TERMS` secret). They are separate checks, so requiring only the first still lets a pull request through when the word scan fails. (If the workflow was written in Chinese, the checks are called **Project PM 品質檢查** and **不能公開的詞**.)
+
 Every change is recorded in `~/.project-pm/install-log.json`.
 
 ## Uninstall
