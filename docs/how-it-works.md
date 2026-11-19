@@ -42,7 +42,7 @@ At the top: a completion ring and three counters (running, waiting on you, not f
 ## Sessions or agents
 
 
-The PM hands each piece of work to a session or to an agent; you still talk only to the PM. Work it will follow up on, that commits, pushes, waits on CI or releases, or that takes long goes to a session. Work that ends when it is done, read-only questions and changes of a few minutes go to an agent (the Agent tool). A small thing goes to a session that is already open: every agent loads the whole system prompt again, measured at about 37,000 to 58,000 tokens. To change course mid-way, tell the PM; it passes your words on to the agent.
+The PM hands each piece of work to a session or to an agent; you still talk only to the PM. Work it will follow up on, that commits, pushes, waits on CI or releases, or that takes long goes to a session. Work that ends when it is done, read-only questions and changes of a few minutes go to an agent (the Agent tool). The PM puts quota first: a session already open takes the work only if it was active within the last hour and has not run many turns (measured at about 18,000 input-equivalent tokens, the cheapest). Waking a session idle for over an hour, or a large one, writes its whole context into the cache again (a 650,000-token context measured at about 840,000), so a small thing then goes to a new session (about 70,000) or an agent (about 60,000 for a read-only Explore agent, 120,000 to 150,000 for one that writes files). To change course mid-way, tell the PM; it passes your words on to the agent.
 
 For the PM's own Agent calls the mod:
 

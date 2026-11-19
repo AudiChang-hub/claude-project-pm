@@ -42,7 +42,7 @@ README 背後的細節：每個狀態的意思、PM 怎麼判斷工作有沒有�
 ## Session 還是 Agent
 
 
-PM 派工時，每件事會交給 Session 或 Agent；你仍然只跟 PM 說話。之後會追問、要 commit／push／等 CI／發布、或要做比較久的，交給 Session。做完就結束、唯讀查詢、或幾分鐘內的小改動，交給 Agent（Agent 工具）。很小的事直接交給已經開著的 Session：每開一個 Agent 都要重新載入整份系統提示，實測約 3.7 萬到 5.8 萬 tokens。要中途調整，告訴 PM，PM 會轉達給 Agent。
+PM 派工時，每件事會交給 Session 或 Agent；你仍然只跟 PM 說話。之後會追問、要 commit／push／等 CI／發布、或要做比較久的，交給 Session。做完就結束、唯讀查詢、或幾分鐘內的小改動，交給 Agent（Agent 工具）。PM 以額度為優先：已經開著的 Session，要 1 小時內有活動、而且還沒做很多輪，才交給它（實測約 1.8 萬等值 tokens，最省）。閒置超過 1 小時、或已經做很多輪的大 Session，喚醒時要把整段上下文重新寫進快取（實測 65 萬上下文約 84 萬），這時小事改開新 Session（約 7 萬）或 Agent（唯讀的 Explore 約 6 萬，會寫檔的約 12～15 萬）。要中途調整，告訴 PM，PM 會轉達給 Agent。
 
 PM 自己呼叫 Agent 時，mod 會：
 
