@@ -320,7 +320,7 @@ const zhTW = {
   'agent.briefDetailReply': '- 你不能寫檔：完整說明（做法、驗證、數字、取捨）接在第一行後面，寫在同一則回覆裡。mod 會把它存成檔案，PM 只讀第一行，使用者可以從看板打開。',
   'agent.briefQa': `這是 {item} 的獨立驗收（QA）。你只拿到 diff 範圍和驗收條件，沒有開發者的結論：自己看、自己跑，不要相信 commit 訊息或回報裡的說法。逐項檢查：
 1. diff 只包含這個工作項目的標的，沒有順手改別的（鐵律：只改要改的標的）。
-2. 修 bug 的變更有重現測試，而且這個測試在修正之前會失敗（準則第 3 條）。在專案資料夾以外取出修正前的版本（例如 git archive 到暫存資料夾），放上新測試跑一次確認；不要改專案資料夾裡的檔案。
+2. 修 bug 的變更有重現測試，而且這個測試在修正之前會失敗（準則第 3 條）。你是唯讀的，用讀的確認：\`git show <修正前的 sha>:<檔案>\` 看修正前的程式，\`git log -p\` 確認測試和修正在同一個 commit，或測試先進來；再對照修正前的程式，判斷測試在那時會不會失敗。沒有實際跑過「修正前會失敗」時，在回覆裡註明「讀程式推斷」。
 3. 測試、validate 都通過：實際執行，看 exit code，不要只看輸出文字。
 4. 版號和 CHANGELOG 照開發準則（沒有準則時照專案自己的慣例）。
 5. 沒有夾帶 secret、token、密碼或本機設定（本機路徑、帳號、.env、settings.local 之類）。
@@ -681,7 +681,7 @@ Delivery: pending (what it waits on)`,
   'agent.briefDetailReply': '- You cannot write files: put the full account (how, how it was checked, numbers, trade-offs) after the first line, in the same reply. The mod saves it to a file; the PM reads the first line, and the user can open the rest from the board.',
   'agent.briefQa': `This is the independent QA of {item}. You have only the diff's range and the acceptance criteria, not the developer's conclusions: look and run things yourself, and do not take a commit message or a report at its word. Check each of these:
 1. The diff holds only what this work item is about, nothing changed on the side (the iron rule: change only what is to be changed).
-2. A bug fix comes with a test that reproduces the bug and fails before the fix (guideline 3). Take the version before the fix outside the project's folder (for example git archive into a temporary folder), put the new test in it and run it; change no file in the project's folder.
+2. A bug fix comes with a test that reproduces the bug and fails before the fix (guideline 3). You only read, so check it by reading: \`git show <sha before the fix>:<file>\` for the code before the fix, and \`git log -p\` to see that the test came in with the fix or before it; then judge from the old code whether the test would have failed. When you could not actually run it before the fix, say "inferred from reading the code" in your reply.
 3. The tests and validate pass: run them and read the exit code, not just the output.
 4. The version and CHANGELOG follow the development guidelines (without guidelines, the project's own practice).
 5. No secret, token, password or local setting rides along (local paths, accounts, .env, settings.local and the like).

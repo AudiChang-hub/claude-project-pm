@@ -2627,14 +2627,16 @@ async function qaBriefs($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en') {
     $.agent.spawn({ tool_use_id: id, prompt: 'x', description, subagentType, provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-opus-5-5', background: true, fork: false } as never)
   const words =
     lang === 'zh'
-      ? { qa: '這是 T-12 的獨立驗收（QA）', checks: ['只包含這個工作項目的標的', '修正之前會失敗', '看 exit code', 'CHANGELOG', 'secret', '實際畫面'], qaReply: '[pass] 或 [fail]', reply: '[狀態, commit]', file: '寫進這個檔案：', inReply: '你不能寫檔：完整說明', readOnly: '這是唯讀工作：不要修改任何檔案。' }
-      : { qa: 'This is the independent QA of T-12.', checks: ['only what this work item is about', 'fails before the fix', 'read the exit code', 'CHANGELOG', 'secret', 'on screen'], qaReply: '[pass] or [fail]', reply: '[status, commit]', file: 'to this file: ', inReply: 'You cannot write files: put the full account', readOnly: 'This work only reads: change no file.' }
+      ? { qa: '這是 T-12 的獨立驗收（QA）', checks: ['只包含這個工作項目的標的', '修正之前會失敗', 'git show', 'git log -p', '讀程式推斷', '看 exit code', 'CHANGELOG', 'secret', '實際畫面'], qaReply: '[pass] 或 [fail]', reply: '[狀態, commit]', file: '寫進這個檔案：', inReply: '你不能寫檔：完整說明', readOnly: '這是唯讀工作：不要修改任何檔案。' }
+      : { qa: 'This is the independent QA of T-12.', checks: ['only what this work item is about', 'fails before the fix', 'git show', 'git log -p', 'inferred from reading the code', 'read the exit code', 'CHANGELOG', 'secret', 'on screen'], qaReply: '[pass] or [fail]', reply: '[status, commit]', file: 'to this file: ', inReply: 'You cannot write files: put the full account', readOnly: 'This work only reads: change no file.' }
 
   // A QA agent: the checklist, pass or fail for its first line, and the rest in its reply (it only reads).
   await spawn('c1', 'T-12 QA', 'Explore')
   const qa = w.spawned[0]!.prompt
   expect(qa).toContain(words.qa)
   for (const check of words.checks) expect(qa).toContain(check)
+  // A QA agent only reads: nothing it is asked to do may write, not even outside the project's folder.
+  expect(qa).not.toContain('git archive')
   expect([qa.includes(words.qaReply), qa.includes(words.inReply), qa.includes(words.readOnly)]).toEqual([true, true, true])
   expect([qa.includes(words.reply), qa.includes(words.file)]).toEqual([false, false])
   // Another agent that only reads: the usual first line, its account in its reply, no checklist.
