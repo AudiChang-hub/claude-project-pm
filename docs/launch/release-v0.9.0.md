@@ -1,6 +1,6 @@
 **Run many Claude Code sessions and agents at once. You talk to one PM, and nothing slips.**
 
-Project PM gives each project one PM session. It keeps a live board of every session and agent and a ledger of everything you asked for, and it won't call work done while anything is waiting on you, unfinished, waiting on CI, or not yet pushed or released. Now it also won't call work done until it has passed QA.
+Project PM gives each project one PM session. It keeps a live board of every session and agent and a ledger of everything you asked for, and it won't call work done while anything is waiting on you, unfinished, waiting on CI, or not yet pushed or released. Now, by default, an item also closes only after it has passed QA.
 
 It follows v0.8.0. It needs the Claude Code desktop app (Code tab) and a Claude Code version that supports function-hook mods (tested with 2.1.317).
 
@@ -12,7 +12,7 @@ Then type `/pm` in a new session of your project.
 
 ## Highlights
 
-- **A QA gate.** Each work item can carry acceptance criteria. Before a code change is pushed, the PM sends an independent QA agent (Explore, its description starting with "T-xx QA") that gets only the diff's range and the criteria, never the developer's conclusions. The mod gives it a checklist: the diff holds only its target, a bug fix comes with a test that fails before the fix, tests and validate pass by their exit code, the version and CHANGELOG follow your guidelines, no secret or local setting rides along, and an interface change is looked at on screen. The ledger won't close an item without a QA pass (or a skip with its reason), and it refuses a verdict recorded under the owner's name; it cannot prove who really checked.
+- **A QA gate.** Each work item can carry acceptance criteria. Before a code change is pushed, the PM sends an independent QA agent (Explore, its description starting with "T-xx QA") that gets only the diff's range and the criteria, never the developer's conclusions. The mod gives it a checklist: the diff holds only its target, a bug fix comes with a test that fails before the fix, tests and validate pass by their exit code, the version and CHANGELOG follow your guidelines, no secret or local setting rides along, an interface change is looked at on screen, and no test was weakened to pass (a deleted case or assertion, a changed expected value, a counter-example swapped for an easier one, an added skip, a loosened threshold), each listed by file and line. The ledger won't close an item without a QA pass (or a skip with its reason), and it refuses a verdict recorded under the owner's name; it cannot prove who really checked.
 - **Quota first.** The PM picks where work goes by what it costs, measured in input-equivalent tokens per hand-off:
 
   | Hand-off | Cost |
