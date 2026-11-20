@@ -54,5 +54,6 @@ python -c "from PIL import Image; [(lambda p: (lambda im: im.crop(im.getchannel(
 
 The hero images are scaled to 1600 px wide and `how-states*.png` kept at 1000 px before reducing. The
 web board's shots are rectangles: round their corners (radius 28 px for the README ones, 24 px for
-the how-it-works crops), fade the README ones out over their last 160 px (they stop below the
-Sessions column), scale them to 1600 px (README) or 1100 px (crops) wide, then reduce them the same way.
+the how-it-works crops), scale them to 1600 px (README) or 1100 px (crops) wide, then reduce them the
+same way. The README ones end on a clean break, below the first work item past the Sessions column,
+so no fade is needed (a fade reduced to 256 colors shows as grey bands).

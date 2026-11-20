@@ -212,7 +212,7 @@ async function page() {
   throw new Error(`The browser did not start: ${last}`)
 }
 
-/** `selector`: only that element (and `pad` around it); `until`: the page from the top down to that element's end. */
+/** `selector`: only that element (and `pad` around it); `until`: the page from the top down past that element's end, cut below a work item. */
 type Shot = { out: string; width: number; scheme: 'light' | 'dark'; selector?: string; until?: string; pad?: number }
 
 async function capture(url: string, shot: Shot) {
@@ -233,7 +233,12 @@ async function capture(url: string, shot: Shot) {
   const box = shot.selector
     ? await evaluate(`(() => { const r = document.querySelector(${JSON.stringify(shot.selector)}).getBoundingClientRect(); return { x: r.x - ${pad}, y: r.y + scrollY - ${pad}, width: r.width + ${pad * 2}, height: r.height + ${pad * 2} } })()`)
     : shot.until
-      ? { x: 0, y: 0, width: shot.width, height: await evaluate(`Math.ceil(document.querySelector(${JSON.stringify(shot.until)}).getBoundingClientRect().bottom + scrollY + 32)`) }
+      ? { x: 0, y: 0, width: shot.width, height: await evaluate(`(() => {
+          // A clean break: the first work item that ends below the element, so no card or row is cut in two.
+          const end = document.querySelector(${JSON.stringify(shot.until)}).getBoundingClientRect().bottom
+          const rows = [...document.querySelectorAll('#items > li')].map(li => li.getBoundingClientRect().bottom).filter(b => b >= end)
+          return rows.length ? Math.ceil(rows[0] + scrollY + 28) : document.documentElement.scrollHeight
+        })()`) }
       : { x: 0, y: 0, width: shot.width, height }
   const { data } = await p.send('Page.captureScreenshot', { format: 'png', clip: { ...box, scale: 1 }, captureBeyondViewport: true })
   await writeFile(join(images, shot.out), Buffer.from(data, 'base64'))
@@ -265,8 +270,8 @@ try {
     const suffix = lang === 'en' ? '' : '-zh-TW'
     const scenes: [Scene, Shot[]][] = [
       ['board', [
-        { out: `web-board-light${suffix}.png`, width: 1180, scheme: 'light', until: '.grid__side .block' },
-        { out: `web-board-dark${suffix}.png`, width: 1180, scheme: 'dark', until: '.grid__side .block' },
+        { out: `web-board-light${suffix}.png`, width: 1180, scheme: 'light', until: '.grid__side' },
+        { out: `web-board-dark${suffix}.png`, width: 1180, scheme: 'dark', until: '.grid__side' },
       ]],
       ['qa', [{ out: `how-qa${suffix}.png`, width: 1180, scheme: 'light', selector: '.grid__main', pad: 16 }]],
       ['guidelines', [{ out: `how-guidelines${suffix}.png`, width: 1180, scheme: 'light', selector: '.grid__main .block', pad: 16 }]],
