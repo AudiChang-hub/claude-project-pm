@@ -20,8 +20,11 @@
  * file: the baseline follows the setting.
  *
  * Each warning points at a read-only copy (~/.project-pm/guidelines/copies/<SHA-256>.md) of what the file held when
- * the person last spoke in that session, or later agreed to a change, or the guidelines were set to that file: never of
- * what a stray change left, so a second change in one turn points back to the same copy. git is no guide here: a change
+ * the person last spoke in that session, or later agreed to a change: never of what a stray change left, so a second
+ * change in one turn points back to the same copy. The baseline keeps that copy for every file the turn has watched,
+ * so the guidelines turned off and on again, or the file given up and taken back (git rm --cached, git add), still
+ * point at it (T-39 QA4 2). A file the setting comes to name only during the turn gets a copy of what it held then,
+ * and the warning says that is not necessarily something the person agreed to. git is no guide here: a change
  * already added or committed is what `git checkout` would bring back. A project's file is copied only while it really
  * is inside the repository (a link out of it, to a .env say, is not copied).
  *
@@ -30,7 +33,7 @@
  */
 import { createHash } from 'node:crypto'
 import { chmod, lstat, readFile, readdir, readlink, rm, stat, utimes } from 'node:fs/promises'
-import { isAbsolute, join, relative } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 
 import { NotPlainPathError, localRealpath } from './localpath'
 import { ct } from './messages'
@@ -85,18 +88,40 @@ type Look = {
 }
 
 /**
- * `look` is null when the setting names no file. `copy` is the read-only copy of what the file held when the person
- * last spoke, agreed to a change, or the setting came to name it; it does not move with a change nobody agreed to.
+ * A file's read-only copy (null: nothing to copy) and when it was taken: `start`, when the person last spoke or
+ * agreed to a change; `later`, when the turn first watched the file (the setting came to name it, or there was no
+ * baseline yet), which is not necessarily something the person agreed to.
  */
-type Baseline = { session: string; setting: GuidelinesSetting; at: number; look: Look | null; copy: string | null }
+type Kept = { copy: string | null; since: 'start' | 'later' }
+
+/**
+ * `look` is null when the setting names no file. `copies` holds, for every file this turn has watched (by fileKey),
+ * its copy; it is set afresh only when the person speaks or agrees to a change, and never moves with a change nobody
+ * agreed to.
+ */
+type Baseline = { session: string; setting: GuidelinesSetting; at: number; look: Look | null; copies: Record<string, Kept> }
 
 /** What happened to the file, in the words the board uses; `setting` when the setting itself changed. */
 export type Change = 'changed' | 'emptied' | 'deleted' | 'linked' | 'unplain' | 'unreadable'
 
-/** A change of the file (`file`, `from`, `copy`), or of the setting (`was` and `now`). */
+/** A change of the file (`file`, `from`, its copy), or of the setting (`was` and `now`, and the old file's copy). */
 export type GuidelinesAlert =
-  | { at: number; by: string; repo: string; change: Change; file: string; from: FileSetting['from']; copy: string | null }
-  | { at: number; by: string; repo: string; change: 'setting'; was: GuidelinesSetting; now: GuidelinesSetting; copy?: string | null }
+  | { at: number; by: string; repo: string; change: Change; file: string; from: FileSetting['from']; copy: string | null; since?: Kept['since'] }
+  | { at: number; by: string; repo: string; change: 'setting'; was: GuidelinesSetting; now: GuidelinesSetting; copy?: string | null; since?: Kept['since'] }
+
+/** A file's key in a baseline's copies: as the system compares paths. */
+const fileKey = (file: string) => (process.platform === 'win32' ? file.toLowerCase() : file)
+
+/** A copy a baseline names, if it is one of ours: ~/.project-pm/guidelines/copies/<SHA-256>.md, nothing else. */
+function keptOf(kept: unknown, env: NodeJS.ProcessEnv): Kept | null {
+  const { copy, since } = (kept ?? {}) as Partial<Kept>
+  if (since !== 'start' && since !== 'later') return null
+  if (copy === null) return { copy, since }
+  if (typeof copy !== 'string') return null
+  const folder = join(home(env), 'copies')
+
+  return isSamePath(dirname(copy), folder) && /^[0-9a-f]{64}\.md$/.test(basename(copy)) ? { copy: join(folder, basename(copy)), since } : null
+}
 
 const sha256 = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex')
 
@@ -238,16 +263,30 @@ export async function watchGuidelines(ref: ProjectRef, session: string, setting:
     const isSame = !!was && isSameSetting(was.setting, setting)
     const change = isSame && was.look && look ? changeOf(was.look, look) : null
     if (isSame && !change) return null
-    // The copy moves on only with what the person let stand: their word (no baseline yet), their agreement, or a new
-    // setting's file. A stray change keeps the copy from before it.
-    const copy = isSame && !isAsked ? was.copy : await copyOf(setting, seen, ref, env, now)
-    const next: Baseline = { session, setting, at: now, look, copy }
+    // The copies move on only with what the person let stand: their word, or their agreement, sets them afresh. A
+    // stray change keeps them; a file the turn had not watched yet gets one of what it holds now, marked as later.
+    const copies: Record<string, Kept> = {}
+    if (was && !isAsked) {
+      for (const [key, kept] of Object.entries(was.copies ?? {})) {
+        const ok = keptOf(kept, env)
+        if (ok) copies[key] = ok
+      }
+    }
+    if (isFileSetting(setting) && !copies[fileKey(setting.file)]) {
+      copies[fileKey(setting.file)] = { copy: await copyOf(setting, seen, ref, env, now), since: isStart || isAsked ? 'start' : 'later' }
+    }
+    const next: Baseline = { session, setting, at: now, look, copies }
     await writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`)
     if (!was || isAsked) return null
-    if (!isSame) return { at: now, by: session, repo: ref.path, change: 'setting', was: was.setting, now: setting, copy: was.copy }
-    if (!change || !isFileSetting(setting)) return null
+    if (!isSame) {
+      const old = isFileSetting(was.setting) ? copies[fileKey(was.setting.file)] : undefined
 
-    return { at: now, by: session, repo: ref.path, change, file: setting.file, from: setting.from, copy: was.copy }
+      return { at: now, by: session, repo: ref.path, change: 'setting', was: was.setting, now: setting, copy: old?.copy ?? null, since: old?.since }
+    }
+    if (!change || !isFileSetting(setting)) return null
+    const mine = copies[fileKey(setting.file)]
+
+    return { at: now, by: session, repo: ref.path, change, file: setting.file, from: setting.from, copy: mine?.copy ?? null, since: mine?.since }
   })
   if (isStart) await sweep(env, now).catch(() => {})
   if (!alert) return null
@@ -300,13 +339,15 @@ function settingWords(setting: GuidelinesSetting): string {
  */
 export function alertText(alert: GuidelinesAlert, when?: string): string {
   if (alert.change === 'setting') {
-    const fix = ct('guidelines.fix.setting', { repo: alert.repo }) + (alert.copy ? ct('guidelines.fix.settingCopy', { copy: alert.copy }) : '')
+    const old = isFileSetting(alert.was) ? alert.was.file : ''
+    const copy = alert.copy ? ct(alert.since === 'later' ? 'guidelines.fix.settingCopyLater' : 'guidelines.fix.settingCopy', { copy: alert.copy, file: old }) : ''
+    const fix = ct('guidelines.fix.setting', { repo: alert.repo }) + copy
     const words = { was: settingWords(alert.was), now: settingWords(alert.now), fix }
 
     return when === undefined ? ct('guidelines.settingAlert', words) : ct('board.guidelinesSettingAlert', { ...words, when, by: alert.by })
   }
   // The copy from when the person last let the file stand; for a project's file, also where to see its history in git.
-  let fix = alert.copy ? ct('guidelines.fix.copy', { copy: alert.copy, file: alert.file }) : ct('guidelines.fix.noCopy')
+  let fix = alert.copy ? ct(alert.since === 'later' ? 'guidelines.fix.copyLater' : 'guidelines.fix.copy', { copy: alert.copy, file: alert.file }) : ct('guidelines.fix.noCopy')
   // Each language's sentence carries its own spacing (the English one starts with a space).
   if (alert.from === 'project') fix += historyOf(alert.repo, alert.file)
   const words = { file: alert.file, what: ct(`guidelines.what.${alert.change}`), fix }

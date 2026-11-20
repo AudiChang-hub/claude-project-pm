@@ -243,10 +243,10 @@ for (const lang of LANGS) {
      * The warning the model is told, word for word: `copy` is the read-only copy it points at (copyOf), or null when there
      * was nothing to copy; a project's file also gets its git history.
      */
-    const warning = async (change: string, file: string, copy: string | null) => {
+    const warning = async (change: string, file: string, copy: string | null, later = false) => {
       const ref = (await resolveProject(w.repo))!
       const rel = relative(ref.path, file)
-      let fix = copy ? ct('guidelines.fix.copy', { copy, file }) : ct('guidelines.fix.noCopy')
+      let fix = copy ? ct(later ? 'guidelines.fix.copyLater' : 'guidelines.fix.copy', { copy, file }) : ct('guidelines.fix.noCopy')
       // Only a name of plain characters goes into a command (T-39 QA4 1).
       const name = rel.replace(/\\/g, '/')
       if (!rel.startsWith('..')) fix += /^[A-Za-z0-9._/ -]+$/.test(name) ? ct('guidelines.fix.history', { repo: ref.path, rel: name }) : ct('guidelines.fix.historyPlain')
@@ -498,9 +498,11 @@ for (const lang of LANGS) {
       return ct('guidelines.setting.unreadable', { reason: ct(`guidelines.reason.${s.reason}` as Parameters<typeof ct>[0]) })
     }
     /** The setting warning the model is told, word for word. */
-    const settingWarning = async (was: Setting, now: Setting, copy: string | null) => {
+    /** `copy`: the old file's copy, from when the person spoke, or taken later in the turn (`later`). */
+    const settingWarning = async (was: Setting, now: Setting, copy: string | null, later = false) => {
       const ref = (await resolveProject(w.repo))!
-      const fix = ct('guidelines.fix.setting', { repo: ref.path }) + (copy ? ct('guidelines.fix.settingCopy', { copy }) : '')
+      const file = 'file' in was ? was.file : ''
+      const fix = ct('guidelines.fix.setting', { repo: ref.path }) + (copy ? ct(later ? 'guidelines.fix.settingCopyLater' : 'guidelines.fix.settingCopy', { copy, file }) : '')
 
       return ct('guidelines.settingAlert', { was: settingWords(was), now: settingWords(now), fix })
     }
@@ -522,7 +524,8 @@ for (const lang of LANGS) {
       assert.equal(said(await bash(NOW + 3000)), await settingWarning({ from: 'none' }, { from: 'user', file: mine }, null))
       assert.equal(readFileSync(mine, 'utf8'), 'my notes, again\n')
       writeFileSync(mine, 'changed\n')
-      assert.equal(said(await bash(NOW + 4000)), await warning('changed', mine, copyOf('my notes, again\n')))
+      // Still the copy from when the person spoke, not the text written while off, which nobody agreed to (T-39 QA4 2).
+      assert.equal(said(await bash(NOW + 4000)), await warning('changed', mine, copyOf(RULES)))
       assert.equal((await attention()).length, 3)
       // Turned off in a turn where the person asked about the guidelines: not warned.
       await speak(lang === 'en' ? '/pm guidelines off' : '/pm 準則 關掉', NOW + 5000)
@@ -545,8 +548,33 @@ for (const lang of LANGS) {
       writeFileSync(guidelines(), 'still free\n')
       assert.equal(said(await bash(NOW + 2000)), '')
       writeFileSync(join(w.repo, 'RULES.md'), 'changed\n')
-      assert.equal(said(await bash(NOW + 3000)), await warning('changed', join(w.repo, 'RULES.md'), copyOf('1. Rules elsewhere.\n')))
+      assert.equal(said(await bash(NOW + 3000)), await warning('changed', join(w.repo, 'RULES.md'), copyOf('1. Rules elsewhere.\n'), true))
       assert.equal(readFileSync(guidelines(), 'utf8'), 'still free\n')
+    })
+
+    test('given up and taken back in one turn (git rm --cached, git add): a later change points at the copy from when the person spoke (T-39 QA4 2)', async () => {
+      await projectRules()
+      await speak(other, NOW)
+      git(w.repo, 'rm', '-q', '--cached', 'GUIDELINES.md')
+      writeFileSync(guidelines(), 'while not tracked\n')
+      assert.equal(said(await bash(NOW + 1000)), await settingWarning(projectFile(), { from: 'none' }, copyOf(RULES)))
+      git(w.repo, 'add', 'GUIDELINES.md')
+      assert.equal(said(await bash(NOW + 2000)), await settingWarning({ from: 'none' }, projectFile(), null))
+      writeFileSync(guidelines(), 'changed again\n')
+      const out = said(await bash(NOW + 3000))
+      assert.equal(out, await warning('changed', guidelines(), copyOf(RULES)))
+      assert.ok(!out.includes(copyOf('while not tracked\n')), out)
+      // Restored as the warning says: the file as the person last left it.
+      writeFileSync(guidelines(), readFileSync(copyOf(RULES)))
+      assert.equal(readFileSync(guidelines(), 'utf8'), RULES)
+      // An agreed turn starts afresh: the copy is what the file holds then.
+      await speak(asks, NOW + 4000)
+      writeFileSync(guidelines(), `${RULES}2. Agreed.\n`)
+      assert.equal(said(await bash(NOW + 5000)), '')
+      await speak(other, NOW + 6000)
+      // -f: the index holds a version neither the file nor HEAD has (added, never committed, then changed).
+      git(w.repo, 'rm', '-q', '-f', '--cached', 'GUIDELINES.md')
+      assert.equal(said(await bash(NOW + 7000)), await settingWarning(projectFile(), { from: 'none' }, copyOf(`${RULES}2. Agreed.\n`)))
     })
 
     test('git rm, git rm --cached or git mv of the project\'s guidelines file is warned about, file left as it is (T-39 QA3 1)', async () => {
@@ -592,7 +620,7 @@ for (const lang of LANGS) {
       assert.equal(out, await settingWarning(projectFile(), projectFile('README.md'), copyOf(RULES)))
       // …then drops the setting.
       writeFileSync(settings, JSON.stringify({}))
-      assert.equal(said(await step('PostToolUse', { tool_name: 'Write', tool_input: { file_path: settings }, tool_response: {} }, NOW + 2000)), await settingWarning(projectFile('README.md'), { from: 'none' }, copyOf('# Acme Shop\n')))
+      assert.equal(said(await step('PostToolUse', { tool_name: 'Write', tool_input: { file_path: settings }, tool_response: {} }, NOW + 2000)), await settingWarning(projectFile('README.md'), { from: 'none' }, copyOf('# Acme Shop\n'), true))
       // Not JSON any more: it cannot be read.
       writeFileSync(settings, JSON.stringify({ guidelines: 'GUIDELINES.md' }))
       await speak(other, NOW + 3000)
