@@ -5,7 +5,7 @@
 import { execFile } from 'node:child_process'
 import { statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { plainLocalPath } from './localpath'
 
@@ -17,10 +17,28 @@ export type Run = (argv: string[], cwd: string, timeoutMs?: number) => Promise<s
 
 const MAX_BUFFER = 16 * 1024 * 1024
 
+/**
+ * Windows looks for a program named without a folder (git, gh, claude, and inside a batch file node, ping) in the
+ * current folder before PATH, unless NoDefaultCurrentDirectoryInExePath is set in the environment of the process that
+ * starts it; Node asks Windows the same for every program it starts. The current folder is often the person's
+ * repository, which could hold a git.exe or a node.cmd of its own (T-39 QA8; Claude Code's own shell sets the
+ * variable, which hid this). Set in this process before anything is started, so every program started, and every one
+ * those start, has it.
+ */
+export function noProgramsFromCurrentFolder(): void {
+  if (process.platform === 'win32') process.env.NoDefaultCurrentDirectoryInExePath = '1'
+}
+
+/** Windows' own cmd.exe, by its full path: never one in the current folder, nor one ComSpec names. */
+export function systemCmd(): string {
+  return join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32', 'cmd.exe')
+}
+
 export const run: Run = (argv, cwd, timeoutMs = GIT_TIMEOUT_MS) =>
   new Promise(resolve => {
     const [command, ...args] = argv
     if (!command) return resolve(null)
+    noProgramsFromCurrentFolder()
     try {
       execFile(command, args, { cwd, timeout: timeoutMs, windowsHide: true, maxBuffer: MAX_BUFFER, encoding: 'utf8' }, (err, stdout) => {
         if (!err) return resolve(String(stdout).trim())
@@ -65,8 +83,12 @@ function batchOnPath(command: string): string | null {
 const isCmdSafe = (text: string) => !/["%!\u0000-\u001f]/.test(text) && !text.endsWith('\\')
 
 /**
- * Runs a batch file through cmd.exe: each argument quoted, and only when every one of them, and the file's own path,
- * is read by cmd.exe as given (isCmdSafe); otherwise nothing runs, as for a command not found.
+ * Runs a batch file through Windows' own cmd.exe: each argument quoted, and only when every one of them, and the
+ * file's own path, is read by cmd.exe as given (isCmdSafe); otherwise nothing runs, as for a command not found. It runs
+ * in the batch file's own folder, not the repository: the commands it serves (claude --version, claude mcp get, add,
+ * remove and list) are about the person's user-level setting, and none needs the repository's folder; and with
+ * NoDefaultCurrentDirectoryInExePath set (noProgramsFromCurrentFolder) the `node` an npm batch file names is never
+ * looked for in the current folder either (T-39 QA8).
  */
 function runBatch(file: string, args: string[], cwd: string, timeoutMs: number): Promise<string | null> {
   if (![file, ...args].every(isCmdSafe)) return Promise.resolve(null)
@@ -74,7 +96,8 @@ function runBatch(file: string, args: string[], cwd: string, timeoutMs: number):
 
   return new Promise(resolve => {
     // /d: no AutoRun commands; /v:off: no delayed expansion; /s /c "…": the outer quotes are taken off, the rest kept.
-    execFile(process.env.ComSpec || 'cmd.exe', ['/d', '/v:off', '/s', '/c', `"${line}"`], { cwd, timeout: timeoutMs, windowsHide: true, windowsVerbatimArguments: true, maxBuffer: MAX_BUFFER, encoding: 'utf8' }, (err, stdout) =>
+    noProgramsFromCurrentFolder()
+    execFile(systemCmd(), ['/d', '/v:off', '/s', '/c', `"${line}"`], { cwd: dirname(file), env: { ...process.env, NoDefaultCurrentDirectoryInExePath: '1' }, timeout: timeoutMs, windowsHide: true, windowsVerbatimArguments: true, maxBuffer: MAX_BUFFER, encoding: 'utf8' }, (err, stdout) =>
       resolve(err ? null : String(stdout).trim()),
     )
   })
