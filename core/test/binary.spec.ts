@@ -83,7 +83,11 @@ for (const lang of LANGS) {
       assert.ok(readFileSync(join(repo, '.git', 'hooks', 'pre-push'), 'utf8').includes('check pre-push'))
       assert.ok(existsSync(join(repo, '.git', 'hooks', 'pre-push.local')))
       assert.ok(existsSync(join(repo, '.github', 'workflows', 'project-pm-qa.yml')))
-      if (hasClaude) assert.equal(spawnSync('claude', ['mcp', 'get', 'project-pm'], { env, encoding: 'utf8', windowsHide: true, shell: process.platform === 'win32' }).status, 0)
+      if (hasClaude) {
+        // On failure, what Claude Code and init said (CI run 44723838413 showed only 1 !== 0).
+        const got = spawnSync('claude', ['mcp', 'get', 'project-pm'], { env, encoding: 'utf8', windowsHide: true, shell: process.platform === 'win32' })
+        assert.equal(got.status, 0, `claude mcp get project-pm:\n${got.stdout}\n${got.stderr}\ninit --yes --ci said:\n${done.stdout}\n${done.stderr}`)
+      }
       const skip = spawnSync('git', ['pm', 'skip', 'Acme docs only'], { cwd: repo, env, encoding: 'utf8', windowsHide: true })
       assert.equal(skip.status, 0, skip.stderr)
       const gone = pm('uninstall', '--yes')
@@ -91,7 +95,10 @@ for (const lang of LANGS) {
       assert.deepEqual(snapshot(home, repo), before)
       assert.ok(!existsSync(join(home, '.project-pm', 'install-log.json')))
       assert.ok(!existsSync(join(home, '.project-pm', 'bin')) || readdirSync(join(home, '.project-pm', 'bin')).length === 0)
-      if (hasClaude) assert.notEqual(spawnSync('claude', ['mcp', 'get', 'project-pm'], { env, encoding: 'utf8', windowsHide: true, shell: process.platform === 'win32' }).status, 0)
+      if (hasClaude) {
+        const left = spawnSync('claude', ['mcp', 'get', 'project-pm'], { env, encoding: 'utf8', windowsHide: true, shell: process.platform === 'win32' })
+        assert.notEqual(left.status, 0, `claude mcp get project-pm after uninstall:\n${left.stdout}\n${left.stderr}\nuninstall --yes said:\n${gone.stdout}\n${gone.stderr}`)
+      }
     })
   })
 }
