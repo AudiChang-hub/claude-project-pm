@@ -72,6 +72,10 @@ const zhTW = {
   'push.noProject': 'Project PM 判斷不出這是哪個專案（git 沒有回答，或回答得太慢），這次 push 沒有檢查就通過了，看板上也不會記錄。請確認這次上傳的改動有沒有驗收。',
   'push.notChecked': 'Project PM 這次沒辦法完整檢查（{reason}），先讓 push 通過。看板會把這件事列在「需要處理」，請確認這次上傳的改動有沒有驗收。',
   'board.pushNotChecked': '[push 時沒檢查到] {when} 的 push，Project PM 沒辦法檢查（{reason}），改動直接上傳了。請確認它們有沒有驗收。',
+  'board.guidelinesRestored': '[準則被改動，已還原] {when}，使用者沒有要求修改準則，開發準則檔 {file} 卻被改了（工作階段 {by}）。Project PM 已把它還原成原本的內容；被改掉的版本存在 {backup}。請確認是誰改的、要不要採用。',
+  'board.guidelinesChanged': '[準則被改動，無法還原] {when}，使用者沒有要求修改準則，開發準則檔 {file} 卻被改了（工作階段 {by}）。它所在的資料夾已經不是一般的本機路徑，Project PM 沒有寫回去；被改掉的版本存在 {backup}。請手動檢查並還原。',
+  'guidelines.restored': '開發準則檔（{file}）在使用者沒有要求修改準則的情況下被改動了，Project PM 已把它還原成原本的內容；被改掉的版本存在 {backup}。準則只有在使用者明確要求時才能改：請先問使用者要不要改、改哪一條，不要再用其他方式改它。',
+  'guidelines.changed': '開發準則檔（{file}）在使用者沒有要求修改準則的情況下被改動了，而且無法自動還原（它所在的資料夾已不是一般的本機路徑）；被改掉的版本存在 {backup}。請告訴使用者這件事，並請使用者確認準則內容。',
   'skip.recorded': '已記錄：{code} 在 {sha} 略過驗收，理由「{reason}」。現在可以 push 了，看板上會顯示這筆略過。',
   'skip.recordedNew': '已記錄：新增 {code}（未登記的 push），在 {sha} 略過驗收，理由「{reason}」。現在可以 push 了，看板上會顯示這筆略過。',
   'agents.section': `## Project PM
@@ -232,6 +236,10 @@ What you can do:
   'push.noProject': 'Project PM could not tell which project this is (git did not answer, or not in time), so this push went through unchecked, and the board will not show it. Make sure what was pushed got checked.',
   'push.notChecked': 'Project PM could not fully check this push ({reason}), so it goes through. The board lists it under Needs attention: make sure what was pushed got checked.',
   'board.pushNotChecked': '[push not checked] Project PM could not check the push of {when} ({reason}); the changes went up as they were. Make sure they got checked.',
+  'board.guidelinesRestored': '[guidelines changed, restored] At {when} the development guidelines file {file} was changed though the user had not asked to change the guidelines (session {by}). Project PM put it back as it was; the changed version is kept at {backup}. Check who changed it and whether to take the change.',
+  'board.guidelinesChanged': '[guidelines changed, not restored] At {when} the development guidelines file {file} was changed though the user had not asked to change the guidelines (session {by}). Its folder is no longer a plain local path, so Project PM did not write it back; the changed version is kept at {backup}. Check and restore it by hand.',
+  'guidelines.restored': 'The development guidelines file ({file}) was changed though the user had not asked to change the guidelines; Project PM put it back as it was, and kept the changed version at {backup}. The guidelines change only when the user explicitly asks: ask the user whether to change them, and which rule; do not change the file any other way.',
+  'guidelines.changed': 'The development guidelines file ({file}) was changed though the user had not asked to change the guidelines, and could not be put back (its folder is no longer a plain local path); the changed version is kept at {backup}. Tell the user, and ask them to check the guidelines.',
   'skip.recorded': 'Recorded: {code} skips QA at {sha}, because "{reason}". You can push now; the board shows the skip.',
   'skip.recordedNew': 'Recorded: added {code} (an unregistered push), skipping QA at {sha}, because "{reason}". You can push now; the board shows the skip.',
   'agents.section': `## Project PM

@@ -80,7 +80,7 @@ export async function withLock<T>(file: string, fn: () => Promise<T>): Promise<T
 }
 
 /** Writes `text` to a temporary file beside `file` and renames it over `file`: a reader sees the old file or the new one. */
-export async function writeAtomic(file: string, text: string) {
+export async function writeAtomic(file: string, text: string | Uint8Array) {
   await mkdir(dirname(file), { recursive: true })
   const temp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
   try {

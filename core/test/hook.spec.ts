@@ -3,12 +3,13 @@
  * 2026-11-19; the folders swapped for the Acme demo's): what each writes to the session's record, and what it says.
  */
 import assert from 'node:assert/strict'
-import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
 import { t } from '../../hooks/messages'
 import { runHook } from '../src/hook'
+import { ct } from '../src/messages'
 import type { HookInput } from '../src/hook'
 import { loadActor } from '../src/store'
 import { boardTool, pmTool, reportTool } from '../src/tools'
@@ -194,6 +195,68 @@ for (const lang of LANGS) {
       } finally {
         fs.restore()
       }
+    })
+
+    const RULES = '1. Tests first.\n'
+    const guidelines = () => join(w.repo, 'GUIDELINES.md')
+    const said = (out: unknown) => (out as { hookSpecificOutput?: { additionalContext?: string } } | null)?.hookSpecificOutput?.additionalContext ?? ''
+
+    test('a change to the guidelines the person did not ask for is put back after the tool, kept aside, and listed on the board (T-39)', async () => {
+      await lockGuidelines()
+      await hook('UserPromptSubmit', { prompt: lang === 'en' ? 'Add a coupon field' : '加一個折扣碼欄位' })
+      // A shell command the lock cannot see rewrites the file.
+      writeFileSync(guidelines(), '1. Tests are optional.\n')
+      const out = await hook('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'echo ... > GUIDELINES.md' }, tool_response: {} })
+      assert.equal(readFileSync(guidelines(), 'utf8'), RULES)
+      const kept = readdirSync(join(w.env.PROJECT_PM_HOME!, 'guidelines', 'changed'))
+      assert.equal(kept.length, 1)
+      const backup = join(w.env.PROJECT_PM_HOME!, 'guidelines', 'changed', kept[0]!)
+      assert.equal(readFileSync(backup, 'utf8'), '1. Tests are optional.\n')
+      assert.equal(said(out), ct('guidelines.restored', { file: realpathSync.native(guidelines()), backup }))
+      // The board's attention section says so, in the person's language.
+      const board = await boardTool(w.ctx(), {})
+      const line = (board.structured as { attention: { text: string }[] }).attention.map(a => a.text).find(text => text.includes(realpathSync.native(guidelines())))
+      assert.ok(line?.startsWith(ct('board.guidelinesRestored', { when: '', file: '', by: '', backup: '' }).slice(0, 8)), board.text)
+      assert.ok(line?.includes(ID) && line.includes(backup), line)
+      // Deleted outright: back again.
+      rmSync(guidelines())
+      await hook('PostToolUse', { tool_name: 'PowerShell', tool_input: { command: 'Remove-Item GUIDELINES.md' }, tool_response: {} })
+      assert.equal(readFileSync(guidelines(), 'utf8'), RULES)
+      // The snapshot and the kept text live in the person's data folder; the repository gains nothing.
+      assert.ok(existsSync(join(w.env.PROJECT_PM_HOME!, 'guidelines')))
+      assert.equal(git(w.repo, 'status', '--porcelain', '--untracked-files=all').split('\n').filter(l => l && !/GUIDELINES\.md|\.project-pm\.json/.test(l)).join('\n'), '')
+    })
+
+    test('a change the person asked for stands, and becomes what later tools are checked against (T-39)', async () => {
+      await lockGuidelines()
+      await hook('UserPromptSubmit', { prompt: lang === 'en' ? 'Please update the guidelines: add rule 2' : '請改準則，加第二條' })
+      writeFileSync(guidelines(), `${RULES}2. Small commits.\n`)
+      assert.equal(said(await hook('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: guidelines() }, tool_response: {} })), '')
+      assert.equal(readFileSync(guidelines(), 'utf8'), `${RULES}2. Small commits.\n`)
+      // Next turn, not about the guidelines: the asked-for text is what a stray change goes back to.
+      await hook('UserPromptSubmit', { prompt: lang === 'en' ? 'Fix the checkout bug' : '修結帳的 bug' })
+      writeFileSync(guidelines(), 'nothing\n')
+      await hook('PostToolUse', { tool_name: 'Write', tool_input: { file_path: guidelines() }, tool_response: {} })
+      assert.equal(readFileSync(guidelines(), 'utf8'), `${RULES}2. Small commits.\n`)
+    })
+
+    test('the person\'s own edit between turns stands; a notification waking the turn does not make a change stand (T-39)', async () => {
+      await lockGuidelines()
+      await hook('UserPromptSubmit', { prompt: lang === 'en' ? 'Add a coupon field' : '加一個折扣碼欄位' })
+      // The person edits the file in their editor, then speaks.
+      writeFileSync(guidelines(), `${RULES}2. Mine.\n`)
+      await hook('UserPromptSubmit', { prompt: lang === 'en' ? 'Carry on' : '繼續' })
+      await hook('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_response: {} })
+      assert.equal(readFileSync(guidelines(), 'utf8'), `${RULES}2. Mine.\n`)
+      // Something changes it, then a notification (not the person) starts a turn: the change is still undone.
+      writeFileSync(guidelines(), 'nothing\n')
+      await hook('UserPromptSubmit', { prompt: '<task-notification>done</task-notification>' })
+      await hook('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: {} })
+      assert.equal(readFileSync(guidelines(), 'utf8'), `${RULES}2. Mine.\n`)
+      // A tool that writes no file does not check.
+      writeFileSync(guidelines(), 'nothing\n')
+      await hook('PostToolUse', { tool_name: 'TodoWrite', tool_input: { todos: [] }, tool_response: {} })
+      assert.equal(readFileSync(guidelines(), 'utf8'), 'nothing\n')
     })
 
     test('TaskCreate and TaskUpdate (Claude Code 2.1.326) and TodoWrite keep the task list', async () => {

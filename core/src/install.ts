@@ -26,7 +26,7 @@ export const END = '<!-- project-pm:end -->'
 /** The marker of the files init writes whole in a language with # comments (the git hook, the CI workflow). */
 export const SH_START = '# project-pm:start v1'
 /** Claude Code's events the core's hooks answer, and the tools each one is about ('' is every tool). */
-export const HOOK_EVENTS = { UserPromptSubmit: '', PreToolUse: 'Edit|MultiEdit|Write|NotebookEdit', PostToolUse: 'TodoWrite|TaskCreate|TaskUpdate|Bash', Stop: '' } as const
+export const HOOK_EVENTS = { UserPromptSubmit: '', PreToolUse: 'Edit|MultiEdit|Write|NotebookEdit', PostToolUse: 'TodoWrite|TaskCreate|TaskUpdate|Bash|PowerShell|Edit|MultiEdit|Write|NotebookEdit', Stop: '' } as const
 /** Codex reads 32 KiB of the AGENTS.md chain at most (X2): past this, the section shrinks to one line. */
 export const AGENTS_LIMIT = 28 * 1024
 /** The section's own budget (5.3). */

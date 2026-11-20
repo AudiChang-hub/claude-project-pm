@@ -15,6 +15,7 @@ import { t } from '../../hooks/messages'
 import { clip, finishedTasks, planFromTodos } from '../../hooks/sessions'
 import type { BackgroundTask, Step } from '../../types'
 import type { Run } from './host'
+import { GUARDED_TOOLS, checkGuidelines, keepGuidelines } from './guard'
 import { dataHome, run as hostRun } from './host'
 import { NotPlainPathError, localRealpath, plainLocalPath } from './localpath'
 import { ct } from './messages'
@@ -59,7 +60,7 @@ export async function runHook(tool: string, event: string, input: HookInput, env
       return promptSubmit(id, ref, input, env, now, base, run)
     case 'PostToolUse':
       await postToolUse(id, input, env, now, base)
-      return null
+      return guardAfter(id, ref, input, env, now)
     case 'PreToolUse':
       return preToolUse(id, ref, input, env, run)
     case 'Stop':
@@ -100,6 +101,9 @@ async function promptSubmit(id: string, ref: ProjectRef, input: HookInput, env: 
   const isPm = project.pmId === id
   if (!isPm && !project.isDismissed) parts.push(t('role.delivery', { project: ref.name, tool: REPORT_TOOL }), ct('hook.actorHint', { actor: id }))
   const found = await readGuidelines(ref, env, run)
+  // The person speaking lets the guidelines stand as they are now (their own edit between turns included): the
+  // snapshot later writes are checked against (guard.ts). A notification waking the turn is not the person.
+  if (isOwn && found && 'real' in found) await keepGuidelines(ref, found.real, env, now).catch(() => {})
   if (found && 'text' in found) {
     parts.push(t('guidelines.section', { file: found.file, project: ref.name }))
     if (isPm) parts.push(t('guidelines.pm'))
@@ -166,6 +170,22 @@ async function postToolUse(id: string, input: HookInput, env: NodeJS.ProcessEnv,
       return { ...next, background: [...(next.background ?? []).filter(b => b.id !== taskId), task] }
     }, env)
   }
+}
+
+/**
+ * After a tool that can write (T-39 2): the guidelines file compared with its snapshot. Changed without the person
+ * asking about the guidelines this turn, it is put back (guard.ts) and the model told; asked about, the change stands.
+ */
+async function guardAfter(id: string, ref: ProjectRef, input: HookInput, env: NodeJS.ProcessEnv, now: number): Promise<HookOutput> {
+  if (!GUARDED_TOOLS.has(input.tool_name ?? '')) return null
+  const project = await loadProject(ref, env)
+  if (!project.pmId) return null
+  const actor = (await loadActor(id, env).catch(() => null)) as HookActor | null
+  const restore = await checkGuidelines(ref, id, !!actor?.askedGuidelinesAt, env, now).catch(() => null)
+  if (!restore) return null
+  const said = restore.isRestored ? ct('guidelines.restored', { file: restore.file, backup: restore.backup ?? '-' }) : ct('guidelines.changed', { file: restore.file, backup: restore.backup ?? '-' })
+
+  return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: said } }
 }
 
 async function stop(id: string, input: HookInput, env: NodeJS.ProcessEnv, now: number, base: (old: Actor | null) => HookActor) {
