@@ -9,7 +9,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark-zh-TW.png">
-  <img src="docs/images/hero-light-zh-TW.png" alt="Claude Code 桌面版（示範資料）：問 PM 有沒有漏掉的工作，PM 讀看板後列出等你回覆的、CI 失敗的、沒做完的和待 QA 的；右邊是看板。" width="100%">
+  <img src="docs/images/hero-light-zh-TW.png" alt="Claude Code 桌面版（示範資料）：問 PM 有沒有漏掉的工作，PM 讀看板後列出等你回覆的、CI 失敗的、沒做完的和待 QA 的；右邊是桌面版的看板面板。" width="100%">
 </picture>
 
 <p align="center">
@@ -96,11 +96,11 @@ v0.9.x（QA 關卡、額度優先派工）：[CHANGELOG](CHANGELOG.md)
 | `/pm lang en`・`zh-TW`・`auto` | 看板和 PM 的語言；`auto` 跟隨系統 |
 | `/pm guidelines <檔案>`・`off` | 讓 PM 和各 Session 遵守你的開發準則 |
 
-在 CLI 裡，請 Claude 擔任 PM；`project-pm open` 會在瀏覽器打開看板：
+**兩種看板。** Claude Code 桌面版：看板在右側面板（最上面那張）。Claude Code CLI：請 Claude 擔任 PM，再執行 `project-pm open`，在瀏覽器開這個網頁看板：
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/web-board-dark-zh-TW.png">
-  <img src="docs/images/web-board-light-zh-TW.png" alt="網頁看板（示範資料）：12 項工作完成 6 項；「需要處理」列出待回覆、CI 失敗、未完成、待發布和待 QA；旁邊是每個 Session 的狀態。" width="100%">
+  <img src="docs/images/web-board-light-zh-TW.png" alt="CLI 的網頁看板（示範資料）：12 項完成 6 項；「需要處理」列出待回覆、CI 失敗、未完成、待發布和待 QA。" width="100%">
 </picture>
 
 ## 需求

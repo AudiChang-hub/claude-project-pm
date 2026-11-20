@@ -22,7 +22,7 @@ README 背後的細節：每個狀態的意思、PM 怎麼判斷工作有沒有�
 | 已結束／長期閒置 | 沒有待辦；超過 3 天沒活動為長期閒置。預設收合。 |
 
 <p align="center">
-  <img src="images/how-states-zh-TW.png" alt="示範專案看板上的 Session 卡片，最需要處理的在最前面：待回覆（附上問題）、CI 失敗、額度用完・3pm 後可續、未完成（附上停在哪一步）、待發布、等待 CI。" width="420">
+  <img src="images/how-states-zh-TW.png" alt="桌面版看板面板上的 Session 卡片（示範專案），最需要處理的在最前面：待回覆（附上問題）、CI 失敗、額度用完・3pm 後可續、未完成（附上停在哪一步）、待發布、等待 CI。" width="420">
 </p>
 
 上方是完成率圓環與三項指標（執行中、待回覆、尚未完成：未完成、等待 CI、CI 失敗、待發布），可切換「本專案／全部」。
@@ -36,7 +36,7 @@ README 背後的細節：每個狀態的意思、PM 怎麼判斷工作有沒有�
 **結案前要過 QA。** 工作項目可以附上驗收條件和 QA 結果。沒有 QA 通過，或沒有寫明原因的略過，ledger 就不讓它結案；驗收的人不能是負責人自己。程式改動 push 之前，PM 會派一個獨立的 QA Agent，只給它 diff 和驗收條件。「需要處理」會列出待 QA（負責人已交付、還沒有驗收紀錄）和 QA 不通過的工作項目，每個工作項目也會標出 QA 狀態。在 CLI 裡，git 的 pre-push hook 也會擋下沒過 QA 的 commit。
 
 <p align="center">
-  <img src="images/how-qa-zh-TW.png" alt="示範專案的網頁看板：「需要處理」列出 T-08 QA 不通過（附驗收者的說明）和 T-12 待 QA；工作項目分別標著 QA 通過、QA 不通過、待 QA。" width="640">
+  <img src="images/how-qa-zh-TW.png" alt="CLI 的網頁看板（示範專案）：「需要處理」列出 T-08 QA 不通過（附驗收者的說明）和 T-12 待 QA；工作項目分別標著 QA 通過、QA 不通過、待 QA。" width="640">
 </p>
 
 **收尾摘要的未完成事項。** 摘要寫到「尚未部署」「還沒提交」「not yet deployed」「still needs」這類字眼時列為「需追蹤」；「沒有任何未提交的修改」這種表示已經做完的雙重否定不算。
@@ -98,11 +98,11 @@ PM 有兩個專屬工具（不需要你自己呼叫）：
 
 ### 網頁看板（CLI）
 
-在 Claude Code 的 CLI 裡，看板是一個網頁。`project-pm open` 會在需要時啟動伺服器，並用瀏覽器打開；`project-pm serve` 則在終端機裡執行伺服器。看板只能看，只在你自己的電腦上（127.0.0.1）提供，要用它印出的連結裡的金鑰才打得開，閒置 30 分鐘會自動停止。上面有進度、需要處理的事、工作項目和它們的 QA，以及每個 Session 和它用的工具。`project-pm board` 會在終端機印出同一份看板。
+兩種看板，各配一種用法：Claude Code 桌面版的看板是對話旁邊的面板（`/board`，卡片的樣子見上方〈功能〉）；Claude Code CLI 的看板則是這個網頁，長得不一樣。`project-pm open` 會在需要時啟動伺服器，並用瀏覽器打開；`project-pm serve` 則在終端機裡執行伺服器。看板只能看，只在你自己的電腦上（127.0.0.1）提供，要用它印出的連結裡的金鑰才打得開，閒置 30 分鐘會自動停止。上面有進度、需要處理的事、工作項目和它們的 QA，以及每個 Session 和它用的工具。`project-pm board` 會在終端機印出同一份看板。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/web-board-dark-zh-TW.png">
-  <img src="images/web-board-light-zh-TW.png" alt="示範專案的網頁看板：12 項工作完成 6 項；「需要處理」列出待回覆、CI 失敗、未完成、待發布和待 QA；下方是工作項目，旁邊是每個 Session 的狀態。" width="100%">
+  <img src="images/web-board-light-zh-TW.png" alt="CLI 在瀏覽器打開的網頁看板（示範專案）：12 項工作完成 6 項；「需要處理」列出待回覆、CI 失敗、未完成、待發布和待 QA；下方是工作項目，旁邊是每個 Session 的狀態。" width="100%">
 </picture>
 
 ### 開發準則
@@ -115,7 +115,7 @@ PM 有兩個專屬工具（不需要你自己呼叫）：
 - **沒經你同意的修改會被警告**（CLI）。某一輪你沒有同意改準則，準則檔或準則設定卻變了，看板的「需要處理」會列出來，保留一週：什麼時候、哪個工作階段發現的，以及怎麼自己還原（你上一次說話時的唯讀備份，專案裡的準則檔另附 `git log -p` 指令）。Project PM 不會自動還原。
 
 <p align="center">
-  <img src="images/how-guidelines-zh-TW.png" alt="示範專案網頁看板的「需要處理」：準則檔 docs/GUIDELINES.md 在你沒有同意的情況下被改了，列出時間、發現的工作階段、唯讀備份的位置，以及查看 git 歷史的指令。" width="640">
+  <img src="images/how-guidelines-zh-TW.png" alt="CLI 網頁看板（示範專案）的「需要處理」：準則檔 docs/GUIDELINES.md 在你沒有同意的情況下被改了，列出時間、發現的工作階段、唯讀備份的位置，以及查看 git 歷史的指令。" width="640">
 </p>
 
 - 路徑可以是絕對路徑、`~/…`，或相對於各專案資料夾的路徑（例如 `docs/GUIDELINES.md`），讓每個專案各用自己的準則。

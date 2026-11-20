@@ -9,7 +9,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.png">
-  <img src="docs/images/hero-light.png" alt="Claude Code's desktop app with demo data: asked whether anything is slipping, the PM reads the board and lists what waits on you, a failed CI, unfinished work and an item awaiting QA; the board pane is beside it." width="100%">
+  <img src="docs/images/hero-light.png" alt="Claude Code's desktop app with demo data: asked whether anything is slipping, the PM reads the board and lists what waits on you, a failed CI, unfinished work and an item awaiting QA; on the right, the desktop app's board pane." width="100%">
 </picture>
 
 <p align="center">
@@ -96,11 +96,11 @@ Every status, how delivery is judged, development guidelines and what the mod ke
 | `/pm lang en` · `zh-TW` · `auto` | Board and PM language; `auto` follows your system. |
 | `/pm guidelines <file>` · `off` | Gives the PM and its sessions your development rules. |
 
-In the CLI, ask Claude to be the PM; `project-pm open` shows the board in your browser:
+**Two boards.** Claude Code desktop: the board is the pane on the right (the image at the top). Claude Code CLI: ask Claude to be the PM, then `project-pm open` opens this web board in your browser:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/web-board-dark.png">
-  <img src="docs/images/web-board-light.png" alt="The web board with demo data: 6 of 12 work items done; Needs attention lists waiting on you, CI failed, unfinished, not released and awaiting QA; each session's status beside it." width="100%">
+  <img src="docs/images/web-board-light.png" alt="The CLI's web board in a browser, demo data: 6 of 12 work items done; Needs attention lists waiting on you, CI failed, unfinished, not released and awaiting QA; each session's status beside it." width="100%">
 </picture>
 
 ## Requirements

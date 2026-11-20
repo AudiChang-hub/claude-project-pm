@@ -22,7 +22,7 @@ The details behind the README: what each status means, how the PM decides whethe
 | Ended (已結束) / Idle (長期閒置) | Nothing left; idle for more than 3 days. Hidden behind a toggle. |
 
 <p align="center">
-  <img src="images/how-states.png" alt="Session cards on the board for a demo project, most urgent first: Waiting on you with its question, CI failed, Usage limit · resumes after 3pm, Unfinished with the step it stopped on, Not released, and Waiting on CI." width="420">
+  <img src="images/how-states.png" alt="Session cards in the desktop app's board pane for a demo project, most urgent first: Waiting on you with its question, CI failed, Usage limit · resumes after 3pm, Unfinished with the step it stopped on, Not released, and Waiting on CI." width="420">
 </p>
 
 At the top: a completion ring and three counters (running, waiting on you, not finished: unfinished, waiting on CI, CI failed or not released). Switch between **this project** and **all projects**.
@@ -36,7 +36,7 @@ At the top: a completion ring and three counters (running, waiting on you, not f
 **QA before a work item closes.** A work item can carry acceptance criteria and a QA verdict. The ledger will not mark an item done without a passed QA, or a skip with its reason, and whoever checks it may not be its owner. Before a code change is pushed, the PM starts an independent QA agent given only the diff and the criteria. *Needs attention* lists items awaiting QA (their owner has delivered and there is no verdict) and items that failed QA, and each work item shows its QA. In the CLI, a git pre-push hook also holds commits no QA passed.
 
 <p align="center">
-  <img src="images/how-qa.png" alt="The web board for a demo project: Needs attention lists T-08 as QA failed, with the checker's note, and T-12 as awaiting QA; the work items show QA passed, QA failed and Awaiting QA." width="640">
+  <img src="images/how-qa.png" alt="The CLI's web board for a demo project: Needs attention lists T-08 as QA failed, with the checker's note, and T-12 as awaiting QA; the work items show QA passed, QA failed and Awaiting QA." width="640">
 </p>
 
 **Recaps that admit work is left.** A recap that says something is "not yet deployed", "not committed", "still needs…" (in English or Chinese) is flagged for follow-up. A Chinese double negative such as 沒有任何未提交的修改 ("there are no uncommitted changes") is not.
@@ -98,11 +98,11 @@ A project is the folder a session works in; a git worktree under `.claude/worktr
 
 ### Web board (CLI)
 
-In Claude Code's CLI the board is a web page. `project-pm open` starts its server when needed and opens it in your browser; `project-pm serve` runs the server in the terminal. It is read only, listens on your own computer only (127.0.0.1), needs the key in the link it prints, and stops after 30 minutes unused. It shows progress, what needs attention, the work items with their QA, and each session with the tool it runs in. `project-pm board` prints the same board in the terminal.
+Two boards, one for each way in. In the Claude Code desktop app the board is the pane beside your conversation (`/board`; its cards are shown under *Features* above). In Claude Code's CLI the board is this web page, which looks different. `project-pm open` starts its server when needed and opens it in your browser; `project-pm serve` runs the server in the terminal. It is read only, listens on your own computer only (127.0.0.1), needs the key in the link it prints, and stops after 30 minutes unused. It shows progress, what needs attention, the work items with their QA, and each session with the tool it runs in. `project-pm board` prints the same board in the terminal.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/web-board-dark.png">
-  <img src="images/web-board-light.png" alt="The web board for a demo project: 6 of 12 work items done; Needs attention lists waiting on you, CI failed, unfinished, not released and awaiting QA; the work items below, and each session's status beside them." width="100%">
+  <img src="images/web-board-light.png" alt="The CLI's web board in a browser, for a demo project: 6 of 12 work items done; Needs attention lists waiting on you, CI failed, unfinished, not released and awaiting QA; the work items below, and each session's status beside them." width="100%">
 </picture>
 
 ### Development guidelines
@@ -115,7 +115,7 @@ Point the `guidelines` option at a Markdown file of your own rules (how to commi
 - **A change you did not agree to is warned about** (CLI). If the guidelines file or setting changes in a turn where you did not agree to a guidelines change, the board lists it under *Needs attention* for a week: when, which session noticed it, and how to undo it yourself (a read-only copy of what the file held when you last spoke, and `git log -p` for a project's file). Project PM never puts the file back.
 
 <p align="center">
-  <img src="images/how-guidelines.png" alt="Needs attention on the web board for a demo project: the guidelines file docs/GUIDELINES.md was changed without your agreement, with the time, the session that noticed it, where the read-only copy is, and the git log command to see its history." width="640">
+  <img src="images/how-guidelines.png" alt="Needs attention on the CLI's web board for a demo project: the guidelines file docs/GUIDELINES.md was changed without your agreement, with the time, the session that noticed it, where the read-only copy is, and the git log command to see its history." width="640">
 </p>
 
 - The path may be absolute, `~/…`, or relative to each project's folder (`docs/GUIDELINES.md`), so every project can keep its own.
