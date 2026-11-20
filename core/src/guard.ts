@@ -17,15 +17,20 @@
  * emptied, deleted, made a link or pointed elsewhere, or no longer a plain local path, without the person agreeing to
  * a guidelines change this turn: it is listed on the board, attributed to the session that saw it and worded so as not
  * to say who did it (another session, or the person, may have). A new setting's file is never compared with the old
- * file: the baseline follows the setting. For the person's own file, a
- * read-only copy of what the baseline held is kept for them to copy back by hand; a project's file is in git.
+ * file: the baseline follows the setting.
+ *
+ * Each warning points at a read-only copy (~/.project-pm/guidelines/copies/<SHA-256>.md) of what the file held when
+ * the person last spoke in that session, or later agreed to a change, or the guidelines were set to that file: never of
+ * what a stray change left, so a second change in one turn points back to the same copy. git is no guide here: a change
+ * already added or committed is what `git checkout` would bring back. A project's file is copied only while it really
+ * is inside the repository (a link out of it, to a .env say, is not copied).
  *
  * What it cannot catch: a change made on purpose to get past it (running this hook by hand to take a new baseline,
  * deleting the baselines). It is a smoke alarm, not a lock.
  */
 import { createHash } from 'node:crypto'
-import { chmod, lstat, readFile, readdir, readlink, rm, stat } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { chmod, lstat, readFile, readdir, readlink, rm, stat, utimes } from 'node:fs/promises'
+import { isAbsolute, join, relative } from 'node:path'
 
 import { NotPlainPathError, localRealpath } from './localpath'
 import { ct } from './messages'
@@ -40,6 +45,12 @@ export const ALERT_SHOWN_MS = 7 * 24 * 60 * 60 * 1000
 
 /** A session's baseline unused this long is let go. */
 const BASELINE_KEPT_MS = 30 * 24 * 60 * 60 * 1000
+
+/** A copy no baseline has pointed at this long is let go: past any baseline, and any warning on the board. */
+const COPY_KEPT_MS = BASELINE_KEPT_MS + ALERT_SHOWN_MS
+
+/** How often old baselines and copies are looked for. */
+const SWEEP_EVERY_MS = 24 * 60 * 60 * 1000
 
 /** The tools after which the file is compared: every one that can write a file (the shells too). */
 export const GUARDED_TOOLS: ReadonlySet<string> = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell'])
@@ -73,7 +84,10 @@ type Look = {
   link: string | null
 }
 
-/** `look` is null when the setting names no file. */
+/**
+ * `look` is null when the setting names no file. `copy` is the read-only copy of what the file held when the person
+ * last spoke, agreed to a change, or the setting came to name it; it does not move with a change nobody agreed to.
+ */
 type Baseline = { session: string; setting: GuidelinesSetting; at: number; look: Look | null; copy: string | null }
 
 /** What happened to the file, in the words the board uses; `setting` when the setting itself changed. */
@@ -82,7 +96,7 @@ export type Change = 'changed' | 'emptied' | 'deleted' | 'linked' | 'unplain' | 
 /** A change of the file (`file`, `from`, `copy`), or of the setting (`was` and `now`). */
 export type GuidelinesAlert =
   | { at: number; by: string; repo: string; change: Change; file: string; from: FileSetting['from']; copy: string | null }
-  | { at: number; by: string; repo: string; change: 'setting'; was: GuidelinesSetting; now: GuidelinesSetting }
+  | { at: number; by: string; repo: string; change: 'setting'; was: GuidelinesSetting; now: GuidelinesSetting; copy?: string | null }
 
 const sha256 = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex')
 
@@ -148,30 +162,59 @@ function changeOf(was: Look, now: Look): Change | null {
 }
 
 /**
- * A read-only copy of the person's own guidelines, named by its SHA-256, in their data folder: what they can copy back
- * by hand. Never written over once there.
+ * A read-only copy of the guidelines, named by its SHA-256, in the person's data folder: what they can copy back by
+ * hand. Never written over once there; touched when used again, so the sweep keeps it.
  */
-async function keepCopy(bytes: Buffer, sha: string, env: NodeJS.ProcessEnv): Promise<string | null> {
+async function keepCopy(bytes: Buffer, sha: string, env: NodeJS.ProcessEnv, now: number): Promise<string | null> {
   const copy = join(home(env), 'copies', `${sha}.md`)
+  const isThere = () => stat(copy).then(() => true, () => false)
   try {
-    if (await stat(copy).then(() => true, () => false)) return copy
+    if (await isThere()) {
+      await utimes(copy, now / 1000, now / 1000).catch(() => {})
+
+      return copy
+    }
     await writeAtomic(copy, bytes)
     await chmod(copy, 0o444)
 
     return copy
   } catch {
     // Another session wrote the same copy at the same moment, or the folder cannot be written: it is there or it is not.
-    return (await stat(copy).then(() => true, () => false)) ? copy : null
+    return (await isThere()) ? copy : null
   }
 }
 
-/** Baselines no session has used in a month: the sessions are long gone. */
-async function dropOldBaselines(env: NodeJS.ProcessEnv, now: number): Promise<void> {
-  const folder = join(home(env), 'sessions')
-  for (const name of await readdir(folder).catch(() => [] as string[])) {
-    if (!name.endsWith('.json')) continue
-    const at = await stat(join(folder, name)).then(s => s.mtimeMs, () => now)
-    if (now - at > BASELINE_KEPT_MS) await rm(join(folder, name), { force: true })
+/** Whether `real` is inside the repository's folder as it really is, and not in .git. */
+async function isInRepo(real: string, repo: string): Promise<boolean> {
+  const where = await localRealpath(repo).catch(() => null)
+  if (!where) return false
+  const rel = relative(where, real)
+  const first = (rel.split(/[\\/]/)[0] ?? '').toLowerCase()
+
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel) && first !== '.git'
+}
+
+/** What a file's copy is: the person's own file always; a project's only while it really is in the repository. */
+async function copyOf(setting: GuidelinesSetting, seen: Awaited<ReturnType<typeof lookAt>> | null, ref: ProjectRef, env: NodeJS.ProcessEnv, now: number): Promise<string | null> {
+  if (!seen?.bytes || !seen.look.sha256 || !seen.look.real || !isFileSetting(setting)) return null
+  if (setting.from === 'project' && !(await isInRepo(seen.look.real, ref.path))) return null
+
+  return keepCopy(seen.bytes, seen.look.sha256, env, now)
+}
+
+/** Once a day: baselines no session has used in a month (the sessions are long gone), and copies none points at. */
+async function sweep(env: NodeJS.ProcessEnv, now: number): Promise<void> {
+  const mark = join(home(env), 'sessions', '.swept')
+  const last = await stat(mark).then(s => s.mtimeMs, () => 0)
+  if (now - last < SWEEP_EVERY_MS && last <= now) return
+  await writeAtomic(mark, `${now}\n`)
+  await utimes(mark, now / 1000, now / 1000).catch(() => {})
+  for (const [folder, keep] of [[join(home(env), 'sessions'), BASELINE_KEPT_MS], [join(home(env), 'copies'), COPY_KEPT_MS]] as const) {
+    for (const name of await readdir(folder).catch(() => [] as string[])) {
+      if (!/\.(json|md)$/.test(name)) continue
+      const at = await stat(join(folder, name)).then(s => s.mtimeMs, () => now)
+      if (now - at > keep) await rm(join(folder, name), { force: true })
+    }
   }
 }
 
@@ -195,17 +238,21 @@ export async function watchGuidelines(ref: ProjectRef, session: string, setting:
     const isSame = !!was && isSameSetting(was.setting, setting)
     const change = isSame && was.look && look ? changeOf(was.look, look) : null
     if (isSame && !change) return null
-    const copy = setting.from === 'user' && seen?.bytes && look?.sha256 ? await keepCopy(seen.bytes, look.sha256, env) : null
+    // The copy moves on only with what the person let stand: their word (no baseline yet), their agreement, or a new
+    // setting's file. A stray change keeps the copy from before it.
+    const copy = isSame && !isAsked ? was.copy : await copyOf(setting, seen, ref, env, now)
     const next: Baseline = { session, setting, at: now, look, copy }
     await writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`)
     if (!was || isAsked) return null
-    if (!isSame) return { at: now, by: session, repo: ref.path, change: 'setting', was: was.setting, now: setting }
+    if (!isSame) return { at: now, by: session, repo: ref.path, change: 'setting', was: was.setting, now: setting, copy: was.copy }
     if (!change || !isFileSetting(setting)) return null
 
     return { at: now, by: session, repo: ref.path, change, file: setting.file, from: setting.from, copy: was.copy }
   })
-  if (isStart) await dropOldBaselines(env, now).catch(() => {})
+  if (isStart) await sweep(env, now).catch(() => {})
   if (!alert) return null
+  // The copy a warning names is in use for as long as the board shows it: touched, so the sweep keeps it.
+  if (alert.copy) await utimes(alert.copy, now / 1000, now / 1000).catch(() => {})
   const list = alertsFile(ref, env)
   await withLock(list, async () => {
     const kept = (await readJsonFile<{ alerts?: GuidelinesAlert[] }>(list).catch(() => null)) ?? {}
@@ -239,17 +286,15 @@ function settingWords(setting: GuidelinesSetting): string {
  */
 export function alertText(alert: GuidelinesAlert, when?: string): string {
   if (alert.change === 'setting') {
-    const words = { was: settingWords(alert.was), now: settingWords(alert.now), fix: ct('guidelines.fix.setting', { repo: alert.repo }) }
+    const fix = ct('guidelines.fix.setting', { repo: alert.repo }) + (alert.copy ? ct('guidelines.fix.settingCopy', { copy: alert.copy }) : '')
+    const words = { was: settingWords(alert.was), now: settingWords(alert.now), fix }
 
     return when === undefined ? ct('guidelines.settingAlert', words) : ct('board.guidelinesSettingAlert', { ...words, when, by: alert.by })
   }
-  // A project's file is in git; the person's own has the read-only copy taken when the turn began, if there was one.
-  const fix =
-    alert.from === 'project'
-      ? ct('guidelines.fix.project', { repo: alert.repo, rel: relative(alert.repo, alert.file).replace(/\\/g, '/') })
-      : alert.copy
-        ? ct('guidelines.fix.copy', { copy: alert.copy })
-        : ct('guidelines.fix.noCopy')
+  // The copy from when the person last let the file stand; for a project's file, also where to see its history in git.
+  let fix = alert.copy ? ct('guidelines.fix.copy', { copy: alert.copy, file: alert.file }) : ct('guidelines.fix.noCopy')
+  // Each language's sentence carries its own spacing (the English one starts with a space).
+  if (alert.from === 'project') fix += `${ct('guidelines.fix.history', { repo: alert.repo, rel: relative(alert.repo, alert.file).replace(/\\/g, '/') })}`
   const words = { file: alert.file, what: ct(`guidelines.what.${alert.change}`), fix }
 
   return when === undefined ? ct('guidelines.alert', words) : ct('board.guidelinesAlert', { ...words, when, by: alert.by })
