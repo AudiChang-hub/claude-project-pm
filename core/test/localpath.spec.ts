@@ -14,14 +14,13 @@ import { PROBE_HOST, shortPath, watchFs } from './helpers'
 describe('which paths are plain paths on this machine (T-39: only what is listed passes)', () => {
   const cwd = 'C:\\Users\\acme\\shop'
 
-  test('on Windows: a full drive path, or one relative to the folder or to its drive\'s root', () => {
+  test('on Windows: a full drive path, or one relative to the folder', () => {
     const plain: [string, string][] = [
       ['C:\\Users\\acme\\shop\\GUIDELINES.md', 'C:\\Users\\acme\\shop\\GUIDELINES.md'],
       ['c:/Users/acme', 'c:\\Users\\acme'],
       ['GUIDELINES.md', 'C:\\Users\\acme\\shop\\GUIDELINES.md'],
       ['.\\docs\\x.md', 'C:\\Users\\acme\\shop\\docs\\x.md'],
       ['..\\x', 'C:\\Users\\acme\\x'],
-      ['\\Users\\acme', 'C:\\Users\\acme'],
       ['C:\\..\\..\\Users', 'C:\\Users'],
       ['D:\\RUNNER~1\\x.md', 'D:\\RUNNER~1\\x.md'],
       ['C:\\Users\\acme\\.github\\x.yml', 'C:\\Users\\acme\\.github\\x.yml'],
@@ -69,6 +68,9 @@ describe('which paths are plain paths on this machine (T-39: only what is listed
       'C:relative',
       'C:',
       'c:..\\x',
+      // The root of whatever drive the reading process is on: the same doubt as C:x.
+      '\\Users\\acme',
+      '/Users/acme',
       // Streams and colons anywhere but a drive's.
       'C:\\Users\\acme\\GUIDELINES.md::$DATA',
       'C:\\Users\\acme\\GUIDELINES.md:hidden',

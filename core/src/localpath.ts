@@ -30,10 +30,11 @@ const DEVICE_NAMES = /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|
  * The one test every path from the model or a repository passes before anything is looked up. Nothing outside the
  * list below is let through, however it is spelled.
  *
- * Windows: the text may not start with two slashes either way (\\host, //host, \/host, \\?\, \\.\) nor with \??\,
- * may hold no control character and none of < > " | ? *, and a colon only as a drive's, at the start. A drive-relative
- * path (C:foo, C:) is refused: it means the folder that process last used on that drive, which the hook does not know
- * and the tool may see differently, so neither a guess nor cwd is safe. Resolved by path.win32.resolve, the result
+ * Windows: the text may not start with a slash either way (\\host, //host, \/host, \\?\, \\.\, \??\, and \x, the root
+ * of whatever drive that process is on), may hold no control character and none of < > " | ? *, and a colon only as
+ * a drive's, at the start. A drive-relative path (C:foo, C:) is refused: it means the folder that process last used on
+ * that drive, which the hook does not know and the tool may see differently, so neither a guess nor cwd is safe
+ * (the system check in localpath-variants.spec found \x read against another drive than the session's). Resolved by path.win32.resolve, the result
  * must be X:\…, and no part of it may end in a dot or a space (Windows trims those, so the name opened is another),
  * or be a device name (CON, NUL, COM1, LPT1, CONIN$, … with or without an extension).
  * A drive letter is taken as this machine's own: one the person mapped to a share (Z: -> \\host\share) or made with
@@ -52,7 +53,9 @@ export function plainLocalPath(raw: string, cwd: string, platform: NodeJS.Platfo
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f<>"|?*]/.test(raw)) return null
   const text = raw.replace(/\//g, '\\')
-  if (text.startsWith('\\\\')) return null
+  // Two slashes start a share or a device; one starts the root of the drive that process is on, which, as for C:x,
+  // the hook does not know (Windows itself reads \x against its own current drive, not the session's folder).
+  if (text.startsWith('\\')) return null
   if (text.lastIndexOf(':') > 1 || (text.includes(':') && !/^[a-z]:\\/i.test(text))) return null
   const full = win32.resolve(cwd, raw)
   if (!/^[a-z]:\\/i.test(full) || full.includes('\\\\') || full.lastIndexOf(':') !== 1) return null
