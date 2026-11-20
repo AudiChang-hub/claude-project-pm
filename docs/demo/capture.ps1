@@ -1,4 +1,4 @@
-# Renders docs/demo/overview.html and docs/demo/board.html into the README images with headless Edge (or Chrome).
+# Renders docs/demo/overview.html, hero.html and board.html into the README and how-it-works images with headless Edge (or Chrome).
 # Usage, from the repository root:  pwsh docs/demo/capture.ps1 [image names…]   (no names: every image)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/../..").Path
@@ -18,7 +18,13 @@ $shots = @(
   @{ Name = 'board-light.png'; Page = 'board.html'; Query = 'lang=en&theme=light'; Size = '504,2200'; Transparent = $true },
   @{ Name = 'board-dark.png'; Page = 'board.html'; Query = 'lang=en&theme=dark'; Size = '504,2200'; Transparent = $true },
   @{ Name = 'board-light-zh-TW.png'; Page = 'board.html'; Query = 'lang=zh-TW&theme=light'; Size = '504,2200'; Transparent = $true },
-  @{ Name = 'board-dark-zh-TW.png'; Page = 'board.html'; Query = 'lang=zh-TW&theme=dark'; Size = '504,2200'; Transparent = $true }
+  @{ Name = 'board-dark-zh-TW.png'; Page = 'board.html'; Query = 'lang=zh-TW&theme=dark'; Size = '504,2200'; Transparent = $true },
+  @{ Name = 'hero-light.png'; Page = 'hero.html'; Query = 'lang=en&theme=light'; Size = '1204,764'; Transparent = $true },
+  @{ Name = 'hero-dark.png'; Page = 'hero.html'; Query = 'lang=en&theme=dark'; Size = '1204,764'; Transparent = $true },
+  @{ Name = 'hero-light-zh-TW.png'; Page = 'hero.html'; Query = 'lang=zh-TW&theme=light'; Size = '1204,764'; Transparent = $true },
+  @{ Name = 'hero-dark-zh-TW.png'; Page = 'hero.html'; Query = 'lang=zh-TW&theme=dark'; Size = '1204,764'; Transparent = $true },
+  @{ Name = 'how-states.png'; Page = 'board.html'; Query = 'lang=en&theme=light&view=states'; Size = '504,2200'; Transparent = $true },
+  @{ Name = 'how-states-zh-TW.png'; Page = 'board.html'; Query = 'lang=zh-TW&theme=light&view=states'; Size = '504,2200'; Transparent = $true }
 )
 $only = $args
 foreach ($shot in $shots) {

@@ -1,0 +1,136 @@
+<!doctype html>
+<!--
+  Offline demo for the top of each README: the PM's conversation in the Claude Code desktop app, with the board pane
+  beside it. Fixture data only (the made-up "Acme Storefront" of board.html, which this page shows in its pane): the
+  PM's answer reports exactly what that pane shows. It is a schematic window, not a copy of the app's own look.
+  Views:  hero.html?lang=en&theme=light      docs/images/hero-light.png
+          hero.html?lang=en&theme=dark       docs/images/hero-dark.png
+          lang=zh-TW for docs/images/hero-*-zh-TW.png
+  Capture: pwsh docs/demo/capture.ps1 (see docs/demo/README.md)
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project PM Hero Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&family=Noto+Sans+TC:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --window: #f4f1ea; --chat: #fbfaf7; --ink: #1c1b18; --ink-2: #4a4740; --ink-3: #7d796f;
+    --line: rgba(28, 27, 24, 0.12); --bubble: #ebe6db; --chip: rgba(28, 27, 24, 0.05);
+    --claude: #c15f3c; --warning: #a86400; --error: #c93a3a; --success: #1f8a4c; --planMode: #0f766e;
+    --sans: "Inter", "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  :root[data-theme="dark"] {
+    --window: #1f1e1b; --chat: #262522; --ink: #f3f1ea; --ink-2: #cfcbc0; --ink-3: #9a968b;
+    --line: rgba(243, 241, 234, 0.12); --bubble: #34332e; --chip: rgba(243, 241, 234, 0.06);
+    --claude: #e08a68; --warning: #f0a83a; --error: #f07070; --success: #4cc27a; --planMode: #2dd4bf;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: transparent; color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  .frame { padding: 2px; width: 1204px; }
+  .window { width: 1200px; height: 760px; background: var(--window); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; display: flex; flex-direction: column; }
+  .bar { height: 46px; flex: none; display: flex; align-items: center; column-gap: 14px; padding: 0 18px; border-bottom: 1px solid var(--line); }
+  .lights { display: flex; column-gap: 7px; }
+  .lights i { width: 11px; height: 11px; border-radius: 50%; background: var(--line); display: block; }
+  .bar .name { font-size: 13px; font-weight: 600; }
+  .bar .meta { font-size: 12px; color: var(--ink-3); }
+  .main { flex: 1; display: flex; min-height: 0; }
+  .chat { flex: 1; min-width: 0; background: var(--chat); display: flex; flex-direction: column; }
+  .log { flex: 1; padding: 30px 40px 0; display: flex; flex-direction: column; row-gap: 18px; overflow: hidden; }
+  .you { align-self: flex-end; max-width: 78%; background: var(--bubble); border-radius: 16px 16px 4px 16px; padding: 11px 15px; font-size: 14.5px; line-height: 1.5; }
+  .tool { display: inline-flex; align-items: center; column-gap: 8px; align-self: flex-start; font-size: 12px; color: var(--ink-3); background: var(--chip); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; }
+  .tool code { font: 500 11.5px/1 var(--mono); color: var(--ink-2); }
+  .tool b { width: 6px; height: 6px; border-radius: 50%; background: var(--success); display: block; }
+  .pm { font-size: 14.5px; line-height: 1.58; color: var(--ink); display: flex; flex-direction: column; row-gap: 8px; max-width: 610px; }
+  .pm h4 { font-size: 14.5px; font-weight: 600; margin-top: 4px; }
+  .pm ul { list-style: none; display: flex; flex-direction: column; row-gap: 6px; }
+  .pm li { position: relative; padding-left: 16px; color: var(--ink-2); }
+  .pm li::before { content: ""; position: absolute; left: 2px; top: .62em; width: 6px; height: 6px; border-radius: 50%; background: var(--dot, var(--ink-3)); }
+  .pm li strong { color: var(--ink); font-weight: 600; }
+  .pm code { font: 500 12.5px/1 var(--mono); }
+  .pm .end { color: var(--ink-2); }
+  .composer { margin: 18px 40px 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--window); padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--ink-3); }
+  .composer span.send { width: 28px; height: 28px; border-radius: 8px; background: var(--claude); display: grid; place-items: center; }
+  .side { width: 524px; flex: none; border-left: 1px solid var(--line); padding: 10px 10px 0; overflow: hidden; }
+  .side iframe { width: 504px; height: 1400px; border: 0; display: block; }
+</style>
+</head>
+<body>
+<div class="frame">
+  <div class="window">
+    <div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="name" id="title"></span><span class="meta" id="meta"></span></div>
+    <div class="main">
+      <div class="chat">
+        <div class="log" id="log"></div>
+        <div class="composer"><span id="placeholder"></span><span class="send"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11.5v-9M3 6.5l4-4 4 4"/></svg></span></div>
+      </div>
+      <div class="side"><iframe id="pane" title="Board" scrolling="no"></iframe></div>
+    </div>
+  </div>
+</div>
+<script>
+const q = new URLSearchParams(location.search)
+const lang = q.get('lang') === 'zh-TW' ? 'zh-TW' : 'en'
+const theme = q.get('theme') === 'dark' ? 'dark' : 'light'
+document.documentElement.lang = lang
+if (theme === 'dark') document.documentElement.dataset.theme = 'dark'
+document.getElementById('pane').src = `board.html?lang=${lang}&theme=${theme}`
+
+// The PM's answer reports what board.html's fixture shows: status words from hooks/messages.ts, items by their codes.
+const dot = name => `style="--dot:var(--${name})"`
+const COPY = {
+  en: {
+    title: 'Acme Storefront · PM',
+    meta: '~/code/acme-storefront',
+    you: 'Is anything slipping? What still needs me?',
+    tool: 'Read the board',
+    pm: `
+      <p>Two things are waiting on you:</p>
+      <ul>
+        <li ${dot('warning')}><strong>T-07 Retire the v1 coupon fields</strong> asks: drop the <code>coupon_v1</code> columns in this release, or keep them read-only until 0.9?</li>
+        <li ${dot('planMode')}><strong>T-11 Holiday banner</strong> is merged locally as <code>a3f9c21</code> but not pushed. Say go and it deploys.</li>
+      </ul>
+      <h4>Not done yet, and being handled</h4>
+      <ul>
+        <li ${dot('error')}><strong>T-06 Tax rounding:</strong> CI failed on the rounding test; the session is fixing the half-cent case.</li>
+        <li ${dot('claude')}><strong>Search ranking</strong> stopped with 4 steps left. I've asked it to carry on.</li>
+        <li ${dot('planMode')}><strong>T-14 Order email typo:</strong> the agent committed <code>5e2b9c1</code>. It stays open until a T-14 QA agent passes it.</li>
+      </ul>
+      <p class="end">Nothing closes before its QA passes.</p>`,
+    placeholder: 'Reply to the PM…',
+  },
+  'zh-TW': {
+    title: 'Acme Storefront · PM',
+    meta: '~/code/acme-storefront',
+    you: '有沒有漏掉的工作？哪些在等我？',
+    tool: '讀取看板',
+    pm: `
+      <p>有兩件在等你：</p>
+      <ul>
+        <li ${dot('warning')}><strong>T-07 停用 v1 優惠券欄位</strong>在問：這次發布就刪掉 <code>coupon_v1</code> 欄位，還是保留唯讀到 0.9 版？</li>
+        <li ${dot('planMode')}><strong>T-11 首頁節慶橫幅</strong>已在本機合併為 <code>a3f9c21</code>，還沒 push。你說可以就部署。</li>
+      </ul>
+      <h4>還沒完成，有人在處理</h4>
+      <ul>
+        <li ${dot('error')}><strong>T-06 結帳稅額：</strong>CI 在四捨五入的測試失敗，Session 正在修半分錢的情況。</li>
+        <li ${dot('claude')}><strong>搜尋排序</strong>停在半途，還有 4 個步驟。我已經請它接著做。</li>
+        <li ${dot('planMode')}><strong>T-14 通知信錯字：</strong>Agent 已 commit <code>5e2b9c1</code>，要等「T-14 QA」Agent 驗收通過才結案。</li>
+      </ul>
+      <p class="end">QA 沒通過的工作，一項都不會結案。</p>`,
+    placeholder: '回覆 PM…',
+  },
+}[lang]
+document.getElementById('title').textContent = COPY.title
+document.getElementById('meta').textContent = COPY.meta
+document.getElementById('placeholder').textContent = COPY.placeholder
+document.getElementById('log').innerHTML = `
+  <div class="you">${COPY.you}</div>
+  <div class="tool"><b></b>${COPY.tool}<code>project-pm · board</code></div>
+  <div class="pm">${COPY.pm}</div>`
+</script>
+</body>
+</html>

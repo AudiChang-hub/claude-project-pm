@@ -9,6 +9,8 @@
   Views:  board.html?lang=en&theme=light   docs/images/board-light.png
           board.html?lang=en&theme=dark    docs/images/board-dark.png
           add lang=zh-TW for the Traditional Chinese board (docs/images/board-*-zh-TW.png)
+          board.html?lang=…&view=states    docs/images/how-states(-zh-TW).png: the cards of each status
+                                           under Needs attention, a usage limit and waiting on CI included
   Capture: pwsh docs/demo/capture.ps1 (see docs/demo/README.md)
 -->
 <html lang="en">
@@ -122,6 +124,8 @@ const MESSAGES = {
     'status.open.label': 'Unfinished',
     'status.unreleased.label': 'Not released',
     'status.running.label': 'Running',
+    'status.limit.resumes': 'Usage limit · resumes after {time}',
+    'status.ci.label': 'Waiting on CI',
     'agent.state.running': 'Running',
     'agent.state.done': 'Done',
     'agent.state.verify': 'To verify',
@@ -170,6 +174,8 @@ const MESSAGES = {
     'status.open.label': '未完成',
     'status.unreleased.label': '待發布',
     'status.running.label': '執行中',
+    'status.limit.resumes': '額度用完・{time} 後可續',
+    'status.ci.label': '等待 CI',
     'agent.state.running': '執行中',
     'agent.state.done': '已完成',
     'agent.state.verify': '待驗收',
@@ -233,7 +239,9 @@ const STATUS = Object.fromEntries(Object.entries({
   open: { color: 'claude', hex: '#d97757' },
   unreleased: { color: 'planMode', hex: '#0d9488' },
   running: { color: 'success', hex: '#22c55e' },
-}).map(([key, look]) => [key, { ...look, label: t(`status.${key}.label`) }]))
+  limit: { color: 'warning', hex: '#ea580c', label: t('status.limit.resumes', { time: '3pm' }) },
+  ci: { color: 'permission', hex: '#8b5cf6' },
+}).map(([key, look]) => [key, { ...look, label: look.label ?? t(`status.${key}.label`) }]))
 const AGENT_LOOK = {
   running: STATUS.running,
   verify: STATUS.unreleased,
@@ -301,6 +309,19 @@ const FIXTURE = {
   },
 }
 const { sessions, agents, ledger } = FIXTURE[lang]
+// view=states: the session cards of every status under Needs attention (docs/how-it-works*.md), a usage limit included.
+// A usage limit's words are Claude Code's own error, in English in either language.
+const LIMIT = "You've hit your 5-hour limit · resets 3pm"
+const STATES = {
+  en: [
+    { status: 'limit', title: 'Product reviews API', min: 54, plan: [C, C, P, _], current: 'Paginate the reviews endpoint', summary: LIMIT },
+    { status: 'ci', title: 'Upgrade the payment SDK', min: 6, plan: [C, C, C, C], summary: 'Pushed 4d7a2e9; CI run 18240377 is running' },
+  ],
+  'zh-TW': [
+    { status: 'limit', title: '商品評論 API', min: 54, plan: [C, C, P, _], current: '評論端點加上分頁', summary: LIMIT },
+    { status: 'ci', title: '升級金流 SDK', min: 6, plan: [C, C, C, C], summary: '已 push 4d7a2e9，CI run 18240377 正在跑' },
+  ],
+}
 const items = { done: 6, total: 11 }
 const ended = 4
 const PROJECT = 'Acme Storefront'
@@ -374,7 +395,11 @@ const ledgerRow = i => {
   </div>`
 }
 
-document.getElementById('app').innerHTML = `
+const RANK = ['asking', 'failed', 'limit', 'open', 'unreleased', 'ci']
+if (q.get('view') === 'states') {
+  const cards = [...sessions.filter(s => s.status !== 'running'), ...STATES[lang]].sort((a, b) => RANK.indexOf(a.status) - RANK.indexOf(b.status))
+  document.getElementById('app').innerHTML = `<div class="pane"><div class="body">${cards.map(card).join('')}</div></div>`
+} else document.getElementById('app').innerHTML = `
 <div class="pane">
   <div class="pane-head"><span>${t('pane.titlePm', { project: PROJECT })}</span>
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7"/></svg></div>

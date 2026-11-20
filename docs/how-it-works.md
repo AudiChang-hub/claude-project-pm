@@ -13,12 +13,17 @@ The details behind the README: what each status means, how the PM decides whethe
 | --- | --- |
 | Waiting on you (待回覆) | The session ended its turn with a question for you. |
 | CI failed (CI 失敗) | Its last words left CI running, and GitHub reports that run failed. |
+| Usage limit · resumes after *time* (額度用完・*time* 後可續) | A usage limit ended its last turn midway, read from the turn's error in the transcript, never from the model's words. The PM picks it up once the limit resets. |
 | Unfinished (未完成) | It stopped with steps of its task list still open, and nothing it waits on is still running. |
 | Not released (待發布) | Work is left to deliver, judged facts first (see *How delivery is judged* below): a commit or push git shows is left, a release the session declared pending, or, with neither to go on, words that say the work is still to come. A fully ticked task list does not override it (`wrap_up` ticks every step). |
 | Waiting on CI (等待 CI) | Its last words say CI has not finished, and GitHub has not said it passed. |
 | Running (執行中) | The session is working right now. |
 | In the background (背景執行) | A command or an agent it started in the background (`run_in_background`, or moved there) has not reported back yet, for up to 6 hours; or, for a turn that ended with neither a `report` nor a `wrap_up` recap, it said work goes on in the background (for up to 45 minutes). Open steps on its task list do not make it *Unfinished* meanwhile. |
 | Ended (已結束) / Idle (長期閒置) | Nothing left; idle for more than 3 days. Hidden behind a toggle. |
+
+<p align="center">
+  <img src="images/how-states.png" alt="Session cards on the board for a demo project, most urgent first: Waiting on you with its question, CI failed, Usage limit · resumes after 3pm, Unfinished with the step it stopped on, Not released, and Waiting on CI." width="420">
+</p>
 
 At the top: a completion ring and three counters (running, waiting on you, not finished: unfinished, waiting on CI, CI failed or not released). Switch between **this project** and **all projects**.
 
@@ -27,6 +32,12 @@ At the top: a completion ring and three counters (running, waiting on you, not f
 **CI is not done until GitHub says so.** When a session's latest words say CI is still running, or that it will deploy once checks pass, the session is held at *Waiting on CI*, however long ago it stopped. Quoted words (a status named 「等待 CI」) and sentences about a rule or an example do not count. The PM then runs `gh` in that session's folder: the runs and commits the words name, nearest their own CI words first, a commit only when it is in that repository (a hash quoted from another project or an example is skipped), and when none of them answers, the folder's `HEAD` (only if it was committed before the words). A pass clears the status, a failure turns it into *CI failed*. Answers are cached: a pass for good, a failure for 5 minutes, a running or unknown result for 1 minute. Without `gh`, or outside GitHub, the words decide.
 
 **The ledger will not close unfinished work.** Marking an item done is refused while its owner is running, waiting on you, unfinished, waiting on CI, failed CI, not released or still working in the background, unless you confirm it explicitly and the PM records why in a note.
+
+**QA before a work item closes.** A work item can carry acceptance criteria and a QA verdict. The ledger will not mark an item done without a passed QA, or a skip with its reason, and whoever checks it may not be its owner. Before a code change is pushed, the PM starts an independent QA agent given only the diff and the criteria. *Needs attention* lists items awaiting QA (their owner has delivered and there is no verdict) and items that failed QA, and each work item shows its QA. In the CLI, a git pre-push hook also holds commits no QA passed.
+
+<p align="center">
+  <img src="images/how-qa.png" alt="The web board for a demo project: Needs attention lists T-08 as QA failed, with the checker's note, and T-12 as awaiting QA; the work items show QA passed, QA failed and Awaiting QA." width="640">
+</p>
 
 **Recaps that admit work is left.** A recap that says something is "not yet deployed", "not committed", "still needs…" (in English or Chinese) is flagged for follow-up. A Chinese double negative such as 沒有任何未提交的修改 ("there are no uncommitted changes") is not.
 
@@ -85,6 +96,15 @@ The PM has two tools of its own, which you do not call directly:
 
 A project is the folder a session works in; a git worktree under `.claude/worktrees/` or `.worktrees/` counts as its repository.
 
+### Web board (CLI)
+
+In Claude Code's CLI the board is a web page. `project-pm open` starts its server when needed and opens it in your browser; `project-pm serve` runs the server in the terminal. It is read only, listens on your own computer only (127.0.0.1), needs the key in the link it prints, and stops after 30 minutes unused. It shows progress, what needs attention, the work items with their QA, and each session with the tool it runs in. `project-pm board` prints the same board in the terminal.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/web-board-dark.png">
+  <img src="images/web-board-light.png" alt="The web board for a demo project: 6 of 12 work items done; Needs attention lists waiting on you, CI failed, unfinished, not released and awaiting QA; the work items below, and each session's status beside them." width="100%">
+</picture>
+
 ### Development guidelines
 
 Point the `guidelines` option at a Markdown file of your own rules (how to commit, when to ask before a schema change, what counts as done), and the PM and every other session of a project with a PM get it in their system prompt each turn. The PM is also told to carry out what the rules leave to a coordinator (version numbers, the order of pushes and deployments, the definition of done) and to point out a session that breaks one.
@@ -92,6 +112,11 @@ Point the `guidelines` option at a Markdown file of your own rules (how to commi
 - **A request against the rules is asked about first.** The session says which rule the request breaks and asks whether to make an exception this time, and goes ahead only on a clear yes.
 - **An exception is one-off.** Once that request is done the rules apply again, and a similar request later is asked about again. The PM notes each approved exception on its work item.
 - **The rules change only when you ask.** An edit to the guidelines file is refused unless your latest message in that session asks about the guidelines (it mentions 準則, 守則 or "guideline"). The refusal tells the session to ask you first.
+- **A change you did not agree to is warned about** (CLI). If the guidelines file or setting changes in a turn where you did not agree to a guidelines change, the board lists it under *Needs attention* for a week: when, which session noticed it, and how to undo it yourself (a read-only copy of what the file held when you last spoke, and `git log -p` for a project's file). Project PM never puts the file back.
+
+<p align="center">
+  <img src="images/how-guidelines.png" alt="Needs attention on the web board for a demo project: the guidelines file docs/GUIDELINES.md was changed without your agreement, with the time, the session that noticed it, where the read-only copy is, and the git log command to see its history." width="640">
+</p>
 
 - The path may be absolute, `~/…`, or relative to each project's folder (`docs/GUIDELINES.md`), so every project can keep its own.
 - The file is read on every turn: an edit reaches each session's next turn with no reload. Its text stays on your machine; a file over 24,000 characters is cut, with a note to read the rest.

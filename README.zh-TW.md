@@ -7,6 +7,11 @@
 
 **同時開很多個 Claude Code Session 和 Agent，你只跟一個 PM 說話，一件工作也不漏。**
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark-zh-TW.png">
+  <img src="docs/images/hero-light-zh-TW.png" alt="Claude Code 桌面版（示範資料）：問 PM 有沒有漏掉的工作，PM 讀看板後列出等你回覆的、CI 失敗的、沒做完的和待 QA 的；右邊是看板。" width="100%">
+</picture>
+
 <p align="center">
   <img src="docs/images/overview-zh-TW.png" alt="Project PM v1.0.0 一頁圖解：你從 Claude Code 桌面版或 CLI 跟 PM 說話，兩邊用同一個共用核心；PM 把工作交給 Session 或 Agent；結案和 push 前都要過 QA 關卡；v1.0 新增網頁看板、CI 範本和單一執行檔；以及每次派工的實測成本。" width="100%">
 </p>
@@ -91,7 +96,12 @@ v0.9.x（QA 關卡、額度優先派工）：[CHANGELOG](CHANGELOG.md)
 | `/pm lang en`・`zh-TW`・`auto` | 看板和 PM 的語言；`auto` 跟隨系統 |
 | `/pm guidelines <檔案>`・`off` | 讓 PM 和各 Session 遵守你的開發準則 |
 
-在 CLI 裡，請 Claude 擔任 PM；`project-pm open` 會打開看板。
+在 CLI 裡，請 Claude 擔任 PM；`project-pm open` 會在瀏覽器打開看板：
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/web-board-dark-zh-TW.png">
+  <img src="docs/images/web-board-light-zh-TW.png" alt="網頁看板（示範資料）：12 項工作完成 6 項；「需要處理」列出待回覆、CI 失敗、未完成、待發布和待 QA；旁邊是每個 Session 的狀態。" width="100%">
+</picture>
 
 ## 需求
 
