@@ -76,5 +76,6 @@ Project PM **只支援 Claude Code**；1.0 版幫你設定 Claude Code 的命令
 
 - 程式沒有程式碼簽章（見上面）。Windows 開著「智慧型應用程式控制」時可能直接擋下，目前沒有其他方式可以執行；npm 版要之後的版本才推出。
 - 1.0.0 還沒有發到 npm。
+- 開發準則檔會擋住 AI 用編輯工具去改。繞過這道擋的修改（用指令改、其他 Session 改、你自己用編輯器改）只會在事後被發現，列在看板的「需要處理」；Project PM 不會自動把檔案改回去。要還原的話，專案的準則檔用 `git checkout -- <檔>`，你自己的準則檔用 `~/.project-pm/guidelines/copies/` 裡的唯讀備份。故意繞過偵測的修改抓不到。
 - Windows 從網路下載後的放行步驟（SmartScreen）還沒實際驗證過。程式本身在 Windows 上建置後實際執行過。
 - Mac 的放行步驟沒有在實機驗證過。Mac 版程式本身有在 GitHub 的 Mac 機器上建置並跑過測試。

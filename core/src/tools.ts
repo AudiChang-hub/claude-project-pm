@@ -31,7 +31,7 @@ import { activeAt, projectSessions, trackOf } from './actors'
 import type { Ctx, ToolResult } from './context'
 import { projectOf } from './context'
 import { checkCi, checkPush, heldCi } from './facts'
-import { guidelinesRestores } from './guard'
+import { alertWords, guidelinesAlerts } from './guard'
 import { GIT_TIMEOUT_MS } from './host'
 import { plainLocalPath } from './localpath'
 import { prePushInstalled, pushProblems, pushedUnchecked, withAttention } from './prepush'
@@ -492,9 +492,9 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     const line = ct('board.pushNotChecked', { when: localMinute(problem.at), reason: problem.reason })
     text = withAttention(text, line, t('board.section.attention'), t('board.none'))
   }
-  // The guidelines file changed without the person asking, and put back (guard.ts), for a week.
-  for (const restore of await guidelinesRestores(ref, ctx.env, now)) {
-    const line = ct(restore.isRestored ? 'board.guidelinesRestored' : 'board.guidelinesChanged', { when: localMinute(restore.at), file: restore.file, by: restore.by, backup: restore.backup ?? '-' })
+  // The guidelines file changed without the person agreeing (guard.ts: only noticed, never put back), for a week.
+  for (const alert of await guidelinesAlerts(ref, ctx.env, now)) {
+    const line = ct('board.guidelinesAlert', { when: localMinute(alert.at), by: alert.by, ...alertWords(alert) })
     text = withAttention(text, line, t('board.section.attention'), t('board.none'))
   }
   if (sessionsError) text += `\n\n${ct('board.noSessionsRead', { error: sessionsError })}`

@@ -1,149 +1,213 @@
 /**
- * The guidelines file, checked after the fact (T-39 2). The lock (hook.ts, PreToolUse) refuses an edit through the
- * writing tools; anything it cannot see (a shell command, a spelling it has no word for) is caught here.
+ * The guidelines file, checked after the fact (T-39 2): it only notices and says so, and never writes the file.
  *
- * One snapshot per file, not per project: the person's own guidelines file serves every project, so a change they
- * ask for in one project is what every other project's sessions are checked against (T-39 QA 1). It is keyed by
- * where the file really is, taken again whenever the person speaks in any project (an edit, clearing or deletion of
- * their own between turns thereby stands), and followed when they ask for a change. After a tool that can write, and
- * when a turn stops, the file the project names now is compared with it; a snapshot from before the person last spoke
- * in this session is not a judgment of this turn and is only taken again. A file no longer named is not looked at,
- * so turning the guidelines off, or naming another file, ends the checking of the old one (T-39 QA 2).
+ * The lock (hook.ts, PreToolUse) refuses an edit through the writing tools; anything it cannot see (a shell command, a
+ * spelling it has no word for) shows here. Putting a change back would need to know, across sessions the person runs
+ * at once, who changed the file and whether they had agreed; two rounds of QA found that guess wrong in both
+ * directions, and a wrong guess wrote over the person's own change. So nothing is put back: a warning costs nothing
+ * when it is wrong (T-39, option A).
  *
- * Changed without the person having asked about the guidelines this turn: the changed bytes are kept, the file is
- * written back, and the board says so. Snapshots live in the person's own data folder (~/.project-pm/guidelines),
- * never in the repository.
+ * Each session keeps its own baseline: what the path the guidelines are set to looked like when the person last spoke
+ * in it (the file's SHA-256, whether the path is a link and where to, where the file really is). It lives in the
+ * person's data folder (~/.project-pm/guidelines/sessions/<hash of the session id>.json, never in the repository) and
+ * names the path it was taken for, so the pair (session, set path) is what is compared: set to another file, or
+ * turned off, and the baseline is taken again or dropped, never compared with the old file. After a tool of the
+ * session's that can write, when a notification wakes the session, and when its turn stops, the path is looked at
+ * again; changed, emptied, deleted, made a link or pointed elsewhere, or no longer a plain local path, without the
+ * person agreeing to a guidelines change this turn, it is listed on the board, attributed to the session that saw it
+ * and worded so as not to say who did it (another session, or the person, may have). For the person's own file, a
+ * read-only copy of what the baseline held is kept for them to copy back by hand; a project's file is in git.
+ *
+ * What it cannot catch: a change made on purpose to get past it (running this hook by hand to take a new baseline,
+ * deleting the baselines, changing the setting first). It is a smoke alarm, not a lock.
  */
 import { createHash } from 'node:crypto'
-import { readFile, rm } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { chmod, lstat, readFile, readdir, readlink, rm, stat } from 'node:fs/promises'
+import { join, relative } from 'node:path'
 
-import { localRealpath } from './localpath'
+import { NotPlainPathError, localRealpath } from './localpath'
+import { ct } from './messages'
 import type { ProjectRef } from './project'
 import { paths, readJsonFile, withLock, writeAtomic } from './store'
 
-/** Larger than this, a file is not a guidelines file to keep a copy of. */
-export const MAX_SNAPSHOT_BYTES = 1024 * 1024
+/** Larger than this, a file's bytes are not read (its size and time are compared) nor copied. */
+export const MAX_GUIDELINES_BYTES = 1024 * 1024
 
-/** How long the board lists a restore. */
-export const RESTORE_SHOWN_MS = 7 * 24 * 60 * 60 * 1000
+/** How long the board lists a warning. */
+export const ALERT_SHOWN_MS = 7 * 24 * 60 * 60 * 1000
+
+/** A session's baseline unused this long is let go. */
+const BASELINE_KEPT_MS = 30 * 24 * 60 * 60 * 1000
 
 /** The tools after which the file is compared: every one that can write a file (the shells too). */
 export const GUARDED_TOOLS: ReadonlySet<string> = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell'])
 
-export type Restore = { at: number; file: string; backup: string | null; by: string; isRestored: boolean }
+/** Which guidelines file is set, and by whom: the project's .project-pm.json, or the person's own config. */
+export type GuidelinesSetting = { file: string; from: 'project' | 'user' }
 
-/** What a file held when the snapshot was taken: base64 of its bytes, or null when there was no file. */
-type Snapshot = { file: string; sha256: string | null; bytes: string | null; at: number }
+/** What the set path looked like. `real` and `link` are null where nothing could be (or was) looked up. */
+type Look = {
+  kind: 'file' | 'missing' | 'unplain' | 'unreadable' | 'large'
+  sha256: string | null
+  size: number | null
+  mtime: number | null
+  real: string | null
+  link: string | null
+}
+
+type Baseline = { session: string; file: string; from: GuidelinesSetting['from']; at: number; look: Look; copy: string | null }
+
+/** What happened to the file, in the words the board uses. */
+export type Change = 'changed' | 'emptied' | 'deleted' | 'linked' | 'unplain' | 'unreadable'
+
+export type GuidelinesAlert = { at: number; file: string; from: GuidelinesSetting['from']; change: Change; by: string; copy: string | null; repo: string }
 
 const sha256 = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex')
 
 /** Two real paths, as the system compares them: letter case aside on Windows. */
-const isSamePath = (a: string, b: string) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b)
+const isSamePath = (a: string | null, b: string | null) => (a === null || b === null ? a === b : process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b)
 
-/** One snapshot per file, wherever it is named from. */
-function snapshotFile(real: string, env: NodeJS.ProcessEnv): string {
-  return join(paths(env).home, 'guidelines', 'files', `${sha256(process.platform === 'win32' ? real.toLowerCase() : real).slice(0, 40)}.json`)
+const home = (env: NodeJS.ProcessEnv) => join(paths(env).home, 'guidelines')
+
+function baselineFile(session: string, env: NodeJS.ProcessEnv): string {
+  return join(home(env), 'sessions', `${sha256(session).slice(0, 40)}.json`)
 }
 
-/** The restores made for a project, for its board. */
-function restoresFile(ref: ProjectRef, env: NodeJS.ProcessEnv): string {
-  return join(paths(env).home, 'guidelines', `${ref.file}.json`)
+/** The warnings for a project, for its board. */
+function alertsFile(ref: ProjectRef, env: NodeJS.ProcessEnv): string {
+  return join(home(env), `${ref.file}.json`)
 }
 
-/** The file's bytes now: null when it is not there, undefined when it cannot be read safely or is too large to keep. */
-async function bytesOf(file: string): Promise<Buffer | null | undefined> {
+/**
+ * What `file` looks like now, read only. Nothing is asked about a path that is not a plain local path, or that a link
+ * on the way leads off this machine's disks from (localRealpath throws before asking).
+ */
+async function lookAt(file: string): Promise<{ look: Look; bytes: Buffer | null }> {
+  const none = { sha256: null, size: null, mtime: null }
+  let real: string | null
   try {
-    // The path may have become a link since (to a share, say): checked as any other before it is read.
-    const real = await localRealpath(file)
-    if (!real) return null
+    real = await localRealpath(file)
+  } catch (err) {
+    return { look: { kind: err instanceof NotPlainPathError ? 'unplain' : 'unreadable', ...none, real: null, link: null }, bytes: null }
+  }
+  if (!real) return { look: { kind: 'missing', ...none, real: null, link: null }, bytes: null }
+  // Every link on the way was checked above: the path itself may now be looked at, not followed.
+  const self = await lstat(file).catch(() => null)
+  const link = self?.isSymbolicLink() ? await readlink(file).catch(() => '?') : null
+  const base = { real, link }
+  try {
+    const stats = await stat(real)
+    if (!stats.isFile()) return { look: { kind: 'unreadable', ...none, ...base }, bytes: null }
+    if (stats.size > MAX_GUIDELINES_BYTES) return { look: { kind: 'large', sha256: null, size: stats.size, mtime: stats.mtimeMs, ...base }, bytes: null }
     const bytes = await readFile(real)
 
-    return bytes.length <= MAX_SNAPSHOT_BYTES ? bytes : undefined
+    return { look: { kind: 'file', sha256: sha256(bytes), size: bytes.length, mtime: null, ...base }, bytes }
   } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? null : undefined
+    const kind = (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unreadable'
+
+    return { look: { kind, ...none, ...base }, bytes: null }
   }
 }
 
-const snapshotOf = (real: string, bytes: Buffer | null, now: number): Snapshot => ({ file: real, sha256: bytes === null ? null : sha256(bytes), bytes: bytes?.toString('base64') ?? null, at: now })
+/** What changed between two looks at one path, or null when nothing did. */
+function changeOf(was: Look, now: Look): Change | null {
+  const isSame = was.kind === now.kind && was.sha256 === now.sha256 && was.size === now.size && was.mtime === now.mtime && was.link === now.link && isSamePath(was.real, now.real)
+  if (isSame) return null
+  if (now.kind === 'unplain') return 'unplain'
+  if (now.link !== was.link) return 'linked'
+  if (now.kind === 'missing') return 'deleted'
+  if (now.kind === 'unreadable') return 'unreadable'
+  // The file really is somewhere else now (a folder on the way made a link). From a share or an unreadable path back
+  // to a readable one (no real path before) is a change of its text.
+  if (was.real !== null && !isSamePath(was.real, now.real)) return 'linked'
+  if (now.size === 0) return 'emptied'
 
-async function writeSnapshot(file: string, snapshot: Snapshot | null): Promise<void> {
-  if (snapshot) await writeAtomic(file, `${JSON.stringify(snapshot, null, 2)}\n`)
-  else await rm(file, { force: true })
+  return 'changed'
 }
 
 /**
- * When the person speaks: what the guidelines file (`real`, where readGuidelines found it) holds now is what they let
- * stand, an edit, clearing or deletion of their own between turns included. A file that cannot be read safely, or is
- * too large to keep, has no snapshot, so nothing is judged against an old one.
+ * A read-only copy of the person's own guidelines, named by its SHA-256, in their data folder: what they can copy back
+ * by hand. Never written over once there.
  */
-export async function keepGuidelines(real: string, env: NodeJS.ProcessEnv, now: number): Promise<void> {
-  const file = snapshotFile(real, env)
-  await withLock(file, async () => {
-    const bytes = await bytesOf(real)
-    await writeSnapshot(file, bytes === undefined ? null : snapshotOf(real, bytes, now))
-  })
+async function keepCopy(bytes: Buffer, sha: string, env: NodeJS.ProcessEnv): Promise<string | null> {
+  const copy = join(home(env), 'copies', `${sha}.md`)
+  try {
+    if (await stat(copy).then(() => true, () => false)) return copy
+    await writeAtomic(copy, bytes)
+    await chmod(copy, 0o444)
+
+    return copy
+  } catch {
+    // Another session wrote the same copy at the same moment, or the folder cannot be written: it is there or it is not.
+    return (await stat(copy).then(() => true, () => false)) ? copy : null
+  }
+}
+
+/** Baselines no session has used in a month: the sessions are long gone. */
+async function dropOldBaselines(env: NodeJS.ProcessEnv, now: number): Promise<void> {
+  const folder = join(home(env), 'sessions')
+  for (const name of await readdir(folder).catch(() => [] as string[])) {
+    if (!name.endsWith('.json')) continue
+    const at = await stat(join(folder, name)).then(s => s.mtimeMs, () => now)
+    if (now - at > BASELINE_KEPT_MS) await rm(join(folder, name), { force: true })
+  }
 }
 
 /**
- * After a tool that can write, or when a turn stops: the file the project names now (`real`) compared with its
- * snapshot. `since` is when the person last spoke in this session: a snapshot from before then (or none) judges
- * nothing and is only taken again. Asked about (`isAsked`), a change becomes the snapshot every project checks against;
- * not asked about, the changed bytes are kept beside the snapshot, the file is written back, and the restore is
- * recorded for the board. The restore, or null when nothing was put back or reported.
+ * Looks at the guidelines file for `session` (the actor id). `isStart`: the person has just spoken, so the file as it
+ * is now is what the session's turn starts from; nothing is judged. Otherwise the file is compared with the session's
+ * baseline (taken for the same set path; none, or one for another path, is only taken now) and the baseline moves on.
+ * A change the person did not agree to this turn (`isAsked` false) becomes a warning on the project's board, and is
+ * returned. Nothing here writes, renames or deletes the guidelines file.
  */
-export async function checkGuidelines(ref: ProjectRef, real: string, by: string, isAsked: boolean, since: number, env: NodeJS.ProcessEnv, now: number): Promise<Restore | null> {
-  const file = snapshotFile(real, env)
-
-  const restore = await withLock(file, async (): Promise<Restore | null> => {
-    const snapshot = await readJsonFile<Snapshot>(file).catch(() => null)
-    const bytes = await bytesOf(real)
-    if (!snapshot || !isSamePath(snapshot.file, real) || !(snapshot.at >= since)) {
-      await writeSnapshot(file, bytes === undefined ? null : snapshotOf(real, bytes, now))
+export async function watchGuidelines(ref: ProjectRef, session: string, setting: GuidelinesSetting | null, isStart: boolean, isAsked: boolean, env: NodeJS.ProcessEnv, now: number): Promise<GuidelinesAlert | null> {
+  const file = baselineFile(session, env)
+  const alert = await withLock(file, async (): Promise<GuidelinesAlert | null> => {
+    if (!setting) {
+      await rm(file, { force: true })
 
       return null
     }
-    const sha = bytes ? sha256(bytes) : null
-    if (bytes !== undefined && sha === snapshot.sha256) return null
-    if (isAsked) {
-      await writeSnapshot(file, bytes === undefined ? null : snapshotOf(real, bytes, now))
+    const was = isStart ? null : await readJsonFile<Baseline>(file).catch(() => null)
+    const { look, bytes } = await lookAt(setting.file)
+    const isSameSetting = !!was && was.session === session && was.from === setting.from && isSamePath(was.file, setting.file)
+    const change = isSameSetting ? changeOf(was.look, look) : null
+    if (isSameSetting && !change) return null
+    const copy = setting.from === 'user' && bytes && look.sha256 ? await keepCopy(bytes, look.sha256, env) : null
+    const next: Baseline = { session, file: setting.file, from: setting.from, at: now, look, copy }
+    await writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`)
+    if (!change || isAsked) return null
 
-      return null
-    }
-    // Not asked: the changed bytes are kept for the person first, then the file goes back as it was.
-    let backup: string | null = null
-    if (bytes) {
-      backup = join(paths(env).home, 'guidelines', 'changed', `${ref.file}-${new Date(now).toISOString().replace(/[:.]/g, '-')}.txt`)
-      await writeAtomic(backup, bytes)
-    }
-    // Written only into the folder the file was found in, and only while that folder still is where it was: one
-    // swapped since for a link (to a share, or to another folder here, whose file of the same name would be
-    // overwritten) is not written through; the change is then reported, not undone. A rename puts a plain file in
-    // place even where a link to the file itself was left.
-    const folder = dirname(real)
-    const now_ = await localRealpath(folder).catch(() => null)
-    const isRestored = now_ !== null && isSamePath(now_, folder)
-    if (isRestored) {
-      const target = join(folder, basename(real))
-      if (snapshot.bytes === null) await rm(target, { force: true })
-      else await writeAtomic(target, Buffer.from(snapshot.bytes, 'base64'))
-    }
-
-    return { at: now, file: real, backup, by, isRestored }
+    return { at: now, file: setting.file, from: setting.from, change, by: session, copy: was!.copy, repo: ref.path }
   })
-  if (!restore) return null
-  const list = restoresFile(ref, env)
+  if (isStart) await dropOldBaselines(env, now).catch(() => {})
+  if (!alert) return null
+  const list = alertsFile(ref, env)
   await withLock(list, async () => {
-    const kept = (await readJsonFile<{ restored?: Restore[] }>(list).catch(() => null)) ?? {}
-    await writeAtomic(list, `${JSON.stringify({ restored: [...(kept.restored ?? []), restore].slice(-10) }, null, 2)}\n`)
+    const kept = (await readJsonFile<{ alerts?: GuidelinesAlert[] }>(list).catch(() => null)) ?? {}
+    await writeAtomic(list, `${JSON.stringify({ alerts: [...(kept.alerts ?? []), alert].slice(-10) }, null, 2)}\n`)
   })
 
-  return restore
+  return alert
 }
 
-/** The restores of the last week, for the board's attention section. */
-export async function guidelinesRestores(ref: ProjectRef, env: NodeJS.ProcessEnv, now: number): Promise<Restore[]> {
-  const kept = await readJsonFile<{ restored?: Restore[] }>(restoresFile(ref, env)).catch(() => null)
+/** The warnings of the last week, for the board's attention section. */
+export async function guidelinesAlerts(ref: ProjectRef, env: NodeJS.ProcessEnv, now: number): Promise<GuidelinesAlert[]> {
+  const kept = await readJsonFile<{ alerts?: GuidelinesAlert[] }>(alertsFile(ref, env)).catch(() => null)
 
-  return (kept?.restored ?? []).filter(r => typeof r.at === 'number' && typeof r.file === 'string' && now - r.at < RESTORE_SHOWN_MS)
+  return (kept?.alerts ?? []).filter(a => typeof a.at === 'number' && typeof a.file === 'string' && now - a.at < ALERT_SHOWN_MS)
+}
+
+/** A warning in plain words: what happened, and how the person can see or undo it themselves. */
+export function alertWords(alert: GuidelinesAlert): { file: string; what: string; fix: string } {
+  const what = ct(`guidelines.what.${alert.change}`)
+  // A project's file is in git; the person's own has the read-only copy taken when the turn began, if there was one.
+  const fix =
+    alert.from === 'project'
+      ? ct('guidelines.fix.project', { repo: alert.repo, rel: relative(alert.repo, alert.file).replace(/\\/g, '/') })
+      : alert.copy
+        ? ct('guidelines.fix.copy', { copy: alert.copy })
+        : ct('guidelines.fix.noCopy')
+
+  return { file: alert.file, what, fix }
 }

@@ -3,7 +3,8 @@
  * events with the event's JSON on stdin. It writes the session's actor record (its last instruction, task list,
  * background commands, last words), so the board knows where a terminal session stands without the AI reporting;
  * on UserPromptSubmit it hands the turn the PM's delivery ask and the development guidelines; on PreToolUse it keeps
- * the guidelines file from being edited unless the person asked about the guidelines this turn. A hook never fails
+ * the guidelines file from being edited unless the person asked about the guidelines this turn, and after a tool that
+ * can write it warns when the file changed anyway (guard.ts: it never puts anything back). A hook never fails
  * the tool's turn: whatever goes wrong, it exits 0 and says nothing.
  */
 import { readFile } from 'node:fs/promises'
@@ -15,7 +16,8 @@ import { t } from '../../hooks/messages'
 import { clip, finishedTasks, planFromTodos } from '../../hooks/sessions'
 import type { BackgroundTask, Step } from '../../types'
 import type { Run } from './host'
-import { GUARDED_TOOLS, checkGuidelines, keepGuidelines } from './guard'
+import type { GuidelinesSetting } from './guard'
+import { GUARDED_TOOLS, alertWords, watchGuidelines } from './guard'
 import { dataHome, run as hostRun } from './host'
 import { NotPlainPathError, localRealpath, plainLocalPath } from './localpath'
 import { ct } from './messages'
@@ -83,7 +85,7 @@ async function promptSubmit(id: string, ref: ProjectRef, input: HookInput, env: 
   // A notification or another session's message wakes the turn; it is not the person's instruction.
   const isOwn = !prompt.trimStart().startsWith('<')
   const finished = new Set(finishedTasks(prompt))
-  await changeActor(
+  const me = (await changeActor(
     id,
     old => {
       const next = base(old) as HookActor
@@ -101,16 +103,20 @@ async function promptSubmit(id: string, ref: ProjectRef, input: HookInput, env: 
       return next
     },
     env,
-  )
+  )) as HookActor
   const project = await loadProject(ref, env)
   if (!project.pmId) return null
   const parts: string[] = []
+  // The person speaking: the guidelines file as it is now is where this session's turn starts from (guard.ts). A
+  // notification waking the turn is not the person: what changed since the session's last look is judged first, as of
+  // the person's last word.
+  const alert = await guidelinesSetting(ref, env, run)
+    .then(setting => watchGuidelines(ref, id, setting, isOwn, !!me.askedGuidelinesAt, env, now))
+    .catch(() => null)
+  if (alert) parts.push(ct('guidelines.alert', alertWords(alert)))
   const isPm = project.pmId === id
   if (!isPm && !project.isDismissed) parts.push(t('role.delivery', { project: ref.name, tool: REPORT_TOOL }), ct('hook.actorHint', { actor: id }))
   const found = await readGuidelines(ref, env, run)
-  // The person speaking lets the guidelines stand as they are now (their own edit between turns included): the
-  // snapshot later writes are checked against (guard.ts). A notification waking the turn is not the person.
-  if (isOwn && found?.real) await keepGuidelines(found.real, env, now).catch(() => {})
   if (found && 'text' in found) {
     parts.push(t('guidelines.section', { file: found.file, project: ref.name }))
     if (isPm) parts.push(t('guidelines.pm'))
@@ -180,25 +186,22 @@ async function postToolUse(id: string, input: HookInput, env: NodeJS.ProcessEnv,
 }
 
 /**
- * After a tool that can write, or when a turn stops (T-39 2): the guidelines file the project names now compared with
- * its snapshot. None named now (turned off, or another file named): nothing is compared or put back. Changed without
- * the person asking about the guidelines this turn, it is put back (guard.ts) and the model told; asked about, the
- * change stands for every project.
+ * After a tool that can write, or when a turn stops (T-39 2): the guidelines file set now compared with what this
+ * session's turn started from. Changed without the person agreeing to a guidelines change this turn: the model is
+ * told and the board lists it. Nothing is put back. None set now (turned off), or another file set: the session's
+ * baseline is dropped or taken again, and the old file is not compared.
  */
 async function guardAfter(id: string, ref: ProjectRef, input: HookInput, env: NodeJS.ProcessEnv, now: number, run: Run, isStop = false): Promise<HookOutput> {
   if (!isStop && !GUARDED_TOOLS.has(input.tool_name ?? '')) return null
   const project = await loadProject(ref, env)
   if (!project.pmId) return null
-  const found = await readGuidelines(ref, env, run).catch(() => null)
-  if (!found?.real) return null
+  const setting = await guidelinesSetting(ref, env, run).catch(() => undefined)
+  if (setting === undefined) return null
   const actor = (await loadActor(id, env).catch(() => null)) as HookActor | null
-  // A snapshot from before the person last spoke in this session judges nothing (none spoken yet: none does).
-  const since = actor?.spokeAt ?? Number.POSITIVE_INFINITY
-  const restore = await checkGuidelines(ref, found.real, id, !!actor?.askedGuidelinesAt, since, env, now).catch(() => null)
-  if (!restore || isStop) return null
-  const said = restore.isRestored ? ct('guidelines.restored', { file: restore.file, backup: restore.backup ?? '-' }) : ct('guidelines.changed', { file: restore.file, backup: restore.backup ?? '-' })
+  const alert = await watchGuidelines(ref, id, setting, false, !!actor?.askedGuidelinesAt, env, now).catch(() => null)
+  if (!alert || isStop) return null
 
-  return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: said } }
+  return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: ct('guidelines.alert', alertWords(alert)) } }
 }
 
 async function stop(id: string, input: HookInput, env: NodeJS.ProcessEnv, now: number, base: (old: Actor | null) => HookActor) {
@@ -312,38 +315,66 @@ async function isTracked(file: string, repo: string, run: Run): Promise<boolean>
 }
 
 /**
+ * The file a project's .project-pm.json names, when it is a plain path inside the repository that git tracks by that
+ * name; null otherwise. Where a link there leads is not looked at here.
+ */
+async function projectNamed(ref: ProjectRef, run: Run): Promise<string | null> {
+  // .project-pm.json is the repository's: a committed link there may lead to another machine.
+  const settings = await localRealpath(join(ref.path, '.project-pm.json')).catch(() => null)
+  const fromProject = settings ? await readJsonFile<{ guidelines?: unknown }>(settings).catch(() => null) : null
+  if (typeof fromProject?.guidelines !== 'string' || !fromProject.guidelines.trim()) return null
+  const named = projectGuidelinesFile(fromProject.guidelines, ref.path)
+
+  return named && (await isTracked(named, ref.path, run)) ? named : null
+}
+
+/** The file the person's own ~/.project-pm/config.json names (any path; nothing about it is looked up here). */
+async function userNamed(ref: ProjectRef, env: NodeJS.ProcessEnv): Promise<string | null> {
+  const fromUser = await readJsonFile<{ guidelines?: unknown }>(join(dataHome(env), 'config.json')).catch(() => null)
+  if (typeof fromUser?.guidelines !== 'string' || !fromUser.guidelines.trim()) return null
+
+  return guidelinesPath(fromUser.guidelines, homedir().replace(/\\/g, '/'), ref.path.replace(/\\/g, '/'))
+}
+
+/**
+ * The guidelines file the after-the-fact check watches (guard.ts): the one the project names (by its name, wherever a
+ * link there now leads, so a file swapped for a link is noticed rather than passed over), else the person's own; null
+ * when none is set.
+ */
+export async function guidelinesSetting(ref: ProjectRef, env: NodeJS.ProcessEnv = process.env, run: Run = hostRun): Promise<GuidelinesSetting | null> {
+  const named = await projectNamed(ref, run)
+  if (named) return { file: named, from: 'project' }
+  const mine = await userNamed(ref, env)
+
+  return mine ? { file: mine, from: 'user' } : null
+}
+
+/**
  * The development guidelines file: `guidelines` in the project's .project-pm.json (a file git tracks inside the
  * repository, not in .git, where a link leads checked too), else in ~/.project-pm/config.json (the person's own: any
  * plain local path). `real` is where the file really is, the one read. Nothing is read through a path that is not a
  * plain local path or a link that leads to one (localpath.ts): .project-pm.json, the file it names, the person's file.
  */
 export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = process.env, run: Run = hostRun): Promise<{ file: string; real: string; text: string; isClipped: boolean } | { file: string; real?: string; error: string } | null> {
-  // .project-pm.json is the repository's: a committed link there may lead to another machine.
-  const settings = await localRealpath(join(ref.path, '.project-pm.json')).catch(() => null)
-  const fromProject = settings ? await readJsonFile<{ guidelines?: unknown }>(settings).catch(() => null) : null
   let file: string | null = null
-  if (typeof fromProject?.guidelines === 'string' && fromProject.guidelines.trim()) {
-    const named = projectGuidelinesFile(fromProject.guidelines, ref.path)
-    if (named) {
-      // A link committed in the repository may lead anywhere: where it really goes must be inside too, and not in .git.
-      // One that leads off this machine's disks (\\host\share) is refused unfollowed: following it connects there.
-      const real = await localRealpath(named).then(
-        found => found ?? named,
-        () => null,
-      )
-      const repo = real && (await localRealpath(ref.path).then(
-        found => found ?? ref.path,
-        () => null,
-      ))
-      // Only what the project keeps in git: never a .env or another file the person keeps beside the code. Both the
-      // name and the file it really is: a committed link (RULES.md -> .env) is tracked, the file it leads to may not be.
-      if (real && repo && isInside(real, repo) && !isInGit(real, repo) && (await isTracked(named, ref.path, run)) && (await isTracked(real, repo, run))) file = named
-    }
+  const named = await projectNamed(ref, run)
+  if (named) {
+    // A link committed in the repository may lead anywhere: where it really goes must be inside too, and not in .git.
+    // One that leads off this machine's disks (\\host\share) is refused unfollowed: following it connects there.
+    const real = await localRealpath(named).then(
+      found => found ?? named,
+      () => null,
+    )
+    const repo = real && (await localRealpath(ref.path).then(
+      found => found ?? ref.path,
+      () => null,
+    ))
+    // Only what the project keeps in git: never a .env or another file the person keeps beside the code. Both the
+    // name (projectNamed) and the file it really is: a committed link (RULES.md -> .env) is tracked, the file it leads
+    // to may not be.
+    if (real && repo && isInside(real, repo) && !isInGit(real, repo) && (await isTracked(real, repo, run))) file = named
   }
-  if (!file) {
-    const fromUser = await readJsonFile<{ guidelines?: unknown }>(join(dataHome(env), 'config.json')).catch(() => null)
-    if (typeof fromUser?.guidelines === 'string' && fromUser.guidelines.trim()) file = guidelinesPath(fromUser.guidelines, homedir().replace(/\\/g, '/'), ref.path.replace(/\\/g, '/'))
-  }
+  if (!file) file = await userNamed(ref, env)
   if (!file) return null
   const failed = (err: unknown) => (err instanceof Error ? err.message : String(err))
   // The person's file may be named relative to the project, through a link the repository holds: checked the same.
@@ -354,7 +385,7 @@ export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = p
     return { file, error: failed(err) }
   }
   if (!real) return { file, error: 'not found' }
-  // From here `real` is where the file is, or would be: an empty or missing file is still the one named (guard.ts).
+  // From here `real` is where the file is, or would be: an empty or missing file is still the one named.
   try {
     const text = (await readFile(real, 'utf8')).replace(/^\uFEFF/, '').trim()
     if (!text) return { file, real, error: 'empty' }

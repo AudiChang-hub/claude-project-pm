@@ -76,5 +76,6 @@ An npm version for developers with Node.js 20 or later (`npx -y project-pm@<vers
 
 - The programs are not code-signed (see above). With Windows Smart App Control on, the program may be blocked, and there is no other way to run it yet: the npm version comes in a later release.
 - 1.0.0 is not on npm yet.
+- The development guidelines file is locked against the AI's edit tools. A change that gets past the lock (a shell command, another session, you in your editor) is only noticed afterwards and listed on the board under *Needs attention*; Project PM never puts the file back. To undo one, use `git checkout -- <file>` for a project's file, or the read-only copy in `~/.project-pm/guidelines/copies/` for your own. A change made on purpose to get past the check is not caught.
 - The Windows steps to allow a program downloaded from the web (SmartScreen) have not been checked yet. The program itself, built on Windows, has been run there.
 - The Mac steps to allow the program have not been checked on a real Mac. The Mac programs themselves are built and tested on GitHub's Mac machines.
