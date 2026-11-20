@@ -19,11 +19,11 @@
 | 搬進核心的 | 交辦清單（ledger）、QA 關卡、交付判斷、CI 查詢、文字看板、網頁看板、Session 回報紀錄、Agent 紀錄 |
 | 留在轉接層的 | 「我是誰」、Session 清單、面板、把說明塞進提示、改寫 Agent 呼叫、截短通知（各平台的 hook 才做得到） |
 | 資料放哪 | 使用者層級 `~/.project-pm/`，不進 git；專案資料夾只放不含個資的設定和 AGENTS.md 段落 |
-| 多人協作 | v1.0 不同步，但工作項目先帶 `uid`、建立者、修改者、`rev`；v1.1 用 `gh` 同步到 GitHub Issues，預設關閉，上傳前掃描禁用詞（第 10 節） |
+| 多人協作 | **已取消（2026-11-20，使用者決定：只支援 Claude、專注單人作業，見 9.2 節）**。v1.0 已經寫的 `uid`、建立者、修改者、`rev` 保留，理由見 10.1 節；第 10 節的設計只留作紀錄，不會實作 |
 | 舊資料 | 先擴充、後收斂：核心讀新舊兩處，過渡期同時寫回舊檔，桌面版 mod 不用同時改 |
 | 硬關卡在哪 | 在 git 和 CI，不在 AI 工具的 hook：pre-push 沒有 QA 通過就擋（可明確略過並留下紀錄），CI 跑測試、secret 掃描、真實資料掃描、套件安全檢查 |
 | 測試花費 | 不花錢：CI 只跑不需要 AI 模型的測試；需要模型的冒煙測試在發版前用使用者的 Claude 訂閱在本機手動跑，只跑 Claude Code（D9、Q2） |
-| 分版 | ① v1.0：Claude Code CLI＋核心＋網頁看板＋hook 和 CI 範本＋單一執行檔；② v1.1：多人協作（主打）＋E2（桌面版 mod 改用核心）；③ v1.2：Codex、Copilot、Antigravity；④ v1.3：Cursor、Devin（③ ④ 未用 AI 實測，Q2） |
+| 分版 | ① v1.0：Claude Code CLI＋核心＋網頁看板＋hook 和 CI 範本＋單一執行檔（這一版）；② v1.1：E2（桌面版 mod 改用核心）。Claude Code 以外的平台（原本的 v1.2、v1.3）和多人協作都已取消（2026-11-20，使用者決定：只支援 Claude、專注單人作業，見 9.2 節）。核心不依賴特定平台的設計維持不變（MCP 工具、`hook <工具> <事件>`、使用者層級的資料、git 和 CI 的關卡），日後要重新支援其他平台也做得到，但目前不在計畫內 |
 
 ## 1. 架構
 
@@ -72,8 +72,8 @@
 | `project-pm hook <工具> <事件>` | 給各平台 hook 呼叫：從 stdin 讀事件 JSON，寫入 Session 回報（第 3 層） |
 | `project-pm check pre-push` | git pre-push hook 呼叫（第 6 節） |
 | `project-pm skip "<理由>"` | 明確略過這次 push 的 QA，理由記進交辦清單。使用者平常打的是 `init` 設定好的 `git pm skip "<理由>"`（6.2 節） |
-| `project-pm sync on｜off｜resolve` | v1.1：多人協作的同步（第 10 節） |
-| `project-pm terms upload` | v1.1：把本機的禁用詞名單寫成 repo 的 `BLOCKED_TERMS` secret（10.4 節） |
+| `project-pm sync on｜off｜resolve` | 已取消，不會實作（多人協作，第 10 節） |
+| `project-pm terms upload` | 已取消，不會實作（屬於多人協作，10.4 節） |
 
 為什麼 stdio 和 HTTP 都要：
 
@@ -89,7 +89,7 @@
 
 - 每個寫入都是「鎖定 → 重新讀 → 改 → 寫暫存檔 → rename」。鎖用 `<檔名>.lock`（建立時加 exclusive 旗標），超過 10 秒視為殘留鎖，可以清掉。
 - 檔案有 `revision` 欄位，每寫一次加 1，方便看板判斷要不要重畫，也方便測試抓到遺失的更新。
-- 每個工作項目另有自己的 `rev`，和 `uid`、建立者、修改者一起，是給 v1.1 多人協作準備的（10.1 節）。
+- 每個工作項目另有自己的 `rev`（每寫一次加 1，E1 合併時也加 1）和 `uid`（不靠本機序號的穩定 id）。它們和建立者、修改者原本是給多人協作準備的；多人協作已取消（第 10 節），欄位保留，理由見 10.1 節。
 - 過渡期舊版 mod 不會加鎖（2.4 節的雙寫），這段時間靠「寫之前重新讀、以工作項目為單位依 `updatedAt` 合併」降低覆蓋的機會。舊 mod 不認得 10.1 節的新欄位，合併時若舊檔那一份比較新但少了這些欄位，從核心那一份補回來，`rev` 加 1、`updatedBy.actor` 記成 `desktop-mod`（舊 mod 不記修改者）。這是已知風險，列在第 8 節的驗證項目。
 
 ### 1.4 哪些邏輯搬進核心
@@ -203,15 +203,15 @@ mod 現在就用相對路徑 import（`./qa`），所以 import `../core/...` �
 
 | 選項 | 共用 | 個資 | 多人協作 | 缺點 |
 | --- | --- | --- | --- | --- |
-| A. 使用者層級 `~/.project-pm/`（採用，D1） | 同一台電腦的所有工具都讀得到 | 不進 git，不會外流 | 檔案本身不共用；v1.1 選擇開啟後同步到 GitHub Issues（第 10 節） | 換電腦不會跟著走（v1.1 同步後可以）；刪掉專案資料夾不會一起刪 |
+| A. 使用者層級 `~/.project-pm/`（採用，D1） | 同一台電腦的所有工具都讀得到 | 不進 git，不會外流 | 檔案本身不共用（多人協作已取消，第 10 節） | 換電腦不會跟著走；刪掉專案資料夾不會一起刪 |
 | B. 專案資料夾 `.project-pm/`，加進 `.gitignore` | 同上 | 不進 git，但 Vibe Coder 可能誤把 `.gitignore` 那行刪掉 | 不支援 | 每個 worktree 一份，要另外對到主 repo；刪專案資料夾就沒了 |
 | C. 專案資料夾 `.project-pm/`，進 git | 換電腦、多人都看得到 | **風險高**：交辦文字常有客戶名稱、真實資料、內部網址，Vibe Coder 不會檢查 | 會衝突：兩個人同時改 `ledger.json` 一定合併衝突 | 歷史永遠留在 git |
 
 採用 A（D1 定案），理由：
 
 - 個資：交辦清單的內容是使用者對 AI 說的話，常常夾帶真實資料。這個專案自己就有 BLOCKED_TERMS 掃描，說明真實資料外流是實際風險；放進 git 等於把風險交給最不會處理的人。
-- 共用：目標是「同一個人在同一台電腦換著用不同 AI 工具」，A 就夠了。
-- 多人協作：v1.1 的主打（D2 定案）。做法是同步到 GitHub Issues（有權限控制、不會有 git 的合併衝突），而不是把檔案放進 git；預設關閉，上傳前掃描禁用詞。v1.0 不同步，但工作項目先帶好同步需要的欄位（第 10 節）。
+- 共用：目標原本是「同一個人在同一台電腦換著用不同 AI 工具」，A 就夠了；只支援 Claude 之後（9.2 節），是同一台電腦上的 Claude Code 桌面版和 CLI 共用。
+- 多人協作：已取消（2026-11-20，使用者決定：只支援 Claude、專注單人作業，見 9.2 節）。原本 D2 的做法是同步到 GitHub Issues，而不是把檔案放進 git；這段設計留在第 10 節作為紀錄，不會實作。
 
 路徑可以用環境變數 `PROJECT_PM_HOME` 改（測試和 CI 需要）。
 
@@ -233,8 +233,7 @@ mod 現在就用相對路徑 import（`./qa`），所以 import `../core/...` �
   server.json                     serve 的 port、pid、token（只有使用者本人可讀）
   install-log.json                init 改過哪些檔、原本內容的備份位置
   bin/project-pm-<版本>[.exe]     init 複製過來的單一執行檔，各工具的設定都指向它（5.4 節）
-  sync/<專案名>-<hash>.json       v1.1：同步狀態（第 10 節）
-  blocked-terms.txt               v1.1：禁用詞名單的正本（只有使用者本人可讀，10.4 節）
+  （sync/、blocked-terms.txt：原本給多人協作，已取消，不會建立）
 ```
 
 `<hash>` 沿用現在 `keyFile` 的規則，所以新舊檔名一一對應。
@@ -251,11 +250,11 @@ type ProjectFile = {
 type LedgerItem = {
   // 原有欄位不變：id, text, owner, status, note, createdAt, updatedAt，以及 v0.9.0 的 criteria、qa
   commits?: string[]  // 這個項目的 commit（report、Agent 回報時記下），pre-push 用
-  // 以下給 v1.1 多人協作，v1.0 就開始寫（10.1 節）
+  // 以下 v1.0 開始寫。原本給多人協作（已取消），保留的理由見 10.1 節
   uid?: string        // 穩定唯一 id（UUID v7），跨電腦不撞號
   createdBy?: Author  // 建立者
   updatedBy?: Author  // 最後修改者（修改時間沿用原有的 updatedAt）
-  rev?: number        // 這一項每改一次加 1，v1.1 判斷衝突用
+  rev?: number        // 這一項每寫一次加 1
 }
 
 type Author = { actor: string; person?: string }   // Session／Agent id，和 GitHub 帳號（10.1 節）
@@ -277,7 +276,7 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 }
 ```
 
-規則和 v0.9.0 的 QA 欄位一樣：都是選填，舊檔沒有就當沒有，寫回時不補不需要的欄位（開發準則第 7 條）。所以舊項目不會在 v1.0 被補上 `uid`；它在 v1.1 第一次同步時才補（10.1 節）。`createdBy` 只在建立時寫，舊項目一直沒有；`updatedBy`、`rev` 在項目真的被修改時才寫。
+規則和 v0.9.0 的 QA 欄位一樣：都是選填，舊檔沒有就當沒有，寫回時不補不需要的欄位（開發準則第 7 條）。所以舊項目不會被補上 `uid`（原本要在 v1.1 第一次同步時補，同步已取消）。`createdBy` 只在建立時寫，舊項目一直沒有；`updatedBy`、`rev` 在項目真的被修改時才寫。
 
 ### 2.4 從現有 mod 資料遷移：先擴充、後收斂
 
@@ -287,7 +286,7 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 | --- | --- | --- | --- |
 | E1（v1.0） | 讀：新路徑優先，沒有就讀舊路徑。寫：新路徑，**同時寫回舊路徑的 `projects/*.json`**（只寫舊格式有的欄位以外照抄，多的欄位舊 mod 會忽略） | 不改，照舊讀寫舊路徑 | 可以：舊路徑一直是完整的，移除核心就回到 v0.9 |
 | E2（v1.1） | 同 E1 | 改成透過核心的純函式讀寫新路徑，也照樣寫回舊路徑 | 可以：舊路徑仍完整 |
-| C1（v1.4 以後，所有使用中的 mod 都已更新） | 停止寫回舊路徑；仍會讀舊路徑（給沒遷移到的專案） | 只讀寫新路徑 | 要回去得先把新路徑複製回舊路徑（`project-pm export --legacy`） |
+| C1（E2 之後、所有使用中的 mod 都已更新；目前沒有排進任何一版） | 停止寫回舊路徑；仍會讀舊路徑（給沒遷移到的專案） | 只讀寫新路徑 | 要回去得先把新路徑複製回舊路徑（`project-pm export --legacy`） |
 | C2（再下一版） | 不再讀舊路徑；第一次啟動時若發現舊檔還有沒搬的專案，搬過去並在看板提示一次 | 同 C1 | 同 C1 |
 
 細節：
@@ -353,7 +352,7 @@ type Actor = {        // 取代桌面版的 Session 在核心裡的角色
 
 回傳：`content` 和現在一樣（add、update 回改到的那一項，list 回清單）；`structuredContent` 是那一項或那份清單的 JSON。結案關卡的順序不變：force＋note → QA（`qaUpdate`）→ 負責人。
 
-add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`rev`），模型不用帶任何新參數。v1.1 起 `id` 另外接受同步過的 Issue 編號（`"#12"`，10.2 節）。
+add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`rev`），模型不用帶任何新參數。（原本計畫 v1.1 起 `id` 另外接受同步過的 Issue 編號，隨多人協作取消。）
 
 ### 3.4 `report`
 
@@ -417,7 +416,7 @@ add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`
 
 ### 5.1 流程
 
-1. 偵測：PATH 上有沒有 `claude`、`codex`、`agy`、`copilot`、`agent`（Cursor CLI）、`devin`，以及各自的設定資料夾。只偵測這一版支援的工具，其他的列成「之後會支援」。
+1. 偵測：PATH 上有沒有 `claude`，以及它的設定資料夾。（原本也要偵測 `codex`、`agy`、`copilot`、`agent`、`devin`，隨其他平台已取消（2026-11-20，使用者決定：只支援 Claude、專注單人作業，見 9.2 節）。）
 2. 列出打算改的每個檔和內容差異，問使用者要不要套用。預設只看不改；`--yes` 才直接套用。
 3. 套用：每個被改的檔先備份，記進 `install-log.json`。
 4. 驗證：對每個工具跑一次不花錢的檢查（例如 `claude mcp list` 看得到 `project-pm`），失敗就照紀錄還原那一項並說明。
@@ -434,7 +433,7 @@ add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`
 
 | 項目 | Claude Code（① 版） | 其他工具（③ ④ 版，開工時查證確切路徑） |
 | --- | --- | --- |
-| MCP 設定 | `claude mcp add --scope user project-pm -- <執行檔的絕對路徑> mcp`（用官方指令，不直接改 JSON）[C1]。執行檔路徑是 `~/.project-pm/bin/project-pm-<版本>`，等於釘選版本；用 npm 安裝的開發者寫 `npx -y project-pm@<版本> mcp` | Codex：`~/.codex/config.toml` 的 `[mcp_servers.project-pm]` [X1]；Copilot CLI、Antigravity、Cursor、Devin 各自的設定檔 [H1][A1][U1][W1] |
+| MCP 設定 | `claude mcp add --scope user project-pm -- <執行檔的絕對路徑> mcp`（用官方指令，不直接改 JSON）[C1]。執行檔路徑是 `~/.project-pm/bin/project-pm-<版本>`，等於釘選版本；用 npm 安裝的開發者寫 `npx -y project-pm@<版本> mcp` | （其他工具的設定：Codex 的 `~/.codex/config.toml` [X1]，Copilot CLI、Antigravity、Cursor、Devin 各自的設定檔 [H1][A1][U1][W1]，隨其他平台已取消（2026-11-20，使用者決定：只支援 Claude、專注單人作業，見 9.2 節）） |
 | 指示 | 專案的 `AGENTS.md` 段落；若專案有 `CLAUDE.md` 且沒有 `@AGENTS.md`，在 `CLAUDE.md` 開頭加一行 `@AGENTS.md`（Claude Code 有 CLAUDE.md 時不讀 AGENTS.md [C2]） | 同一份 `AGENTS.md` 段落；Antigravity 的 `.agents/rules` 要 frontmatter，Cursor 的 rules 要 `.mdc` [A2][U2]，只有在該工具不讀 AGENTS.md 時才另寫 |
 | Skills | `~/.claude/skills/project-pm/SKILL.md`：怎麼回報、怎麼派驗收、怎麼略過 | 各工具的 skills 目錄（格式都是 SKILL.md）[X10][A4][V4][U9][W1] |
 | hooks（第 3 層） | 使用者層級 `~/.claude/settings.json`：Stop、UserPromptSubmit 等事件呼叫 `project-pm hook claude-code <事件>` | 各工具的 hook 設定 [X3][A3][H3][U3][W2] |
@@ -547,6 +546,8 @@ add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`
 
 ## 7. 各平台轉接表
 
+**Claude Code 以外的平台已取消（2026-11-20，使用者決定：只支援 Claude、專注單人作業，見 9.2 節）。** 本節 Claude Code 以外的部分（7.2 表裡的其他列、7.3 表裡的其他欄）保留當紀錄，不會實作。核心不依賴特定平台的設計維持不變（MCP 工具、`hook <工具> <事件>`、使用者層級的資料、git 和 CI 的關卡），日後要重新支援其他平台也做得到，但目前不在計畫內。
+
 ### 7.1 四層
 
 | 層 | 意思 | 來源 | 需要 AI 配合嗎 |
@@ -566,27 +567,27 @@ add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`
 | --- | --- | --- | --- | --- | --- |
 | Claude Code | 桌面版 | 現有 mod（轉接層）＋核心的資料；E1 期間 mod 自己提供工具 | 4 | mod 面板 | 唯一有 Session 清單 API 的形態 |
 | Claude Code | CLI | 核心 MCP（stdio）＋`@AGENTS.md`＋Skill＋使用者層級 hooks；裝了 mod 的話，mod 的 hook 也能用（實測 Agent 派工、`tool.call` 在 CLI 會跑） | 3（第 4 層部分：核心的 actors 清單，沒有封存、開 Session） | 網頁看板；終端機面板未實測 | `-p` 模式不顯示面板 [C5] |
-| Codex | 桌面版（ChatGPT 桌面 App）＋IDE 擴充 | 核心 MCP（和 CLI 共用 `config.toml`）＋AGENTS.md＋Skill；桌面版的「設定 > Hooks」 | 2（桌面版的 hook 能用就是 3） | 網頁看板 | 桌面版讀 AGENTS.md、IDE 的 hooks 都未確認 [X2][X3]；③ 開工時查 |
-| Codex | CLI | 核心 MCP＋AGENTS.md＋Skill＋hooks（command 處理方式） | 3 | 網頁看板 | MCP 工具預設 60 秒逾時；`exec` 只載入受信任專案的 MCP [X1][X6]；Stop 只能叫它繼續 |
-| Antigravity | 桌面（App、IDE） | 核心 MCP＋AGENTS.md＋Skill＋hooks（6 個事件，只有 command） | 3 | 網頁看板 | 外掛沒有 UI 元件 [A6] |
-| Antigravity | CLI（`agy`） | 同上 | 3 | 網頁看板 | `-p` 遇到需要核准的工具會拒絕但 exit 0，CI 要檢查輸出內容 [A7] |
-| Gemini CLI | CLI | 不列為目標 | — | — | 個人與免費方案已停用 [G0]；要讀 AGENTS.md 得另外設定 [G2] |
-| VS Code＋Copilot | 編輯器 | 核心 MCP（`.vscode/mcp.json` 或使用者設定）＋AGENTS.md＋Skill；hooks 還在預覽 | 2（hooks 正式後是 3） | 網頁看板；之後可做 webview 擴充 [V6] | 也讀 `.claude/settings.json` 的 hooks，會重複執行 [V3] |
-| Copilot | CLI | 核心 MCP＋AGENTS.md＋Skill＋hooks | 3 | 網頁看板 | agentStop 連擋 8 次會強制結束 [H3] |
-| Cursor | 編輯器 | 核心 MCP＋AGENTS.md＋Skill＋hooks（18 個事件） | 3 | 網頁看板；可裝 Open VSX 擴充，面板能力未驗證 [U7] | stop 擋不了 [U3] |
-| Cursor | CLI（`agent`） | 核心 MCP（共用 `mcp.json`）＋AGENTS.md | 2（hooks 確認後是 3） | 網頁看板 | 只確認 workspaceOpen 會在 CLI 跑 [U3]；`-p` 沒有 `--force` 會拒絕 [U5] |
-| Devin（原 Windsurf） | 桌面 | 核心 MCP＋AGENTS.md＋Skill＋`.devin/hooks.v1.json` | 3 | 網頁看板 | Restricted Mode 下 hooks 不執行 [W1] |
-| Devin | CLI | 同桌面版（同一套 harness）[W1] | 3 | 網頁看板 | `-p` 的輸出格式未確認 [W6]；④ 開工時查 |
+| Codex（已取消） | 桌面版（ChatGPT 桌面 App）＋IDE 擴充 | 核心 MCP（和 CLI 共用 `config.toml`）＋AGENTS.md＋Skill；桌面版的「設定 > Hooks」 | 2（桌面版的 hook 能用就是 3） | 網頁看板 | 桌面版讀 AGENTS.md、IDE 的 hooks 都未確認 [X2][X3]；③ 開工時查 |
+| Codex（已取消） | CLI | 核心 MCP＋AGENTS.md＋Skill＋hooks（command 處理方式） | 3 | 網頁看板 | MCP 工具預設 60 秒逾時；`exec` 只載入受信任專案的 MCP [X1][X6]；Stop 只能叫它繼續 |
+| Antigravity（已取消） | 桌面（App、IDE） | 核心 MCP＋AGENTS.md＋Skill＋hooks（6 個事件，只有 command） | 3 | 網頁看板 | 外掛沒有 UI 元件 [A6] |
+| Antigravity（已取消） | CLI（`agy`） | 同上 | 3 | 網頁看板 | `-p` 遇到需要核准的工具會拒絕但 exit 0，CI 要檢查輸出內容 [A7] |
+| Gemini CLI（不支援，D11） | CLI | 不列為目標 | — | — | 個人與免費方案已停用 [G0]；要讀 AGENTS.md 得另外設定 [G2] |
+| VS Code＋Copilot（已取消） | 編輯器 | 核心 MCP（`.vscode/mcp.json` 或使用者設定）＋AGENTS.md＋Skill；hooks 還在預覽 | 2（hooks 正式後是 3） | 網頁看板；之後可做 webview 擴充 [V6] | 也讀 `.claude/settings.json` 的 hooks，會重複執行 [V3] |
+| Copilot（已取消） | CLI | 核心 MCP＋AGENTS.md＋Skill＋hooks | 3 | 網頁看板 | agentStop 連擋 8 次會強制結束 [H3] |
+| Cursor（已取消） | 編輯器 | 核心 MCP＋AGENTS.md＋Skill＋hooks（18 個事件） | 3 | 網頁看板；可裝 Open VSX 擴充，面板能力未驗證 [U7] | stop 擋不了 [U3] |
+| Cursor（已取消） | CLI（`agent`） | 核心 MCP（共用 `mcp.json`）＋AGENTS.md | 2（hooks 確認後是 3） | 網頁看板 | 只確認 workspaceOpen 會在 CLI 跑 [U3]；`-p` 沒有 `--force` 會拒絕 [U5] |
+| Devin（原 Windsurf）（已取消） | 桌面 | 核心 MCP＋AGENTS.md＋Skill＋`.devin/hooks.v1.json` | 3 | 網頁看板 | Restricted Mode 下 hooks 不執行 [W1] |
+| Devin（已取消） | CLI | 同桌面版（同一套 harness）[W1] | 3 | 網頁看板 | `-p` 的輸出格式未確認 [W6]；④ 開工時查 |
 
 所有形態的硬關卡都一樣：pre-push＋CI（第 6 節）。
 
 ### 7.3 配備表（資料來源）
 
-給 README 的「支援平台」表用。列是功能，欄是平台；每格寫「v0.9.0 現況 → 目標（在哪一版達成）」。版本對應第 8 節（Q4 定案）：v1.0 是 ①，v1.1 是 ②（多人協作，以及遷移 E2：桌面版 mod 改用核心），v1.2 是 ③（Codex、Copilot、Antigravity），v1.3 是 ④（Cursor、Devin）。
+給 README 的「支援平台」表用。列是功能，欄是平台；每格寫「v0.9.0 現況 → 目標（在哪一版達成）」。版本對應第 8 節：v1.0 是 ①，v1.1 是 ②（遷移 E2：桌面版 mod 改用核心）。原本的 v1.2（③ Codex、Copilot、Antigravity）、v1.3（④ Cursor、Devin）和多人協作都已取消（2026-11-20，使用者決定：只支援 Claude、專注單人作業，見 9.2 節）；表上這幾欄和多人協作那一列只留作紀錄（註腳 ᵏ、ᵐ）。
 
 圖例：✅ 可用、◐ 部分、🗓 規劃中、— 不支援。「目標」都是計畫，各版做完、驗證過才能改成 ✅ 放進 README。標了 ⁽ˡ⁾ 的五欄只會驗證到不需要模型的部分，放進 README 時寫「✅ 未實測」或「◐ 未實測」，不能只寫 ✅（Q2）。
 
-| 功能 | Claude Code 桌面版 | Claude Code CLI | Codex ⁽ˡ⁾ | Copilot ⁽ˡ⁾ | Antigravity ⁽ˡ⁾ | Cursor ⁽ˡ⁾ | Devin ⁽ˡ⁾ |
+| 功能 | Claude Code 桌面版 | Claude Code CLI | Codex（已取消 ⁽ᵐ⁾） | Copilot（已取消 ⁽ᵐ⁾） | Antigravity（已取消 ⁽ᵐ⁾） | Cursor（已取消 ⁽ᵐ⁾） | Devin（已取消 ⁽ᵐ⁾） |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 看板面板 | ✅ → ✅ | — 〔實測 `-p`；互動模式讀程式〕 → ✅ v1.0 ⁽ᵃ⁾ | — → ✅ v1.2 ⁽ᵃ⁾ | — → ✅ v1.2 ⁽ᵃ⁾ | — → ✅ v1.2 ⁽ᵃ⁾ | — → ✅ v1.3 ⁽ᵃ⁾ | — → ✅ v1.3 ⁽ᵃ⁾ |
 | 文字看板 | ✅ → ✅ | — 〔實測〕 → ✅ v1.0 | — → ✅ v1.2 | — → ✅ v1.2 | — → ✅ v1.2 | — → ✅ v1.3 | — → ✅ v1.3 |
@@ -597,7 +598,7 @@ add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`
 | Agent 派工 | ✅ → ✅ | — 〔實測〕 ⁽ᶠ⁾ → ◐ v1.0 → ✅ v1.1 | — → ◐ v1.2 ⁽ᵍ⁾ | — → ◐ v1.2 ⁽ᵍ⁾ | — → ◐ v1.2 ⁽ᵍ⁾ | — → ◐ v1.3 ⁽ᵍ⁾ | — → ◐ v1.3 ⁽ᵍ⁾ |
 | 開發準則 | ✅ → ✅ | ◐ 〔讀程式，未實測〕 ⁽ʰ⁾ → ✅ v1.0 | — → ◐ v1.2 ⁽ⁱ⁾ | — → ◐ v1.2 ⁽ⁱ⁾ | — → ◐ v1.2 ⁽ⁱ⁾ | — → ◐ v1.3 ⁽ⁱ⁾ | — → ◐ v1.3 ⁽ⁱ⁾ |
 | CI 真實資料掃描 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 | — ⁽ʲ⁾ → ✅ v1.0 |
-| 多人協作 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 | — ⁽ᵏ⁾ → 🗓 v1.1 |
+| 多人協作 | — → 已取消 ⁽ᵏ⁾ | — → 已取消 ⁽ᵏ⁾ | — → 已取消 ⁽ᵏ⁾ | — → 已取消 ⁽ᵏ⁾ | — → 已取消 ⁽ᵏ⁾ | — → 已取消 ⁽ᵏ⁾ | — → 已取消 ⁽ᵏ⁾ |
 
 Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1-cli-check.md)，Claude Code 2.1.326）。〔實測〕是用 `-p` 實際跑過的；〔讀程式〕是看程式碼判斷、沒有跑。其他欄的 v0.9.0 都是「—」，因為 mod 只能裝在 Claude Code；它們的目標來自查證報告和第 7.2 節，都還沒實測。
 
@@ -613,8 +614,9 @@ Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1
 - ⁽ʰ⁾ 讀程式：準則由 `prompt.compose` 放進提示，不需要 Session id，所以「PM 在桌面版、這個 Session 在 CLI」時 CLI 會拿到準則（實測確認同一條路徑的交付指示有放進 CLI 的提示）；但 CLI 自己當不了 PM。改準則檔的擋法（`tool.call`）也不需要 id。這次的測試沒設定準則檔，所以沒實際驗證。v1.0 改由使用者層級的 UserPromptSubmit hook 每輪放進提示，不再依賴 PM 在桌面版。
 - ⁽ⁱ⁾ 「部分」：AGENTS.md 段落指向準則檔，靠 AI 自己去讀（第 2 層）；「沒問過不能改準則檔」靠各平台的 PreToolUse 類 hook。能不能像 Claude Code 一樣每輪自動放進提示，看各平台有沒有對應的 hook 事件，該版開工時查證。
 - ⁽ʲ⁾ v0.9.0 只有本 repo 自己的 CI 有這一步（qa.md 第 7 節），使用者的專案沒有。v1.0 的 CI 範本（第 6.3 節）是 GitHub Actions，和用哪個 AI 工具無關，所以所有欄同時變成 ✅。
-- ⁽ᵏ⁾ v0.9.0 只有單機的交辦清單。v1.1 的同步做在核心、透過 `gh` 和 GitHub Issues（第 10 節），和用哪個 AI 工具無關，所以所有欄同時是 v1.1。Codex、Copilot、Antigravity 的轉接要到 v1.2，Cursor、Devin 要到 v1.3；在那之前，這幾欄的同步結果只能從網頁看板和 `project-pm board` 看到，工具裡的交辦清單要等各自的版本。v1.0 已經開始寫同步需要的欄位（10.1 節），但還不能同步，所以 v1.0 不算部分支援。
-- ⁽ˡ⁾ 未實測（Q2 定案）：使用者除了 Claude 之外沒有其他平台的訂閱或帳號，這五個平台不會用 AI 實際跑。驗證只到不需要模型的部分：MCP 協定、`init` 寫出的設定檔、hook（用錄好的事件 JSON），以及 `init`／`uninstall` 還原（第 8 節 ③ ④）。例外是和 AI 工具無關的兩列（CI 真實資料掃描、多人協作），它們在 CI 和 Claude Code 上驗證過就算數。
+- ⁽ᵏ⁾ 多人協作已取消（2026-11-20，使用者決定：只支援 Claude、專注單人作業，見 9.2 節）。原本的規劃是 v1.1 透過 `gh` 同步到 GitHub Issues（第 10 節，留作紀錄）。README 的配備表拿掉這一列。
+- ⁽ᵐ⁾ Codex、Copilot、Antigravity、Cursor、Devin 這五欄已取消（2026-11-20，使用者決定：只支援 Claude、專注單人作業，見 9.2 節）。「→」後面的目標只留作紀錄；README 的配備表只留 Claude Code 桌面版和 CLI 兩欄。
+- ⁽ˡ⁾ （隨 ⁽ᵐ⁾ 一起不再適用）未實測（Q2 定案）：使用者除了 Claude 之外沒有其他平台的訂閱或帳號，這五個平台不會用 AI 實際跑。驗證只到不需要模型的部分：MCP 協定、`init` 寫出的設定檔、hook（用錄好的事件 JSON），以及 `init`／`uninstall` 還原（第 8 節 ③ ④）。例外是和 AI 工具無關的兩列（CI 真實資料掃描、多人協作），它們在 CI 和 Claude Code 上驗證過就算數。
 
 註腳（同一平台的桌面版和 CLI 有差異）：
 
@@ -625,25 +627,27 @@ Claude Code CLI 這一欄的 v0.9.0 現況來自第 0 步（[v1-cli-check.md](v1
 
 ## 8. 分版計畫
 
+**2026-11-20 的分版調整（使用者決定，9.2 節）**：只支援 Claude、專注單人作業。分版改成 ① v1.0（這一版）、② v1.1 E2（桌面版 mod 改用核心）。② 原本的多人協作、③ v1.2（Codex、Copilot、Antigravity）、④ v1.3（Cursor、Devin）都取消，下面保留當紀錄。核心不依賴特定平台的設計維持不變（MCP 工具、`hook <工具> <事件>`、使用者層級的資料、git 和 CI 的關卡），日後要重新支援其他平台也做得到，但目前不在計畫內。
+
 每一版都遵守：新功能先擴充、不刪舊的；每版有獨立的回復方法；沒跑到的驗證如實寫在 release 說明。
 
 測試不花錢（D9）：
 
-- CI（GitHub Actions，公開 repo 的免費額度）只跑不需要 AI 模型的測試：單元、MCP 協定、hook、看板、安裝、同步（用假的 GitHub API）。每次 PR 都跑。
+- CI（GitHub Actions，公開 repo 的免費額度）只跑不需要 AI 模型的測試：單元、MCP 協定、hook、看板、安裝。每次 PR 都跑。
 - 需要模型的冒煙測試（headless 跑固定劇本）CI 不跑，改成發版前在本機手動跑，用使用者現有的訂閱額度，不另外申請 API 金鑰。
-- 使用者只有 Claude 的訂閱（Q2 定案），所以只有 Claude Code 會用 AI 實際跑。Codex、Copilot、Antigravity、Cursor、Devin 只驗證到不需要模型的部分（MCP 協定、設定檔、hook、`init`／`uninstall`），配備表和 release 說明標「未實測」。
+- 用 AI 實際跑的冒煙測試只有 Claude Code（使用者的 Claude 訂閱）。原本 Q2 對其他平台「只驗證不需要模型的部分、標未實測」的安排，隨其他平台取消而不再適用。
 
 release 說明固定要寫的已知限制（Q1、Q3 定案）：
 
 - 執行檔沒有程式碼簽章。Windows 開著「智慧型應用程式控制」時可能直接擋下、沒有放行按鈕；遇到這種情況改用 npm 版，要先裝 Node（README 的安裝說明也寫）。
 - macOS 版：「放行步驟未在實機驗證」（沒有 Mac）。執行檔本身在 CI 的 macOS runner 上跑過測試。
-- v1.2 起：哪些平台「未實測」，以及實際驗證到哪裡（MCP 協定、設定檔、hook）。
+- （原本 v1.2 起要寫「哪些平台未實測」，隨其他平台取消而不再適用。）
 
 ### ① v1.0：Claude Code CLI、核心、網頁看板、hook 和 CI 範本、單一執行檔
 
 範圍：
 
-- `core/`：純函式（從 `hooks/` 搬，見 1.4 節）、Node 層、MCP server（stdio＋Streamable HTTP）、`board`、`ledger`、`report`、`pm` 四個工具。工作項目從這一版起寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`rev`），為 v1.1 的同步做準備。
+- `core/`：純函式（從 `hooks/` 搬，見 1.4 節）、Node 層、MCP server（stdio＋Streamable HTTP）、`board`、`ledger`、`report`、`pm` 四個工具。工作項目從這一版起寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`rev`）。原本是為 v1.1 的同步做準備；同步已取消，欄位保留，理由見 10.1 節。
 - 單一執行檔：GitHub Actions 的建置和 release workflow、`SHA256SUMS`、白話的安裝和放行說明（5.5 節），以及 README 和 release 說明裡的已知限制（本節開頭）；npm 套件同時發布。
 - 網頁看板（唯讀，第 4 節）。
 - `init`、`uninstall`：只支援 Claude Code（CLI）；偵測到桌面版 mod 時只提示、不加 MCP 設定（3.7 節）。
@@ -677,24 +681,22 @@ release 說明固定要寫的已知限制（Q1、Q3 定案）：
 - 設定：`project-pm uninstall`。
 - 資料：E1 雙寫，舊路徑一直完整；移除核心等於回到 v0.9.0，桌面版完全不受影響。
 
-### ② v1.1：多人協作（主打）、E2
+### ② v1.1：E2（桌面版 mod 改用核心）
 
-範圍（Q4 定案：v1.1 只做這兩件）：
+範圍：原本 Q4 定的「多人協作＋E2」，多人協作已取消（2026-11-20，使用者決定：只支援 Claude、專注單人作業，見 9.2 節），v1.1 只做 E2。
 
-- **多人協作**（D2，第 10 節）：`project-pm sync`、`sync on｜off｜resolve`、`terms upload`；GitHub Issues 的對應和三方合併；公開 repo 的警告和同意；上傳前的禁用詞掃描；看板的同步狀態和「同步衝突」。
 - **E2**（2.4 節）：桌面版 mod 改用核心的資料和身分；mod 這邊的 report 假成功一起修掉；mod 在核心已提供 `project-pm` MCP 時不再自己註冊工具（3.7 節）。
-
-先查證：GitHub 的寫入 API 支不支援條件式更新、Issues 的 ETag 行為（10.3 節）。
 
 驗證：
 
-- 多人協作：照 10.5 節。CI 用假的 GitHub API 和兩個 `PROJECT_PM_HOME` 跑每次 PR；發版前用使用者自己的私人測試 repo 手動跑一輪。都不需要模型。
 - E2：同 2.4 節，用舊格式的假資料，新版 mod 和核心同時開著，兩邊都看得到對方寫的；舊路徑仍完整。發版前手動一次。
-- 需要模型的冒煙測試：同 v1.0，只跑 Claude Code（桌面版和 CLI），用使用者的 Claude 訂閱在本機手動跑；劇本多一段同步。
+- 需要模型的冒煙測試：同 v1.0，只跑 Claude Code（桌面版和 CLI），用使用者的 Claude 訂閱在本機手動跑。
 
-回復：同步出問題時 `project-pm sync off`，本機資料不受影響（10.5 節）；E2 出問題時 mod 退回 E1 版本，舊路徑仍完整。
+回復：E2 出問題時 mod 退回 E1 版本，舊路徑仍完整。
 
-### ③ v1.2：Codex、Copilot、Antigravity
+### ③ v1.2：Codex、Copilot、Antigravity（已取消）
+
+**已取消（2026-11-20，使用者決定：只支援 Claude、專注單人作業，見 9.2 節）。以下保留當紀錄，不會實作。**
 
 範圍：`init` 支援 Codex（CLI、桌面版）、Copilot（CLI、VS Code）、Antigravity（CLI、桌面）；各自的 `hook <工具> <事件>`；AGENTS.md 大小檢查（Codex 32 KiB）；處理 Copilot 重複執行 Claude 的 hooks。
 
@@ -708,7 +710,9 @@ release 說明固定要寫的已知限制（Q1、Q3 定案）：
 
 回復：每個平台的轉接是獨立的（`init --tool codex`、`uninstall --tool codex`），一個平台出問題只移除那一個，不影響其他。
 
-### ④ v1.3：Cursor、Devin
+### ④ v1.3：Cursor、Devin（已取消）
+
+**已取消（2026-11-20，使用者決定：只支援 Claude、專注單人作業，見 9.2 節）。以下保留當紀錄，不會實作。** 資料遷移的 C1 原本排在這之後（v1.4 以後），現在沒有排進任何一版（2.4 節）。
 
 範圍：`init` 支援 Cursor（編輯器、CLI）、Devin（桌面、CLI）；各自的 hook。可以評估 VS Code 系的 webview 擴充（Cursor、Devin 都能裝 Open VSX 擴充）當第 4 層的面板。資料遷移的 C1 不在這一版，等 ③ ④ 都穩定一個版本以上（v1.4 以後）。
 
@@ -724,8 +728,8 @@ release 說明固定要寫的已知限制（Q1、Q3 定案）：
 
 | # | 問題 | 結論 | 定案日期 | 理由與影響的章節 |
 | --- | --- | --- | --- | --- |
-| D1 | 交辦清單存在哪 | A：使用者層級 `~/.project-pm/`，不進 git | 2026-11-19 | 照原建議。個資不外流；同一台電腦的工具都能共用；Vibe Coder 不用管 `.gitignore`（2.1 節）。多人共用改走 D2 的 GitHub 同步，不是把檔案放進 git |
-| D2 | 要不要支援多人協作 | **要做，當 v1.1 的主打。** v1.0 不同步，但工作項目先帶齊同步需要的欄位（`uid`、`createdBy`、`updatedBy`、`updatedAt`、`rev`），v1.1 不用遷移資料。v1.1 透過 `gh` 同步到 GitHub Issues（Projects 選填），不架伺服器；預設關閉，公開 repo 要警告並明確同意，上傳前用 `BLOCKED_TERMS` 同一份名單掃描，命中就擋 | 2026-11-19 | 原本的建議：v1 不支援，之後評估 GitHub Issues。改變的原因：使用者要把它當 v1.1 亮點。影響：摘要、1.3、2.1～2.4、3.3、7.3、第 8 節 ②、第 10 節（新增） |
+| D1 | 交辦清單存在哪 | A：使用者層級 `~/.project-pm/`，不進 git | 2026-11-19 | 照原建議。個資不外流；同一台電腦的工具都能共用；Vibe Coder 不用管 `.gitignore`（2.1 節）。多人共用原本改走 D2 的 GitHub 同步，不是把檔案放進 git（D2 已在 2026-11-20 取消，9.2 節） |
+| D2 | 要不要支援多人協作 | **2026-11-20 取消（9.2 節），以下是當時的結論，只留作紀錄。** 要做，當 v1.1 的主打。 v1.0 不同步，但工作項目先帶齊同步需要的欄位（`uid`、`createdBy`、`updatedBy`、`updatedAt`、`rev`），v1.1 不用遷移資料。v1.1 透過 `gh` 同步到 GitHub Issues（Projects 選填），不架伺服器；預設關閉，公開 repo 要警告並明確同意，上傳前用 `BLOCKED_TERMS` 同一份名單掃描，命中就擋 | 2026-11-19 | 原本的建議：v1 不支援，之後評估 GitHub Issues。改變的原因：使用者要把它當 v1.1 亮點。影響：摘要、1.3、2.1～2.4、3.3、7.3、第 8 節 ②、第 10 節（新增） |
 | D3 | 怎麼發佈 | **主要發布各作業系統的單一執行檔**（Windows、macOS、Linux），用 Node SEA 或 Bun 編譯，在 GitHub Actions 建置；npm 套件保留給開發者。不買程式碼簽章憑證，列為已知限制；`init` 不幫使用者裝 Node、不改系統 | 2026-11-19 | 原本的建議：先 npm、之後加單一執行檔。改變的原因：使用者不希望 Vibe Coder 另外安裝執行環境。代價：每個檔約 50～100 MB；沒有簽章時 Windows 會跳 SmartScreen、macOS 會擋，安裝說明要用白話教怎麼放行（5.5 節）。影響：摘要、1.2、2.2、5.2、5.4、5.5、6.2、第 8 節 |
 | D4 | 網頁看板能不能操作 | 唯讀 | 2026-11-19 | 照原建議。只讀就沒有跨站請求的風險；操作仍透過 PM，關卡規則只有一個入口（4.2 節） |
 | D5 | 看板 port | 固定預設，被占用時往後找 | 2026-11-19 | 照原建議。書籤、說明文件都好寫；實際 port 記在 `server.json`（4.3 節） |
@@ -745,17 +749,33 @@ release 說明固定要寫的已知限制（Q1、Q3 定案）：
 | # | 問題 | 結論 | 定案日期 | 理由與影響的章節 |
 | --- | --- | --- | --- | --- |
 | Q1 | Windows「智慧型應用程式控制」擋下未簽章的執行檔時怎麼辦 | 列為已知限制，不申請簽章。README 和 release 說明寫明：遇到這種情況改用 npm 版，要先裝 Node | 2026-11-19 | 和 D3 一致：不花錢、不另外申請。這是少數會要使用者裝 Node 的情況，所以要寫清楚。影響：5.5 節、第 8 節開頭的「release 說明固定要寫的已知限制」 |
-| Q2 | 使用者沒有訂閱的平台怎麼做冒煙測試 | 使用者除了 Claude 之外沒有其他平台的訂閱或帳號。Codex、Copilot、Antigravity、Cursor、Devin 都不用 AI 實際跑，只驗證不需要模型的部分（MCP 協定、設定檔、hook）；配備表和 release 說明標「未實測」 | 2026-11-19 | 和 D9 一致：不花錢、不另外申請帳號。影響：7.3 節（圖例和註腳 ˡ）、第 8 節開頭和 ③ ④ 的驗證 |
+| Q2 | 使用者沒有訂閱的平台怎麼做冒煙測試 | 使用者除了 Claude 之外沒有其他平台的訂閱或帳號。Codex、Copilot、Antigravity、Cursor、Devin 都不用 AI 實際跑，只驗證不需要模型的部分（MCP 協定、設定檔、hook）；配備表和 release 說明標「未實測」。**2026-11-20 起不再適用**：只支援 Claude（9.2 節），README、release 說明和 CHANGELOG 拿掉這條已知限制 | 2026-11-19 | 和 D9 一致：不花錢、不另外申請帳號。影響：7.3 節（圖例和註腳 ˡ）、第 8 節開頭和 ③ ④ 的驗證 |
 | Q3 | macOS 的下載和放行步驟由誰實機走一次 | 使用者沒有 Mac，不驗證。macOS 版的 release 說明標「放行步驟未在實機驗證」；執行檔本身仍在 CI 的 macOS runner 上跑測試 | 2026-11-19 | 如實回報沒驗到的部分。影響：5.5 節、第 8 節 ① 的驗證和 release 說明 |
-| Q4 | v1.1 的範圍是否太大 | 拆開。v1.1：多人協作＋E2（桌面版外掛改用核心）。v1.2：Codex、Copilot、Antigravity。v1.3：Cursor、Devin。資料遷移的 C1 順延到 v1.4 以後 | 2026-11-19 | 讓 v1.1 專心在主打的多人協作。影響：摘要、1.5、2.4、5.2、7.2、7.3、第 8 節、第 11 節 |
+| Q4 | v1.1 的範圍是否太大 | 拆開。v1.1：多人協作＋E2（桌面版外掛改用核心）。v1.2：Codex、Copilot、Antigravity。v1.3：Cursor、Devin。資料遷移的 C1 順延到 v1.4 以後。**2026-11-20 改（9.2 節）**：v1.1 只有 E2；v1.2、v1.3 取消；C1 沒有排進任何一版 | 2026-11-19 | 讓 v1.1 專心在主打的多人協作。影響：摘要、1.5、2.4、5.2、7.2、7.3、第 8 節、第 11 節 |
 
-## 10. 多人協作（v1.1）
+### 9.2 2026-11-20 的變更（已定案）
 
-D2 定案：多人協作是 v1.1 的主打。v1.0 不同步，但資料結構先準備好，v1.1 打開同步時不用遷移資料。
+使用者在 2026-11-20 決定（同一天稍早曾先決定只拿掉 Devin、把 v1.2 和 v1.3 合併，最後定為下表）：
+
+| # | 問題 | 結論 | 定案日期 | 理由與影響的章節 |
+| --- | --- | --- | --- | --- |
+| D14 | 多人協作（D2）還做不做 | **取消，不會實作。** 第 10 節的設計只留作紀錄。v1.0 已經寫的 `uid`、`createdBy`、`updatedBy`、`rev` 保留 | 2026-11-20 | 只支援 Claude、專注單人作業（理念：「人人都成為 CEO」）。欄位保留：刪欄位要分兩版（開發準則第 7 條），`uid` 和 `rev` 在多個行程同時寫入時本來就有用（10.1 節）。影響：摘要、1.2、1.3、2.1～2.3、3.3、7.3、第 8 節、D2、第 10 節、README 的配備表 |
+| D15 | 要支援哪些平台 | **只支援 Claude**（Claude Code 桌面版和 CLI）。Codex、Copilot、Antigravity、Cursor、Devin 都取消，原本的 v1.2、v1.3 取消 | 2026-11-20 | 只支援 Claude、專注單人作業。核心不依賴特定平台的設計維持不變（MCP 工具、`hook <工具> <事件>`、使用者層級的資料、git 和 CI 的關卡），日後要重新支援其他平台也做得到，但目前不在計畫內。Q2「其他平台未實測」的已知限制不再適用。影響：摘要、2.1、5.1、5.2、第 7 節、7.3、第 8 節、Q2、Q4、README 的配備表、`core/README*`、release 說明、CHANGELOG `[1.0.0]` |
+| D16 | 分版 | ① v1.0（這一版）；② v1.1：E2（桌面版 mod 改用核心）。資料遷移的 C1 沒有排進任何一版 | 2026-11-20 | 多人協作和其他平台都取消後只剩 E2。影響：摘要、2.4、7.3、第 8 節、Q4 |
+
+## 10. 多人協作（已取消）
+
+**已取消（2026-11-20，使用者決定：只支援 Claude、專注單人作業，見 9.2 節）。本節不會實作，內容保留作為當時的設計紀錄。** 原本的 D2：多人協作是 v1.1 的主打。v1.0 不同步，但資料結構先準備好，v1.1 打開同步時不用遷移資料。
 
 目標情境：兩三個人（或同一個人的兩台電腦）做同一個 GitHub repo，各自用自己的 AI 工具和 PM，看到同一份交辦清單和 QA 紀錄；誰建的、誰改的、誰驗收的都看得出來。
 
 ### 10.1 v1.0 先帶的欄位
+
+**這些欄位保留（D14）。** 多人協作取消後，v1.0 已經寫進資料的 `uid`、`createdBy`、`updatedBy`、`rev` 不刪：
+
+- 刪欄位要分兩版（開發準則第 7 條）：先停止使用、再移除，v1.0 已經寫出去的檔才不會被下一版讀壞。
+- `uid` 和 `rev` 在單人作業也有用：每個 AI Session 各自啟動一個 `project-pm`，同一個專案常有好幾個行程同時寫（1.3 節）。`rev` 記下每一項被寫過幾次（E1 合併時也加 1），查遺失的更新、比兩份副本時是線索；`uid` 是不靠本機數字序號的穩定 id。目前的程式只寫入它們、不靠它們做判斷：E1 合併比的是數字 `id` 和 `updatedAt`（2.4 節）。
+- `createdBy`、`updatedBy` 記下是哪個 Session 或 Agent 建立、最後修改這一項；目前沒有功能依賴它們（QA 關卡比的是負責人和驗收者），留著不影響任何行為，要拿掉也得照第 7 條分兩版。
 
 都是選填的新欄位，遵守 2.3 節「只擴充」：舊欄位不改型別、不改意思；舊檔沒有就當沒有；寫回時不幫舊項目補欄位。
 

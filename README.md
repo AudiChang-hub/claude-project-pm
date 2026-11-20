@@ -43,24 +43,21 @@ Step by step, and what to do when Windows or macOS warns you (those steps are no
 
 ## Platform support
 
-✅ available · ◐ partial · 🗓 planned · — not supported
+✅ available · ◐ partial
 
-| Feature | Claude Code desktop | Claude Code CLI¹ | Codex² | Copilot² | Antigravity² | Cursor² | Devin² |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| Board | ✅ | ✅ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
-| Ledger | ✅ | ✅ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
-| QA gate | ✅ | ✅ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
-| Delivery check (git, CI) | ✅ | ◐ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
-| Live session tracking | ✅ | ◐ | 🗓 v1.2⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ | 🗓 v1.3⁴ | 🗓 v1.3⁴ |
-| Agent hand-off | ✅ | ◐ | 🗓 v1.2⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ | 🗓 v1.3⁴ | 🗓 v1.3⁴ |
-| Development guidelines | ✅ | ✅ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
-| CI template³ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Team sync | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 |
+| Feature | Claude Code desktop | Claude Code CLI¹ |
+| --- | :-: | :-: |
+| Board | ✅ | ✅ |
+| Ledger | ✅ | ✅ |
+| QA gate | ✅ | ✅ |
+| Delivery check (git, CI) | ✅ | ◐ |
+| Live session tracking | ✅ | ◐ |
+| Agent hand-off | ✅ | ◐ |
+| Development guidelines | ✅ | ✅ |
+| CI template² | ✅ | ✅ |
 
 ¹ Tested with Claude Code 2.1.326. The board is the web board and `project-pm board`. Partial: CI status (git is checked), sessions seen only through hooks, and no automatic agent set-up.
-² App (or editor) and CLI; a note will mark where they differ.
-³ GitHub Actions, whatever AI tool you use. No other platform's AI has been tried with it.
-⁴ Partial outside the desktop app: sessions report through hooks, so one without the hook is not seen, and no new session can be started.
+² GitHub Actions, run in your repository on every push and pull request.
 
 Updated with every release.
 

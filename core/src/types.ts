@@ -8,7 +8,7 @@ import type { AgentRecord, BackgroundTask, LedgerItem, ProjectFile, QaRecord, Re
 export type Author = { actor: string; person?: string }
 
 export type CoreQaRecord = QaRecord & {
-  /** The checker's GitHub login (v1.1 shows it to the others). */
+  /** The checker's GitHub login, when known. (Planned for team sync, cancelled on 2026-11-20: kept, design 10.1.) */
   byPerson?: string
 }
 
@@ -16,11 +16,11 @@ export type CoreItem = Omit<LedgerItem, 'qa'> & {
   qa?: CoreQaRecord
   /** The commits of this item (report, ledger update): the pre-push check finds the item by them. */
   commits?: string[]
-  /** A stable unique id (UUID v7): two machines adding items at once never clash. Written from v1.0 on. */
+  /** A stable unique id (UUID v7): items added at once by several processes never clash. Written from v1.0 on. */
   uid?: string
   createdBy?: Author
   updatedBy?: Author
-  /** How many times this item was written: v1.1 compares it with the last sync. */
+  /** How many times this item was written (one more on each write, the E1 merge included). Kept although team sync, its first use, was cancelled (design 10.1). */
   rev?: number
 }
 

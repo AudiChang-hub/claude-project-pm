@@ -125,7 +125,7 @@ PM 開的 Agent，description 符合 `^\s*T-\d+\s+QA(?=$|[\s:：,，.。（(、]
 
 ## 8. 可移植的核心與 Desktop 專屬的部分
 
-長期目標是讓這套品管也能用在 Claude Code CLI、Codex、Antigravity、VS Code 等其他 AI 開發工具，所以 QA 的判斷寫成不依賴 Claude Desktop 或 Claude Code 引擎（`$`）的純函式，集中在 `hooks/qa.ts`。現在還不拆成獨立套件。
+長期目標是讓這套品管也能用在 Claude Code CLI、Codex、Antigravity、VS Code 等其他 AI 開發工具，所以 QA 的判斷寫成不依賴 Claude Desktop 或 Claude Code 引擎（`$`）的純函式，集中在 `hooks/qa.ts`。現在還不拆成獨立套件。（2026-11-20：使用者決定只支援 Claude，其他平台已取消，見 v1-core.md 9.2 節。判斷不依賴引擎的寫法維持不變。）
 
 | 可移植的核心 | 位置 | 依賴 |
 | --- | --- | --- |

@@ -43,24 +43,21 @@ v0.9.x（QA 關卡、額度優先派工）：[CHANGELOG](CHANGELOG.md)
 
 ## 支援平台
 
-✅ 可用 · ◐ 部分 · 🗓 規劃中 · — 不支援
+✅ 可用 · ◐ 部分
 
-| 功能 | Claude Code 桌面版 | Claude Code CLI¹ | Codex² | Copilot² | Antigravity² | Cursor² | Devin² |
-| --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| 看板 | ✅ | ✅ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
-| 交辦清單 | ✅ | ✅ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
-| QA 關卡 | ✅ | ✅ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
-| 交付判斷（git、CI） | ✅ | ◐ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
-| 即時追蹤 Session | ✅ | ◐ | 🗓 v1.2⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ | 🗓 v1.3⁴ | 🗓 v1.3⁴ |
-| Agent 派工 | ✅ | ◐ | 🗓 v1.2⁴ | 🗓 v1.2⁴ | 🗓 v1.2⁴ | 🗓 v1.3⁴ | 🗓 v1.3⁴ |
-| 開發準則 | ✅ | ✅ | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.2 | 🗓 v1.3 | 🗓 v1.3 |
-| CI 範本³ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 多人協作 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 | 🗓 v1.1 |
+| 功能 | Claude Code 桌面版 | Claude Code CLI¹ |
+| --- | :-: | :-: |
+| 看板 | ✅ | ✅ |
+| 交辦清單 | ✅ | ✅ |
+| QA 關卡 | ✅ | ✅ |
+| 交付判斷（git、CI） | ✅ | ◐ |
+| 即時追蹤 Session | ✅ | ◐ |
+| Agent 派工 | ✅ | ◐ |
+| 開發準則 | ✅ | ✅ |
+| CI 範本² | ✅ | ✅ |
 
 ¹ 在 Claude Code 2.1.326 實測。看板是網頁看板和 `project-pm board`。部分支援的地方：CI 狀態（git 有檢查）、只看得到裝了 hook 的 Session、不會自動設定 Agent。
-² 含 App（或編輯器）和 CLI，兩者有差異時會加註。
-³ GitHub Actions，和用哪個 AI 工具無關。其他平台的 AI 都還沒實際試過。
-⁴ Claude Code 桌面版以外只能做到部分：靠 hook 自動回報，看不到沒裝 hook 的 Session，也不能開新 Session。
+² GitHub Actions，在你的 repo 每次 push 和 pull request 時執行。
 
 這張表每次推版都會更新。
 

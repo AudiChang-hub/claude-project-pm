@@ -2,9 +2,9 @@
 
 [中文說明](README.zh-TW.md)
 
-A PM for AI coding sessions: a list of the work you asked for, a QA check before work closes and before it is pushed, and a board of where every session stands. It runs as an MCP server (MCP is the standard way AI tools plug in extra tools like this one).
+A PM for Claude Code sessions: a list of the work you asked for, a QA check before work closes and before it is pushed, and a board of where every session stands. It runs as an MCP server (MCP is how Claude Code plugs in extra tools like this one).
 
-Version 1.0 sets up and has been tested with **Claude Code's command line only**. Other AI tools that speak MCP may be able to connect to it, but none of them has been tried yet. It needs no Node.js: you download one program and run it once.
+Project PM is for **Claude Code only**; version 1.0 sets it up for Claude Code's command line. It needs no Node.js: you download one program and run it once.
 
 ## Install
 
@@ -78,4 +78,3 @@ An npm version for developers with Node.js 20 or later (`npx -y project-pm@<vers
 - 1.0.0 is not on npm yet.
 - The Windows steps to allow a program downloaded from the web (SmartScreen) have not been checked yet. The program itself, built on Windows, has been run there.
 - The Mac steps to allow the program have not been checked on a real Mac. The Mac programs themselves are built and tested on GitHub's Mac machines.
-- Only Claude Code's command line has been tested. Codex, GitHub Copilot, Antigravity, Cursor, Devin and other AI tools have not been tried at all, and `init` does not set them up; that comes in later versions.
