@@ -17,7 +17,12 @@ import { projectGuidelinesFile } from '../src/hook'
 import { plainLocalPath } from '../src/localpath'
 import { PROBE_HOST } from './helpers'
 
-const CWDS = ['C:\\Users\\acme\\shop', 'C:\\Users\\RUNNER~1\\acme-shop', 'd:\\work', `\\\\${PROBE_HOST}\\share\\shop`, '\\\\?\\C:\\Users\\acme']
+/**
+ * The folders each spelling is read against. C:\Users\RUNNER~1 is the 8.3 name GitHub's Windows runners have, and
+ * C:\PROGRA~1 the one most Windows machines have, so the system check meets a real short name on either (CI run
+ * 44716640045 met it only on the runner).
+ */
+const CWDS = ['C:\\Users\\acme\\shop', 'C:\\Users\\RUNNER~1\\acme-shop', 'C:\\PROGRA~1\\acme-shop', 'd:\\work', `\\\\${PROBE_HOST}\\share\\shop`, '\\\\?\\C:\\Users\\acme']
 
 /** Every combination of the parts below, with forward slashes and in upper case too. */
 function variants(): string[] {
@@ -155,11 +160,25 @@ describe('plainLocalPath against generated spellings (T-39)', () => {
     // One of each different spelling is enough to ask about.
     const unique = [...new Map(accepted.map(([cwd, raw, plain]) => [`${cwd}|${raw}`, [cwd, raw, plain] as const])).values()]
     const system = systemFullPaths(unique.map(([cwd, raw]) => [cwd, raw]))
+    // The system's reading of the plain path itself: .NET Framework's GetFullPath writes a short (8.3) name of a
+    // folder that exists out long (C:\Users\RUNNER~1 -> C:\Users\runneradmin), for both alike.
+    const ofPlain = systemFullPaths(unique.map(([, , plain]) => [plain, '']))
     assert.equal(system.length, unique.length)
+    assert.equal(ofPlain.length, unique.length)
+    const bare = (path: string) => path.replace(/\\$/, '').toLowerCase()
     unique.forEach(([cwd, raw, plain], i) => {
       const full = system[i]!
       assert.match(full, /^[A-Za-z]:\\/, JSON.stringify({ raw, cwd, full }))
-      assert.equal(full.replace(/\\$/, '').toLowerCase(), plain.replace(/\\$/, '').toLowerCase(), JSON.stringify({ raw, cwd }))
+      // The very place the plain path names, as the system reads both.
+      assert.equal(bare(full), bare(ofPlain[i]!), JSON.stringify({ raw, cwd }))
+      // And the plain path as it stands, part for part, but for a short name (RUNNER~1) written out long: nothing
+      // else may differ.
+      const want = bare(plain).split('\\')
+      const got = bare(full).split('\\')
+      assert.equal(got.length, want.length, JSON.stringify({ raw, cwd, full }))
+      want.forEach((part, at) => {
+        if (!/~\d/.test(part)) assert.equal(got[at], part, JSON.stringify({ raw, cwd, full }))
+      })
     })
   })
 
@@ -176,6 +195,6 @@ describe('plainLocalPath against generated spellings (T-39)', () => {
     assert.equal(plainLocalPath('\\Windows', 'C:\\Users\\acme', 'win32'), null)
     assert.equal(plainLocalPath('bin/../x', 'C:\\Users\\acme', 'win32'), 'C:\\Users\\acme\\x')
     // A repository's own setting may still not leave it (QA1–3), plain or not.
-    for (const named of ['../acme-secret.txt', 'C:\\Windows', 'C:Windows', '\\Windows', '\\\\h\\s\\x', '.git/config', '.GIT./config']) assert.equal(projectGuidelinesFile(named, 'C:\\Users\\acme\\shop'), null, named)
+    for (const named of ['../acme-secret.txt', 'C:\\Windows', 'C:Windows', '\\Windows', '\\\\h\\s\\x', '.git/config', '.GIT./config', '.GIT/config', '.Git/config', '.git /config', '.git../HEAD']) assert.equal(projectGuidelinesFile(named, 'C:\\Users\\acme\\shop'), null, named)
   })
 })

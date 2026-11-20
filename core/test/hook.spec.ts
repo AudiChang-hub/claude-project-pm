@@ -419,7 +419,7 @@ for (const lang of LANGS) {
       await pmTool(w.ctx(), { action: 'claim' })
       watched = [w.repo]
       // Each would run in the double quotes of PowerShell or bash, or end them. Windows allows all of these in a name.
-      const names = ['$(Start-Process calc).md', '`whoami`.md', "it's.md", 'a;b.md', 'a&b.md', '(x).md', 'x$HOME.md', ...(process.platform === 'win32' ? [] : ['say "hi".md', 'a|b.md'])]
+      const names = ['$(Start-Process calc).md', '`whoami`.md', "it's.md", 'a;b.md', 'a&b.md', '(x).md', 'x$HOME.md', '開發準則.md', ...(process.platform === 'win32' ? [] : ['say "hi".md', 'a|b.md', 'back\\slash.md'])]
       let at = NOW
       const watch = async (name: string) => {
         writeFileSync(join(w.repo, name), RULES)

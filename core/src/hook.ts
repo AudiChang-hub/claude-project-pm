@@ -295,14 +295,15 @@ function isInside(file: string, folder: string): boolean {
 }
 
 /**
- * Whether `file` is in the repository's .git folder. Windows drops a name's trailing dots and spaces and ignores case,
- * so ".git." and ".GIT " are .git there too.
+ * Whether `file` is in the repository's .git folder, or might be. Windows drops a name's trailing dots and spaces and
+ * ignores case, so ".git." and ".GIT " are .git there; macOS ignores case by default, so ".GIT" is .git there. Read the
+ * same way on every system (CI run 44716640045: on Linux and macOS ".GIT./config" and ".GIT/config" got through): a
+ * folder that only looks like .git, on a system where it is not, is refused too, which costs nothing.
  */
 function isInGit(file: string, repo: string): boolean {
   const first = relative(resolve(repo), resolve(file)).split(/[\\/]+/)[0] ?? ''
-  const name = process.platform === 'win32' ? first.replace(/[. ]+$/, '').toLowerCase() : first
 
-  return name === '.git'
+  return first.replace(/[. ]+$/, '').toLowerCase() === '.git'
 }
 
 /** Whether git tracks `file` (in its index): a .env, an ignored file or one never added is not the project's. */
@@ -313,11 +314,13 @@ async function isTracked(file: string, repo: string, run: Run): Promise<boolean>
 /** Whether git tracks `file`; null when git did not answer (it failed, or took too long). */
 async function trackedBy(file: string, repo: string, run: Run): Promise<boolean | null> {
   const rel = relative(resolve(repo), resolve(file)).replace(/\\/g, '/')
-  // Literal: a name with * or : in it is that name, not a pattern matching some other file git tracks.
-  const listed = await run(['git', '--literal-pathspecs', 'ls-files', '--', rel], repo)
+  // Literal: a name with * or : in it is that name, not a pattern matching some other file git tracks. -z: each name as
+  // it is, ended by NUL; without it git quotes and escapes a name with " or \, a control character, or (core.quotepath,
+  // on by default) any non-ASCII letter, so 開發準則.md was never found tracked (CI run 44716640045, `say "hi".md`).
+  const listed = await run(['git', '--literal-pathspecs', 'ls-files', '-z', '--', rel], repo)
   if (listed === null) return null
 
-  return listed.split('\n').some(line => line.trim() === rel)
+  return listed.split('\0').some(name => name === rel)
 }
 
 /** A guidelines setting that could not be read: why. */
