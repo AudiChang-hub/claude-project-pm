@@ -17,7 +17,7 @@ import { clip, finishedTasks, planFromTodos } from '../../hooks/sessions'
 import type { BackgroundTask, Step } from '../../types'
 import type { Run } from './host'
 import type { GuidelinesSetting } from './guard'
-import { GUARDED_TOOLS, alertWords, watchGuidelines } from './guard'
+import { GUARDED_TOOLS, alertText, watchGuidelines } from './guard'
 import { dataHome, run as hostRun } from './host'
 import { NotPlainPathError, localRealpath, plainLocalPath } from './localpath'
 import { ct } from './messages'
@@ -113,7 +113,7 @@ async function promptSubmit(id: string, ref: ProjectRef, input: HookInput, env: 
   const alert = await guidelinesSetting(ref, env, run)
     .then(setting => watchGuidelines(ref, id, setting, isOwn, !!me.askedGuidelinesAt, env, now))
     .catch(() => null)
-  if (alert) parts.push(ct('guidelines.alert', alertWords(alert)))
+  if (alert) parts.push(alertText(alert))
   const isPm = project.pmId === id
   if (!isPm && !project.isDismissed) parts.push(t('role.delivery', { project: ref.name, tool: REPORT_TOOL }), ct('hook.actorHint', { actor: id }))
   const found = await readGuidelines(ref, env, run)
@@ -186,22 +186,22 @@ async function postToolUse(id: string, input: HookInput, env: NodeJS.ProcessEnv,
 }
 
 /**
- * After a tool that can write, or when a turn stops (T-39 2): the guidelines file set now compared with what this
- * session's turn started from. Changed without the person agreeing to a guidelines change this turn: the model is
- * told and the board lists it. Nothing is put back. None set now (turned off), or another file set: the session's
- * baseline is dropped or taken again, and the old file is not compared.
+ * After a tool that can write, or when a turn stops (T-39 2): the guidelines setting and file now compared with what
+ * this session's turn started from. Changed without the person agreeing to a guidelines change this turn (the file,
+ * or the setting: turned off, another file, git no longer tracking it): the model is told and the board lists it.
+ * Nothing is put back; a new setting's file is not compared with the old one.
  */
 async function guardAfter(id: string, ref: ProjectRef, input: HookInput, env: NodeJS.ProcessEnv, now: number, run: Run, isStop = false): Promise<HookOutput> {
   if (!isStop && !GUARDED_TOOLS.has(input.tool_name ?? '')) return null
   const project = await loadProject(ref, env)
   if (!project.pmId) return null
-  const setting = await guidelinesSetting(ref, env, run).catch(() => undefined)
-  if (setting === undefined) return null
+  const setting = await guidelinesSetting(ref, env, run).catch(() => null)
+  if (!setting) return null
   const actor = (await loadActor(id, env).catch(() => null)) as HookActor | null
   const alert = await watchGuidelines(ref, id, setting, false, !!actor?.askedGuidelinesAt, env, now).catch(() => null)
   if (!alert || isStop) return null
 
-  return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: ct('guidelines.alert', alertWords(alert)) } }
+  return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: alertText(alert) } }
 }
 
 async function stop(id: string, input: HookInput, env: NodeJS.ProcessEnv, now: number, base: (old: Actor | null) => HookActor) {
@@ -307,46 +307,75 @@ function isInGit(file: string, repo: string): boolean {
 
 /** Whether git tracks `file` (in its index): a .env, an ignored file or one never added is not the project's. */
 async function isTracked(file: string, repo: string, run: Run): Promise<boolean> {
+  return (await trackedBy(file, repo, run)) === true
+}
+
+/** Whether git tracks `file`; null when git did not answer (it failed, or took too long). */
+async function trackedBy(file: string, repo: string, run: Run): Promise<boolean | null> {
   const rel = relative(resolve(repo), resolve(file)).replace(/\\/g, '/')
   // Literal: a name with * or : in it is that name, not a pattern matching some other file git tracks.
   const listed = await run(['git', '--literal-pathspecs', 'ls-files', '--', rel], repo)
+  if (listed === null) return null
 
-  return !!listed && listed.split('\n').some(line => line.trim() === rel)
+  return listed.split('\n').some(line => line.trim() === rel)
+}
+
+/** A guidelines setting that could not be read: why. */
+class SettingError extends Error {
+  constructor(readonly reason: 'git' | 'corrupt' | 'notPlain') {
+    super(reason)
+  }
 }
 
 /**
  * The file a project's .project-pm.json names, when it is a plain path inside the repository that git tracks by that
- * name; null otherwise. Where a link there leads is not looked at here.
+ * name; null otherwise. Where a link there leads is not looked at here. Throws SettingError when it cannot be told:
+ * .project-pm.json is not a plain local path or not JSON, or git does not answer.
  */
 async function projectNamed(ref: ProjectRef, run: Run): Promise<string | null> {
   // .project-pm.json is the repository's: a committed link there may lead to another machine.
-  const settings = await localRealpath(join(ref.path, '.project-pm.json')).catch(() => null)
-  const fromProject = settings ? await readJsonFile<{ guidelines?: unknown }>(settings).catch(() => null) : null
+  const settings = await localRealpath(join(ref.path, '.project-pm.json')).catch(err => {
+    throw new SettingError(err instanceof NotPlainPathError ? 'notPlain' : 'corrupt')
+  })
+  const fromProject = settings
+    ? await readJsonFile<{ guidelines?: unknown }>(settings).catch(() => {
+        throw new SettingError('corrupt')
+      })
+    : null
   if (typeof fromProject?.guidelines !== 'string' || !fromProject.guidelines.trim()) return null
   const named = projectGuidelinesFile(fromProject.guidelines, ref.path)
+  if (!named) return null
+  const tracked = await trackedBy(named, ref.path, run)
+  if (tracked === null) throw new SettingError('git')
 
-  return named && (await isTracked(named, ref.path, run)) ? named : null
+  return tracked ? named : null
 }
 
 /** The file the person's own ~/.project-pm/config.json names (any path; nothing about it is looked up here). */
 async function userNamed(ref: ProjectRef, env: NodeJS.ProcessEnv): Promise<string | null> {
-  const fromUser = await readJsonFile<{ guidelines?: unknown }>(join(dataHome(env), 'config.json')).catch(() => null)
+  const fromUser = await readJsonFile<{ guidelines?: unknown }>(join(dataHome(env), 'config.json')).catch(() => {
+    throw new SettingError('corrupt')
+  })
   if (typeof fromUser?.guidelines !== 'string' || !fromUser.guidelines.trim()) return null
 
   return guidelinesPath(fromUser.guidelines, homedir().replace(/\\/g, '/'), ref.path.replace(/\\/g, '/'))
 }
 
 /**
- * The guidelines file the after-the-fact check watches (guard.ts): the one the project names (by its name, wherever a
- * link there now leads, so a file swapped for a link is noticed rather than passed over), else the person's own; null
- * when none is set.
+ * The guidelines setting the after-the-fact check watches (guard.ts): the file the project names (by its name,
+ * wherever a link there now leads, so a file swapped for a link is noticed rather than passed over), else the person's
+ * own, else none; or unreadable, with why, so that a setting nobody can read is a change too, not "none".
  */
-export async function guidelinesSetting(ref: ProjectRef, env: NodeJS.ProcessEnv = process.env, run: Run = hostRun): Promise<GuidelinesSetting | null> {
-  const named = await projectNamed(ref, run)
-  if (named) return { file: named, from: 'project' }
-  const mine = await userNamed(ref, env)
+export async function guidelinesSetting(ref: ProjectRef, env: NodeJS.ProcessEnv = process.env, run: Run = hostRun): Promise<GuidelinesSetting> {
+  try {
+    const named = await projectNamed(ref, run)
+    if (named) return { from: 'project', file: named }
+    const mine = await userNamed(ref, env)
 
-  return mine ? { file: mine, from: 'user' } : null
+    return mine ? { from: 'user', file: mine } : { from: 'none' }
+  } catch (err) {
+    return { from: 'unreadable', reason: err instanceof SettingError ? err.reason : 'corrupt' }
+  }
 }
 
 /**
@@ -357,7 +386,7 @@ export async function guidelinesSetting(ref: ProjectRef, env: NodeJS.ProcessEnv 
  */
 export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = process.env, run: Run = hostRun): Promise<{ file: string; real: string; text: string; isClipped: boolean } | { file: string; real?: string; error: string } | null> {
   let file: string | null = null
-  const named = await projectNamed(ref, run)
+  const named = await projectNamed(ref, run).catch(() => null)
   if (named) {
     // A link committed in the repository may lead anywhere: where it really goes must be inside too, and not in .git.
     // One that leads off this machine's disks (\\host\share) is refused unfollowed: following it connects there.
@@ -374,7 +403,7 @@ export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = p
     // to may not be.
     if (real && repo && isInside(real, repo) && !isInGit(real, repo) && (await isTracked(real, repo, run))) file = named
   }
-  if (!file) file = await userNamed(ref, env)
+  if (!file) file = await userNamed(ref, env).catch(() => null)
   if (!file) return null
   const failed = (err: unknown) => (err instanceof Error ? err.message : String(err))
   // The person's file may be named relative to the project, through a link the repository holds: checked the same.

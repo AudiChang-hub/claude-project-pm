@@ -10,16 +10,18 @@
  * Each session keeps its own baseline: what the path the guidelines are set to looked like when the person last spoke
  * in it (the file's SHA-256, whether the path is a link and where to, where the file really is). It lives in the
  * person's data folder (~/.project-pm/guidelines/sessions/<hash of the session id>.json, never in the repository) and
- * names the path it was taken for, so the pair (session, set path) is what is compared: set to another file, or
- * turned off, and the baseline is taken again or dropped, never compared with the old file. After a tool of the
- * session's that can write, when a notification wakes the session, and when its turn stops, the path is looked at
- * again; changed, emptied, deleted, made a link or pointed elsewhere, or no longer a plain local path, without the
- * person agreeing to a guidelines change this turn, it is listed on the board, attributed to the session that saw it
- * and worded so as not to say who did it (another session, or the person, may have). For the person's own file, a
+ * names the setting it was taken for (the project's file, the person's own, none, or unreadable), so the pair
+ * (session, setting) is what is compared. After a tool of the session's that can write, when a notification wakes
+ * the session, and when its turn stops, both are looked at again. The setting changed (git rm or git mv of the file,
+ * an edit of .project-pm.json, the guidelines turned off or on, a setting that cannot be read), or the file changed,
+ * emptied, deleted, made a link or pointed elsewhere, or no longer a plain local path, without the person agreeing to
+ * a guidelines change this turn: it is listed on the board, attributed to the session that saw it and worded so as not
+ * to say who did it (another session, or the person, may have). A new setting's file is never compared with the old
+ * file: the baseline follows the setting. For the person's own file, a
  * read-only copy of what the baseline held is kept for them to copy back by hand; a project's file is in git.
  *
  * What it cannot catch: a change made on purpose to get past it (running this hook by hand to take a new baseline,
- * deleting the baselines, changing the setting first). It is a smoke alarm, not a lock.
+ * deleting the baselines). It is a smoke alarm, not a lock.
  */
 import { createHash } from 'node:crypto'
 import { chmod, lstat, readFile, readdir, readlink, rm, stat } from 'node:fs/promises'
@@ -42,8 +44,24 @@ const BASELINE_KEPT_MS = 30 * 24 * 60 * 60 * 1000
 /** The tools after which the file is compared: every one that can write a file (the shells too). */
 export const GUARDED_TOOLS: ReadonlySet<string> = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell'])
 
-/** Which guidelines file is set, and by whom: the project's .project-pm.json, or the person's own config. */
-export type GuidelinesSetting = { file: string; from: 'project' | 'user' }
+/**
+ * Which guidelines file is set, and by whom: the project's .project-pm.json, or the person's own config; none; or a
+ * setting that could not be read (`git` did not answer whether the file is tracked, a settings file is `corrupt`, or
+ * .project-pm.json is `notPlain`).
+ */
+export type GuidelinesSetting = { from: 'project' | 'user'; file: string } | { from: 'none' } | { from: 'unreadable'; reason: 'git' | 'corrupt' | 'notPlain' }
+
+/** A setting that names a file. */
+type FileSetting = Extract<GuidelinesSetting, { file: string }>
+
+const isFileSetting = (setting: GuidelinesSetting): setting is FileSetting => setting.from === 'project' || setting.from === 'user'
+
+/** Whether two settings are the same: the same file by the same source, none twice, unreadable twice. */
+function isSameSetting(a: GuidelinesSetting, b: GuidelinesSetting): boolean {
+  if (a.from !== b.from) return false
+
+  return isFileSetting(a) && isFileSetting(b) ? isSamePath(a.file, b.file) : true
+}
 
 /** What the set path looked like. `real` and `link` are null where nothing could be (or was) looked up. */
 type Look = {
@@ -55,12 +73,16 @@ type Look = {
   link: string | null
 }
 
-type Baseline = { session: string; file: string; from: GuidelinesSetting['from']; at: number; look: Look; copy: string | null }
+/** `look` is null when the setting names no file. */
+type Baseline = { session: string; setting: GuidelinesSetting; at: number; look: Look | null; copy: string | null }
 
-/** What happened to the file, in the words the board uses. */
+/** What happened to the file, in the words the board uses; `setting` when the setting itself changed. */
 export type Change = 'changed' | 'emptied' | 'deleted' | 'linked' | 'unplain' | 'unreadable'
 
-export type GuidelinesAlert = { at: number; file: string; from: GuidelinesSetting['from']; change: Change; by: string; copy: string | null; repo: string }
+/** A change of the file (`file`, `from`, `copy`), or of the setting (`was` and `now`). */
+export type GuidelinesAlert =
+  | { at: number; by: string; repo: string; change: Change; file: string; from: FileSetting['from']; copy: string | null }
+  | { at: number; by: string; repo: string; change: 'setting'; was: GuidelinesSetting; now: GuidelinesSetting }
 
 const sha256 = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex')
 
@@ -154,31 +176,33 @@ async function dropOldBaselines(env: NodeJS.ProcessEnv, now: number): Promise<vo
 }
 
 /**
- * Looks at the guidelines file for `session` (the actor id). `isStart`: the person has just spoken, so the file as it
- * is now is what the session's turn starts from; nothing is judged. Otherwise the file is compared with the session's
- * baseline (taken for the same set path; none, or one for another path, is only taken now) and the baseline moves on.
- * A change the person did not agree to this turn (`isAsked` false) becomes a warning on the project's board, and is
- * returned. Nothing here writes, renames or deletes the guidelines file.
+ * Looks at the guidelines for `session` (the actor id). `isStart`: the person has just spoken, so the setting and the
+ * file as they are now are what the session's turn starts from; nothing is judged. Otherwise they are compared with
+ * the session's baseline, which then moves on: a setting changed since (none set, another file, the project's file
+ * given up for the person's own, one that cannot be read) is a change of its own, and the new file is not compared
+ * with the old one; the same file is compared with how it looked. A change the person did not agree to this turn
+ * (`isAsked` false) becomes a warning on the project's board, and is returned. No baseline yet: nothing to judge.
+ * Nothing here writes, renames or deletes the guidelines file.
  */
-export async function watchGuidelines(ref: ProjectRef, session: string, setting: GuidelinesSetting | null, isStart: boolean, isAsked: boolean, env: NodeJS.ProcessEnv, now: number): Promise<GuidelinesAlert | null> {
+export async function watchGuidelines(ref: ProjectRef, session: string, setting: GuidelinesSetting, isStart: boolean, isAsked: boolean, env: NodeJS.ProcessEnv, now: number): Promise<GuidelinesAlert | null> {
   const file = baselineFile(session, env)
   const alert = await withLock(file, async (): Promise<GuidelinesAlert | null> => {
-    if (!setting) {
-      await rm(file, { force: true })
-
-      return null
-    }
-    const was = isStart ? null : await readJsonFile<Baseline>(file).catch(() => null)
-    const { look, bytes } = await lookAt(setting.file)
-    const isSameSetting = !!was && was.session === session && was.from === setting.from && isSamePath(was.file, setting.file)
-    const change = isSameSetting ? changeOf(was.look, look) : null
-    if (isSameSetting && !change) return null
-    const copy = setting.from === 'user' && bytes && look.sha256 ? await keepCopy(bytes, look.sha256, env) : null
-    const next: Baseline = { session, file: setting.file, from: setting.from, at: now, look, copy }
+    const kept = isStart ? null : await readJsonFile<Baseline>(file).catch(() => null)
+    // A baseline from before the setting was kept in it (or another session's, were two ids to share a hash) is none.
+    const was = kept && kept.session === session && kept.setting && typeof kept.setting.from === 'string' ? kept : null
+    const seen = isFileSetting(setting) ? await lookAt(setting.file) : null
+    const look = seen?.look ?? null
+    const isSame = !!was && isSameSetting(was.setting, setting)
+    const change = isSame && was.look && look ? changeOf(was.look, look) : null
+    if (isSame && !change) return null
+    const copy = setting.from === 'user' && seen?.bytes && look?.sha256 ? await keepCopy(seen.bytes, look.sha256, env) : null
+    const next: Baseline = { session, setting, at: now, look, copy }
     await writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`)
-    if (!change || isAsked) return null
+    if (!was || isAsked) return null
+    if (!isSame) return { at: now, by: session, repo: ref.path, change: 'setting', was: was.setting, now: setting }
+    if (!change || !isFileSetting(setting)) return null
 
-    return { at: now, file: setting.file, from: setting.from, change, by: session, copy: was!.copy, repo: ref.path }
+    return { at: now, by: session, repo: ref.path, change, file: setting.file, from: setting.from, copy: was.copy }
   })
   if (isStart) await dropOldBaselines(env, now).catch(() => {})
   if (!alert) return null
@@ -194,13 +218,31 @@ export async function watchGuidelines(ref: ProjectRef, session: string, setting:
 /** The warnings of the last week, for the board's attention section. */
 export async function guidelinesAlerts(ref: ProjectRef, env: NodeJS.ProcessEnv, now: number): Promise<GuidelinesAlert[]> {
   const kept = await readJsonFile<{ alerts?: GuidelinesAlert[] }>(alertsFile(ref, env)).catch(() => null)
+  const isAlert = (a: GuidelinesAlert) =>
+    typeof a?.at === 'number' && typeof a.by === 'string' && typeof a.repo === 'string' && (a.change === 'setting' ? !!a.was?.from && !!a.now?.from : typeof a.file === 'string')
 
-  return (kept?.alerts ?? []).filter(a => typeof a.at === 'number' && typeof a.file === 'string' && now - a.at < ALERT_SHOWN_MS)
+  return (kept?.alerts ?? []).filter(a => isAlert(a) && now - a.at < ALERT_SHOWN_MS)
 }
 
-/** A warning in plain words: what happened, and how the person can see or undo it themselves. */
-export function alertWords(alert: GuidelinesAlert): { file: string; what: string; fix: string } {
-  const what = ct(`guidelines.what.${alert.change}`)
+/** A setting in plain words. */
+function settingWords(setting: GuidelinesSetting): string {
+  if (isFileSetting(setting)) return ct(setting.from === 'project' ? 'guidelines.setting.project' : 'guidelines.setting.user', { file: setting.file })
+  if (setting.from === 'none') return ct('guidelines.setting.none')
+  const reason = setting.reason === 'git' ? 'guidelines.reason.git' : setting.reason === 'notPlain' ? 'guidelines.reason.notPlain' : 'guidelines.reason.corrupt'
+
+  return ct('guidelines.setting.unreadable', { reason: ct(reason) })
+}
+
+/**
+ * A warning in plain words, for the model, or with `when` for the board: what happened, and how the person can see
+ * or undo it themselves.
+ */
+export function alertText(alert: GuidelinesAlert, when?: string): string {
+  if (alert.change === 'setting') {
+    const words = { was: settingWords(alert.was), now: settingWords(alert.now), fix: ct('guidelines.fix.setting', { repo: alert.repo }) }
+
+    return when === undefined ? ct('guidelines.settingAlert', words) : ct('board.guidelinesSettingAlert', { ...words, when, by: alert.by })
+  }
   // A project's file is in git; the person's own has the read-only copy taken when the turn began, if there was one.
   const fix =
     alert.from === 'project'
@@ -208,6 +250,7 @@ export function alertWords(alert: GuidelinesAlert): { file: string; what: string
       : alert.copy
         ? ct('guidelines.fix.copy', { copy: alert.copy })
         : ct('guidelines.fix.noCopy')
+  const words = { file: alert.file, what: ct(`guidelines.what.${alert.change}`), fix }
 
-  return { file: alert.file, what, fix }
+  return when === undefined ? ct('guidelines.alert', words) : ct('board.guidelinesAlert', { ...words, when, by: alert.by })
 }

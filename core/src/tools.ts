@@ -31,7 +31,7 @@ import { activeAt, projectSessions, trackOf } from './actors'
 import type { Ctx, ToolResult } from './context'
 import { projectOf } from './context'
 import { checkCi, checkPush, heldCi } from './facts'
-import { alertWords, guidelinesAlerts } from './guard'
+import { alertText, guidelinesAlerts } from './guard'
 import { GIT_TIMEOUT_MS } from './host'
 import { plainLocalPath } from './localpath'
 import { prePushInstalled, pushProblems, pushedUnchecked, withAttention } from './prepush'
@@ -494,7 +494,7 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
   }
   // The guidelines file changed without the person agreeing (guard.ts: only noticed, never put back), for a week.
   for (const alert of await guidelinesAlerts(ref, ctx.env, now)) {
-    const line = ct('board.guidelinesAlert', { when: localMinute(alert.at), by: alert.by, ...alertWords(alert) })
+    const line = alertText(alert, localMinute(alert.at))
     text = withAttention(text, line, t('board.section.attention'), t('board.none'))
   }
   if (sessionsError) text += `\n\n${ct('board.noSessionsRead', { error: sessionsError })}`

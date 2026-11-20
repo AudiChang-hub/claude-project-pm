@@ -13,6 +13,7 @@ import { ALERT_SHOWN_MS } from '../src/guard'
 import { runHook } from '../src/hook'
 import { ct } from '../src/messages'
 import type { HookInput } from '../src/hook'
+import type { Run } from '../src/host'
 import { resolveProject } from '../src/project'
 import { loadActor } from '../src/store'
 import { boardTool, pmTool, reportTool } from '../src/tools'
@@ -249,7 +250,7 @@ for (const lang of LANGS) {
     const attention = async (actor?: string, extra?: Parameters<World['ctx']>[1]) => {
       const board = await boardTool(w.ctx(actor, extra), {})
 
-      return (board.structured as { attention: { text: string }[] }).attention.map(a => a.text).filter(text => text.startsWith(ct('board.guidelinesAlert').slice(0, 8)))
+      return (board.structured as { attention: { text: string }[] }).attention.map(a => a.text).filter(text => [ct('board.guidelinesAlert'), ct('board.guidelinesSettingAlert')].some(key => text.startsWith(key.slice(0, 8))))
     }
     /** The person's own guidelines file, shared by two projects, each with its own PM. */
     const sharedRules = async (mine = join(w.root, 'acme-rules.md')) => {
@@ -384,37 +385,127 @@ for (const lang of LANGS) {
       assert.equal(said(await bash(NOW + 7000)), await warning('changed', mine, null))
     })
 
-    test('turned off, edited, turned on: the old baseline is never compared; then a change is warned again (T-39 QA 2, A)', async () => {
+    /** How a guidelines setting reads in a warning: the project's file, the person's own, none, or one that could not be read. */
+    type Setting = { from: 'project'; file: string } | { from: 'user'; file: string } | { from: 'none' } | { from: 'unreadable'; reason: 'git' | 'corrupt' | 'notPlain' }
+    const settingWords = (s: Setting) => {
+      if (s.from === 'project' || s.from === 'user') return ct(`guidelines.setting.${s.from}` as Parameters<typeof ct>[0], { file: s.file })
+      if (s.from === 'none') return ct('guidelines.setting.none')
+
+      return ct('guidelines.setting.unreadable', { reason: ct(`guidelines.reason.${s.reason}` as Parameters<typeof ct>[0]) })
+    }
+    /** The setting warning the model is told, word for word. */
+    const settingWarning = async (was: Setting, now: Setting) => {
+      const ref = (await resolveProject(w.repo))!
+
+      return ct('guidelines.settingAlert', { was: settingWords(was), now: settingWords(now), fix: ct('guidelines.fix.setting', { repo: ref.path }) })
+    }
+    const projectFile = (name = 'GUIDELINES.md'): Setting => ({ from: 'project', file: join(w.repo, name) })
+
+    test('turned off, edited, turned on: the old file is never compared; each change of the setting is warned (T-39 QA 2, QA3 1)', async () => {
       const config = (value: object) => writeFileSync(join(w.env.PROJECT_PM_HOME!, 'config.json'), JSON.stringify(value))
       const { mine } = await sharedRules()
       await speak(other, NOW)
-      // `/pm guidelines off`: the person's config names none.
+      // `/pm guidelines off` (or anything else) turns them off this turn without the person agreeing: said once.
       config({})
       writeFileSync(mine, 'my notes now\n')
-      assert.equal(said(await bash(NOW + 1000)), '')
+      assert.equal(said(await bash(NOW + 1000)), await settingWarning({ from: 'user', file: mine }, { from: 'none' }))
+      // The old file is no longer compared: editing it while off says nothing.
+      writeFileSync(mine, 'my notes, again\n')
       assert.equal(said(await bash(NOW + 2000)), '')
-      assert.equal((await attention()).length, 0)
-      // On again, in the same turn: what the file holds now is where the session starts from.
+      // On again, in the same turn: said, and what the file holds now is where the session goes on from.
       config({ guidelines: mine })
-      assert.equal(said(await bash(NOW + 3000)), '')
-      assert.equal(readFileSync(mine, 'utf8'), 'my notes now\n')
+      assert.equal(said(await bash(NOW + 3000)), await settingWarning({ from: 'none' }, { from: 'user', file: mine }))
+      assert.equal(readFileSync(mine, 'utf8'), 'my notes, again\n')
       writeFileSync(mine, 'changed\n')
-      assert.equal(said(await bash(NOW + 4000)), await warning('changed', mine, copyOf('my notes now\n')))
+      assert.equal(said(await bash(NOW + 4000)), await warning('changed', mine, copyOf('my notes, again\n')))
+      assert.equal((await attention()).length, 3)
+      // Turned off in a turn where the person asked about the guidelines: not warned.
+      await speak(lang === 'en' ? '/pm guidelines off' : '/pm 準則 關掉', NOW + 5000)
+      config({})
+      assert.equal(said(await bash(NOW + 6000)), '')
+      // Off between turns, the person speaking: not warned either.
+      config({ guidelines: mine })
+      await speak(other, NOW + 7000)
+      assert.equal(said(await bash(NOW + 8000)), '')
     })
 
-    test('the project names another file: the old one is no longer compared, the new one is (T-39 QA 2, A)', async () => {
+    test('the project names another file: warned as a change of the setting, the old file no longer compared, the new one is (T-39 QA 2, QA3 1)', async () => {
       await projectRules()
       await speak(other, NOW)
       writeFileSync(join(w.repo, 'RULES.md'), '1. Rules elsewhere.\n')
       git(w.repo, 'add', 'RULES.md')
       writeFileSync(join(w.repo, '.project-pm.json'), JSON.stringify({ guidelines: 'RULES.md' }))
       writeFileSync(guidelines(), 'old file, free now\n')
-      assert.equal(said(await bash(NOW + 1000)), '')
+      assert.equal(said(await bash(NOW + 1000)), await settingWarning(projectFile(), projectFile('RULES.md')))
       writeFileSync(guidelines(), 'still free\n')
       assert.equal(said(await bash(NOW + 2000)), '')
       writeFileSync(join(w.repo, 'RULES.md'), 'changed\n')
       assert.equal(said(await bash(NOW + 3000)), await warning('changed', join(w.repo, 'RULES.md')))
       assert.equal(readFileSync(guidelines(), 'utf8'), 'still free\n')
+    })
+
+    test('git rm, git rm --cached or git mv of the project\'s guidelines file is warned about, file left as it is (T-39 QA3 1)', async () => {
+      await projectRules()
+      const none: Setting = { from: 'none' }
+      // git rm --cached: the file stays on disk, git no longer tracks it, so the project no longer names it.
+      await speak(other, NOW)
+      git(w.repo, 'rm', '-q', '--cached', 'GUIDELINES.md')
+      const out = said(await bash(NOW + 1000))
+      assert.notEqual(out, '', 'git rm --cached went unnoticed')
+      assert.equal(out, await settingWarning(projectFile(), none))
+      assert.equal(readFileSync(guidelines(), 'utf8'), RULES)
+      // Put back by the person between turns: their own doing, not warned.
+      git(w.repo, 'add', 'GUIDELINES.md')
+      await speak(other, NOW + 2000)
+      assert.equal(said(await bash(NOW + 3000)), '')
+      // git mv: the project's setting still names the old name, which git no longer tracks.
+      git(w.repo, 'mv', 'GUIDELINES.md', 'RULES2.md')
+      assert.equal(said(await bash(NOW + 4000)), await settingWarning(projectFile(), none))
+      assert.ok(existsSync(join(w.repo, 'RULES2.md')))
+      git(w.repo, 'mv', 'RULES2.md', 'GUIDELINES.md')
+      await speak(other, NOW + 5000)
+      // git rm (-f: the file was added, never committed): gone from git and from disk.
+      git(w.repo, 'rm', '-q', '-f', 'GUIDELINES.md')
+      assert.equal(said(await bash(NOW + 6000)), await settingWarning(projectFile(), none))
+      assert.equal(existsSync(guidelines()), false)
+      // With the person's own file set too, the project falling back to it is a change of the setting as well.
+      const mine = join(w.root, 'acme-rules.md')
+      writeFileSync(mine, RULES)
+      writeFileSync(join(w.env.PROJECT_PM_HOME!, 'config.json'), JSON.stringify({ guidelines: mine }))
+      assert.equal(said(await bash(NOW + 7000)), await settingWarning(none, { from: 'user', file: mine }))
+      assert.equal((await attention()).length, 4)
+    })
+
+    test('.project-pm.json edited by a tool, or unreadable, or git not answering: warned as a change of the setting (T-39 QA3 1)', async () => {
+      await projectRules()
+      const settings = join(w.repo, '.project-pm.json')
+      await speak(other, NOW)
+      // Edit (not locked) points the project at another tracked file.
+      writeFileSync(settings, JSON.stringify({ guidelines: 'README.md' }))
+      const out = said(await step('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: settings }, tool_response: {} }, NOW + 1000))
+      assert.notEqual(out, '', 'an edit of .project-pm.json went unnoticed')
+      assert.equal(out, await settingWarning(projectFile(), projectFile('README.md')))
+      // …then drops the setting.
+      writeFileSync(settings, JSON.stringify({}))
+      assert.equal(said(await step('PostToolUse', { tool_name: 'Write', tool_input: { file_path: settings }, tool_response: {} }, NOW + 2000)), await settingWarning(projectFile('README.md'), { from: 'none' }))
+      // Not JSON any more: it cannot be read.
+      writeFileSync(settings, JSON.stringify({ guidelines: 'GUIDELINES.md' }))
+      await speak(other, NOW + 3000)
+      writeFileSync(settings, '{ "guidelines": ')
+      assert.equal(said(await bash(NOW + 4000)), await settingWarning(projectFile(), { from: 'unreadable', reason: 'corrupt' }))
+      // git does not answer whether the file is tracked (a timeout, say): it cannot be told either.
+      writeFileSync(settings, JSON.stringify({ guidelines: 'GUIDELINES.md' }))
+      await speak(other, NOW + 5000)
+      const silent: Run = async (argv, cwd, ms) => (argv.includes('ls-files') ? null : hostWith()(argv, cwd, ms))
+      const quiet = await watching(() => runHook('claude-code', 'PostToolUse', { session_id: SESSION, cwd: w.repo, hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_response: {} }, w.env, NOW + 6000, silent))
+      assert.equal(said(quiet), await settingWarning(projectFile(), { from: 'unreadable', reason: 'git' }))
+      // A notification waking the session after the setting changed: warned there too.
+      writeFileSync(settings, JSON.stringify({}))
+      assert.ok(said(await speak('<task-notification>done</task-notification>', NOW + 7000)).includes(await settingWarning({ from: 'unreadable', reason: 'git' }, { from: 'none' })))
+      // Changed in a turn where the person asked about the guidelines: not warned.
+      await speak(asks, NOW + 8000)
+      writeFileSync(settings, JSON.stringify({ guidelines: 'GUIDELINES.md' }))
+      assert.equal(said(await bash(NOW + 9000)), '')
     })
 
     test('the file\'s folder swapped for a link to another folder, same text: warned, nothing written through (T-39 QA2 1, A)', async () => {
