@@ -167,7 +167,8 @@ function isRemoteSpelling(value: unknown): boolean {
   const text = value instanceof URL ? value.href : Buffer.isBuffer(value) ? value.toString() : typeof value === 'string' ? value : ''
   const path = text.replace(/\//g, '\\')
   if (path.toLowerCase().includes(PROBE_HOST)) return true
-  if (/^\\\\[?.]\\[a-z]:(\\|$)/i.test(path)) return false
+  // A drive written as a device is this machine, unless . or .. climbs out of it (\\.\C:\..\UNC\host is \\.\UNC\host).
+  if (/^\\\\[?.]\\[a-z]:(\\|$)/i.test(path)) return path.split('\\').slice(4).some(part => /^[. ]+$/.test(part))
 
   return path.startsWith('\\\\')
 }

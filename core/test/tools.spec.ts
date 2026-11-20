@@ -143,7 +143,7 @@ for (const lang of LANGS) {
       const ctx = w.ctx('claude-code:pm1', { run: async (argv: string[], cwd: string, timeoutMs?: number) => (visited.push(cwd), cwd.startsWith(w.root) ? run(argv, cwd, timeoutMs) : null) })
       const fs = watchFs()
       try {
-        for (const project of [`\\\\${PROBE_HOST}\\share\\acme`, `//${PROBE_HOST}/share/acme`, `\\\\?\\UNC\\${PROBE_HOST}\\share\\acme`, `\\\\.\\pipe\\acme`]) {
+        for (const project of [`\\\\${PROBE_HOST}\\share\\acme`, `//${PROBE_HOST}/share/acme`, `\\\\?\\UNC\\${PROBE_HOST}\\share\\acme`, `\\\\.\\pipe\\acme`, `\\\\.\\C:\\..\\UNC\\${PROBE_HOST}\\share\\acme`, `//?/C:/x/../../UNC/${PROBE_HOST}/share/acme`]) {
           for (const call of [() => ledgerTool(ctx, { action: 'list', project }), () => boardTool(ctx, { project }), () => reportTool(ctx, { status: 'done', summary: 'x', project }), () => pmTool(ctx, { action: 'status', project })]) {
             const out = await call()
             assert.deepEqual(visited.filter(cwd => !cwd.startsWith(w.root)), [], `ran a command in ${project}`)

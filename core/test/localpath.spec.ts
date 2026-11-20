@@ -31,6 +31,18 @@ describe('which paths are on this machine', () => {
       '\\\\.\\PhysicalDrive0',
       '\\\\?\\',
       '\\\\',
+      // A drive written as a device, with . or .. in it: Windows folds them into the prefix (\\.\C:\..\UNC\host is
+      // \\.\UNC\host), so nothing after a device prefix may climb (QA6).
+      `\\\\.\\C:\\..\\UNC\\${PROBE_HOST}\\share\\x`,
+      `//./C:/../UNC/${PROBE_HOST}/share/x`,
+      `\\\\.\\C:\\x\\..\\..\\UNC\\${PROBE_HOST}\\share\\x`,
+      `\\\\?\\C:\\..\\UNC\\${PROBE_HOST}\\share\\x`,
+      `\\??\\C:\\..\\UNC\\${PROBE_HOST}\\share\\x`,
+      `\\\\.\\C:\\.\\..\\UNC\\${PROBE_HOST}\\share\\x`,
+      `\\\\.\\C:\\..`,
+      `\\\\.\\C:\\x\\.`,
+      `\\\\.\\C:\\.. \\UNC\\${PROBE_HOST}\\share\\x`,
+      `\\\\.\\C:\\...\\UNC\\${PROBE_HOST}\\share\\x`,
     ]
     for (const path of local) assert.equal(isLocalPath(path, 'win32'), true, path)
     for (const path of remote) assert.equal(isLocalPath(path, 'win32'), false, path)
@@ -47,6 +59,8 @@ describe('which paths are on this machine', () => {
     assert.equal(plainDrivePath('\\??\\C:\\Users\\acme', 'win32'), 'C:\\Users\\acme')
     assert.equal(plainDrivePath(`\\\\?\\UNC\\${PROBE_HOST}\\share`, 'win32'), `\\\\?\\UNC\\${PROBE_HOST}\\share`)
     assert.equal(plainDrivePath('C:\\Users\\acme', 'win32'), 'C:\\Users\\acme')
+    // One that climbs out of its drive is not a drive path: it stays as written, for isLocalPath to refuse (QA6).
+    for (const path of [`\\\\.\\C:\\..\\UNC\\${PROBE_HOST}\\share`, `//?/C:/x/../../UNC/${PROBE_HOST}/share`]) assert.equal(plainDrivePath(path, 'win32'), path)
     assert.equal(plainDrivePath('\\\\?\\C:\\x', 'linux'), '\\\\?\\C:\\x')
   })
 })
@@ -94,7 +108,7 @@ describe('where a local path really is', () => {
     if (process.platform !== 'win32') return t.skip('only Windows reads \\\\host\\share as another machine')
     const fs = watchFs()
     try {
-      for (const path of [`\\\\${PROBE_HOST}\\share\\x`, `//${PROBE_HOST}/share/x`, `\\\\?\\UNC\\${PROBE_HOST}\\share\\x`, '\\\\.\\pipe\\acme']) {
+      for (const path of [`\\\\${PROBE_HOST}\\share\\x`, `//${PROBE_HOST}/share/x`, `\\\\?\\UNC\\${PROBE_HOST}\\share\\x`, '\\\\.\\pipe\\acme', `\\\\.\\C:\\..\\UNC\\${PROBE_HOST}\\share\\x`, `\\\\?\\C:\\x\\..\\..\\UNC\\${PROBE_HOST}\\share\\x`]) {
         await assert.rejects(localRealpath(path), RemotePathError, path)
       }
       assert.deepEqual(fs.remote, [])
@@ -113,6 +127,14 @@ describe('where a local path really is', () => {
       assert.deepEqual(fs.remote, [])
     } finally {
       fs.restore()
+    }
+    // A link whose target is a drive device that climbs out to a share (QA6).
+    const climbing = watchFs({ [join(root, 'shop', 'up')]: `\\\\.\\C:\\..\\UNC\\${PROBE_HOST}\\share` })
+    try {
+      await assert.rejects(localRealpath(join(root, 'shop', 'up', 'GUIDELINES.md')), RemotePathError)
+      assert.deepEqual(climbing.remote, [])
+    } finally {
+      climbing.restore()
     }
   })
 })

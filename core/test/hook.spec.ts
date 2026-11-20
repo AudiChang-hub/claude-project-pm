@@ -122,6 +122,15 @@ for (const lang of LANGS) {
         `\\??\\UNC\\${PROBE_HOST}\\share\\GUIDELINES.md`,
         // This machine's own disk, reached as a share: the same file in another spelling (QA5's bypass).
         `\\\\localhost\\${drive}$${w.repo.slice(2)}\\GUIDELINES.md`,
+        // A drive written as a device, with .. climbing out of it: Windows folds the .. into the prefix and opens
+        // \\.\UNC\host\share\… (QA6).
+        `\\\\.\\C:\\..\\UNC\\${PROBE_HOST}\\share\\GUIDELINES.md`,
+        `//./C:/../UNC/${PROBE_HOST}/share/GUIDELINES.md`,
+        `\\\\.\\C:\\x\\..\\..\\UNC\\${PROBE_HOST}\\share\\GUIDELINES.md`,
+        `\\\\?\\C:\\..\\UNC\\${PROBE_HOST}\\share\\GUIDELINES.md`,
+        `\\\\.\\C:\\.\\..\\UNC\\${PROBE_HOST}\\share\\GUIDELINES.md`,
+        // …and the guidelines file itself that way, through this machine's own share.
+        `\\\\.\\${drive}:\\..\\UNC\\localhost\\${drive}$${w.repo.slice(2)}\\GUIDELINES.md`,
       ]
       const fs = watchFs()
       try {

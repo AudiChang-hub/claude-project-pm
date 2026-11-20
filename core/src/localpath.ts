@@ -21,23 +21,36 @@ const MAX_LINKS = 40
 
 /**
  * Whether `path`, as written, names a place on this machine's own disks. On Windows that is a drive path, a
- * path from the current drive's root, a relative path, or a drive written as a device (\\?\C:\…, \\.\C:\…, \??\C:\…).
- * Never a UNC path (\\host\share, //host/share, \\localhost\C$ too) or any other device or namespace path
- * (\\?\UNC\…, \\?\GLOBALROOT\…, \\?\Volume{…}\…, \\.\pipe\…). Elsewhere every path is: a POSIX system reaches
- * other machines only through folders the person mounted.
+ * path from the current drive's root, a relative path, or a drive written as a device (\\?\C:\…, \\.\C:\…, \??\C:\…)
+ * with no . or .. in it. Never a UNC path (\\host\share, //host/share, \\localhost\C$ too) or any other device or
+ * namespace path (\\?\UNC\…, \\?\GLOBALROOT\…, \\?\Volume{…}\…, \\.\pipe\…). Elsewhere every path is: a POSIX
+ * system reaches other machines only through folders the person mounted.
+ *
+ * Windows folds a device path's . and .. into its prefix, past the drive: \\.\C:\..\UNC\host\share opens
+ * \\.\UNC\host\share, and with localhost that is this machine's own disk again. So after a device prefix any part
+ * made only of dots (or dots and spaces, which Windows trims to dots) makes the path not local, whatever it climbs to.
+ * A drive letter, here as everywhere, is taken as this machine's: one the person mapped to a share (Z: -> \\host\share)
+ * or made with subst is theirs, already connected.
  */
 export function isLocalPath(path: string, platform: NodeJS.Platform = process.platform): boolean {
   if (platform !== 'win32') return true
   const text = path.trim().replace(/\//g, '\\')
   const device = /^(?:\\\\[?.]\\|\\\?\?\\)/.exec(text)
-  if (device) return /^[a-z]:(?:\\|$)/i.test(text.slice(device[0].length))
+  if (device) {
+    const rest = text.slice(device[0].length)
+
+    return /^[a-z]:(?:\\|$)/i.test(rest) && !rest.split('\\').some(part => /^[. ]+$/.test(part))
+  }
 
   return !text.startsWith('\\\\')
 }
 
-/** A local drive written as a device (\\?\C:\x, \\.\C:\x, \??\C:\x), as the plain drive path (C:\x); others as given. */
+/**
+ * A local drive written as a device (\\?\C:\x, \\.\C:\x, \??\C:\x), as the plain drive path (C:\x); others as given,
+ * among them one with . or .. after the prefix (\\.\C:\..\UNC\host is not on drive C: at all; isLocalPath refuses it).
+ */
 export function plainDrivePath(path: string, platform: NodeJS.Platform = process.platform): string {
-  if (platform !== 'win32') return path
+  if (platform !== 'win32' || !isLocalPath(path, platform)) return path
   const device = /^(?:[\\/][\\/][?.][\\/]|\\\?\?\\)(?=[a-z]:(?:[\\/]|$))/i.exec(path)
 
   return device ? path.slice(device[0].length) : path
