@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 
 import { COMMANDS } from './cli'
-import { run } from './host'
+import { run, systemProgram } from './host'
 import { boardAddress, runningServer, serve } from './http'
 import type { InstallEnv } from './install'
 import { init, uninstall } from './install'
@@ -22,7 +22,7 @@ export function selfCommand(...args: string[]): { command: string; args: string[
 /** Opens a URL in the person's browser; false when no opener ran. */
 export async function openBrowser(url: string): Promise<boolean> {
   const argv =
-    process.platform === 'win32' ? ['rundll32', 'url.dll,FileProtocolHandler', url] : process.platform === 'darwin' ? ['open', url] : ['xdg-open', url]
+    process.platform === 'win32' ? [systemProgram('rundll32.exe'), 'url.dll,FileProtocolHandler', url] : process.platform === 'darwin' ? ['open', url] : ['xdg-open', url]
 
   return (await run(argv, process.cwd(), 10_000)) !== null
 }

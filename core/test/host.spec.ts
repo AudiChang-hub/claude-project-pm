@@ -4,12 +4,12 @@
  * `npm install --global @anthropic-ai/claude-code` had put claude.cmd on PATH, and set up no MCP server.
  */
 import assert from 'node:assert/strict'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
-import { run } from '../src/host'
+import { run, systemProgram } from '../src/host'
 import { PROBE_HOST, watchFs } from './helpers'
 
 describe('a command installed as a .cmd file, on Windows (CI run 44723838413)', { skip: process.platform === 'win32' ? false : 'a .cmd file is Windows\'' }, () => {
@@ -108,11 +108,77 @@ describe('a command installed as a .cmd file, on Windows (CI run 44723838413)', 
     }
   })
 
-  test('git, gh and claude.exe by name are never taken from the working folder (T-39 QA8)', async () => {
-    // Any program that is not git, under git's name: what a repository could leave in its folder.
+  /**
+   * A repository folder holding git.exe, gh.exe and claude.exe that are node (a hard link, or a copy), so that run with
+   * `-e <script>` each leaves a mark: what a repository could leave in its folder, under those names.
+   */
+  const fakes = (folder: string) => {
+    mkdirSync(folder, { recursive: true })
+    for (const name of ['git', 'gh', 'claude']) {
+      const to = join(folder, `${name}.exe`)
+      try {
+        linkSync(process.execPath, to)
+      } catch {
+        copyFileSync(process.execPath, to)
+      }
+    }
+  }
+  const mark = (name: string) => `require('fs').writeFileSync(${JSON.stringify(join(root, `pwned-${name}`))}, 'x')`
+
+  test('git, gh and claude by name are never taken from the working folder (T-39 QA8)', async () => {
+    const repo = join(root, 'acme-shop')
+    fakes(repo)
+    for (const name of ['git', 'gh', 'claude']) {
+      await run([name, '-e', mark(name)], repo)
+      assert.equal(existsSync(join(root, `pwned-${name}`)), false, `ran the repository's ${name}.exe`)
+    }
+    assert.match((await run(['git', '--version'], repo)) ?? '', /^git version /)
+  })
+
+  test('nor through a ".", relative or empty entry on PATH (T-39 QA9)', async () => {
+    const repo = join(root, 'acme-shop')
+    fakes(repo)
+    fakes(join(repo, 'tools'))
+    for (const first of ['.', '.\\', 'tools', '.\\tools', '', ' ', '"."']) {
+      process.env.PATH = `${first};${bin};${path}`
+      for (const name of ['git', 'gh', 'claude']) {
+        await run([name, '-e', mark(name)], repo)
+        assert.equal(existsSync(join(root, `pwned-${name}`)), false, `PATH starting ${JSON.stringify(first)} ran the repository's ${name}.exe`)
+      }
+      // What PATH names on this machine's own disks is still found: git, and the npm-style acme-cli.cmd.
+      assert.match((await run(['git', '--version'], repo)) ?? '', /^git version /, JSON.stringify(first))
+      assert.deepEqual(JSON.parse((await run(['acme-cli', 'list'], repo))!), ['list'], JSON.stringify(first))
+    }
+  })
+
+  test('the program a found .exe starts gets a PATH with only those folders: none it could read as the repository (T-39 QA9)', async () => {
     const repo = join(root, 'acme-shop')
     mkdirSync(repo, { recursive: true })
-    copyFileSync(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'hostname.exe'), join(repo, 'git.exe'))
-    assert.match((await run(['git', '--version'], repo)) ?? '', /^git version /)
+    process.env.PATH = `.;tools;;${bin};${path}`
+    // node.exe (from the PATH Node itself is on), asked what PATH it was given.
+    const said = await run(['node', '-e', 'console.log(process.env.PATH)'], repo)
+    assert.ok(said, 'node was not found')
+    const parts = said!.split(';')
+    assert.ok(parts.every(part => /^[A-Za-z]:\\/.test(part)), said!)
+    assert.ok(parts.some(part => part.toLowerCase() === bin.toLowerCase()), said!)
+  })
+})
+
+describe('Windows\' own programs, by their full path (T-39 QA9)', { skip: process.platform === 'win32' ? false : 'Windows\'' }, () => {
+  test('cmd.exe and rundll32.exe come from System32 under SystemRoot, and only a plain local SystemRoot is taken', () => {
+    const saved = { SystemRoot: process.env.SystemRoot, windir: process.env.windir }
+    try {
+      process.env.SystemRoot = 'C:\\Windows'
+      assert.equal(systemProgram('cmd.exe').toLowerCase(), 'c:\\windows\\system32\\cmd.exe')
+      assert.equal(systemProgram('rundll32.exe').toLowerCase(), 'c:\\windows\\system32\\rundll32.exe')
+      for (const bad of [`\\\\${PROBE_HOST}\\share\\Windows`, '.', 'Windows', '\\Windows', 'C:Windows', '\\\\?\\C:\\Windows']) {
+        process.env.SystemRoot = bad
+        process.env.windir = bad
+        assert.equal(systemProgram('cmd.exe').toLowerCase(), 'c:\\windows\\system32\\cmd.exe', bad)
+      }
+    } finally {
+      process.env.SystemRoot = saved.SystemRoot
+      process.env.windir = saved.windir
+    }
   })
 })

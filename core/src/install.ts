@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import type { Run } from './host'
-import { noProgramsFromCurrentFolder, systemCmd } from './host'
+import { childEnv, noProgramsFromCurrentFolder, systemCmd } from './host'
 import { localRealpath } from './localpath'
 import { ct } from './messages'
 import { remoteTips } from './prepush'
@@ -636,9 +636,9 @@ export function deleteAfterExit(file: string, env: NodeJS.ProcessEnv, { tries = 
     writeFileSync(note, ct('uninstall.deleteFailed', { file }))
     const line = `""${script}" "${file}" "${dirname(file)}" "${note}" ${Math.max(1, Math.floor(tries))} ${show ? 1 : 0}"`
     // ping and notepad.exe by name: never from the folder uninstall was run in (the repository), nor that folder kept
-    // as the script's (T-39 QA8).
+    // as the script's, nor a ".", relative or empty entry on PATH (T-39 QA8, QA9).
     noProgramsFromCurrentFolder()
-    const child = spawn(systemCmd(), ['/d', '/s', '/c', line], { cwd: tmpdir(), detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true })
+    const child = spawn(systemCmd(), ['/d', '/s', '/c', line], { cwd: tmpdir(), env: childEnv(), detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true })
     child.unref()
 
     return { script, note }

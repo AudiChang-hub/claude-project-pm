@@ -1,6 +1,7 @@
 /**
  * The commands the core runs (git, gh, claude), never through a shell but in one case (a command npm installed on
- * Windows, below), and the paths it keeps its data under.
+ * Windows, below), on Windows each by the full path it is found at on PATH's plain local folders, and the paths it
+ * keeps its data under.
  */
 import { execFile } from 'node:child_process'
 import { statSync } from 'node:fs'
@@ -29,49 +30,104 @@ export function noProgramsFromCurrentFolder(): void {
   if (process.platform === 'win32') process.env.NoDefaultCurrentDirectoryInExePath = '1'
 }
 
-/** Windows' own cmd.exe, by its full path: never one in the current folder, nor one ComSpec names. */
+/**
+ * One of Windows' own programs (cmd.exe, rundll32.exe), by its full path in System32: never one in the current folder,
+ * on PATH, or one ComSpec names. SystemRoot (or windir) is taken only when it is a plain path on this machine's own
+ * disks (plainLocalPath), else C:\Windows (T-39 QA9).
+ */
+export function systemProgram(name: string): string {
+  const root = [process.env.SystemRoot, process.env.windir].map(value => (value && /^[A-Za-z]:\\/.test(value) ? plainLocalPath(value, value, 'win32') : null)).find(Boolean)
+
+  return join(root ?? 'C:\\Windows', 'System32', name)
+}
+
+/** Windows' own cmd.exe (systemProgram). */
 export function systemCmd(): string {
-  return join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32', 'cmd.exe')
+  return systemProgram('cmd.exe')
 }
 
 export const run: Run = (argv, cwd, timeoutMs = GIT_TIMEOUT_MS) =>
   new Promise(resolve => {
     const [command, ...args] = argv
     if (!command) return resolve(null)
-    noProgramsFromCurrentFolder()
+    const done = (err: Error | null, stdout: string) => resolve(err ? null : String(stdout).trim())
     try {
-      execFile(command, args, { cwd, timeout: timeoutMs, windowsHide: true, maxBuffer: MAX_BUFFER, encoding: 'utf8' }, (err, stdout) => {
-        if (!err) return resolve(String(stdout).trim())
-        // Not found on Windows: it may be a .cmd file, as npm installs every command there (claude.cmd), which a
-        // program started without a shell is never found as (CI run 44723838413: init said Claude Code was missing).
-        const batch = process.platform === 'win32' && (err as NodeJS.ErrnoException).code === 'ENOENT' ? batchOnPath(command) : null
-        if (!batch) return resolve(null)
-        runBatch(batch, args, cwd, timeoutMs).then(resolve, () => resolve(null))
-      })
+      if (process.platform !== 'win32') {
+        execFile(command, args, { cwd, timeout: timeoutMs, windowsHide: true, maxBuffer: MAX_BUFFER, encoding: 'utf8' }, done)
+
+        return
+      }
+      // Windows: a program named without a folder is looked for here, on PATH's plain local folders only, and started by
+      // its full path; Windows' own search would also try the current folder, and any ".", relative or empty entry on
+      // PATH, both of which the repository chooses the files of (T-39 QA8, QA9).
+      noProgramsFromCurrentFolder()
+      const env = childEnv()
+      if (!isBare(command)) {
+        execFile(command, args, { cwd, env, timeout: timeoutMs, windowsHide: true, maxBuffer: MAX_BUFFER, encoding: 'utf8' }, done)
+
+        return
+      }
+      const hasExt = /\.(exe|com)$/i.test(command)
+      const exe = onPath(command, hasExt ? [''] : ['.com', '.exe'])
+      if (exe) {
+        execFile(exe, args, { cwd, env, timeout: timeoutMs, windowsHide: true, maxBuffer: MAX_BUFFER, encoding: 'utf8' }, done)
+
+        return
+      }
+      // None: it may be a .cmd file, as npm installs every command there (claude.cmd), which a program started without a
+      // shell is never found as (CI run 44723838413: init said Claude Code was missing).
+      const batch = hasExt ? null : onPath(command, ['.cmd', '.bat'])
+      if (!batch) return resolve(null)
+      runBatch(batch, args, timeoutMs).then(resolve, () => resolve(null))
     } catch {
       resolve(null)
     }
   })
 
+/** A program's name alone, as a caller writes it (git, gh, claude): no folder, nothing a shell would read. */
+const isBare = (command: string) => /^[\w.-]+$/.test(command)
+
 /**
- * The .cmd or .bat file a bare command name is on Windows' PATH, or null. Only folders on this machine's own disks
- * are looked in (plainLocalPath: a network folder on PATH would be connected to), and never the working folder, which a
- * repository chooses the files of.
+ * PATH's folders that are absolute plain paths on this machine's own disks (Windows), each once: no ".", relative or
+ * empty entry (read against the current folder, often the repository), and no network folder (plainLocalPath: looking
+ * in one would connect to it).
  */
-function batchOnPath(command: string): string | null {
-  if (!/^[\w.-]+$/.test(command) || /\.(cmd|bat|exe|com)$/i.test(command)) return null
-  for (const entry of (process.env.PATH ?? '').split(';')) {
+export function pathFolders(path: string = process.env.PATH ?? ''): string[] {
+  const folders: string[] = []
+  for (const entry of path.split(';')) {
     const folder = entry.trim().replace(/^"(.*)"$/, '$1')
     if (!/^[A-Za-z]:[\\/]/.test(folder)) continue
     const plain = plainLocalPath(folder, folder, 'win32')
-    if (!plain) continue
-    for (const ext of ['.cmd', '.bat']) {
-      const file = join(plain, `${command}${ext}`)
+    if (plain && !folders.some(known => known.toLowerCase() === plain.toLowerCase())) folders.push(plain)
+  }
+
+  return folders
+}
+
+/** The first file `command` with one of `exts` is in PATH's plain local folders (pathFolders), or null. */
+function onPath(command: string, exts: string[]): string | null {
+  for (const folder of pathFolders()) {
+    for (const ext of exts) {
+      const file = join(folder, `${command}${ext}`)
       if (statSync(file, { throwIfNoEntry: false })?.isFile()) return file
     }
   }
 
   return null
+}
+
+/**
+ * The environment a program the core starts gets on Windows: PATH with its plain local folders only (pathFolders),
+ * so that the programs it starts by name in turn (git's own, a batch file's node) are not looked for in a folder the
+ * repository chooses either; and NoDefaultCurrentDirectoryInExePath set.
+ */
+export function childEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(process.env)) if (!/^path$/i.test(key)) env[key] = value
+  env.PATH = pathFolders().join(';')
+  env.NoDefaultCurrentDirectoryInExePath = '1'
+
+  return env
 }
 
 /**
@@ -90,14 +146,14 @@ const isCmdSafe = (text: string) => !/["%!\u0000-\u001f]/.test(text) && !text.en
  * NoDefaultCurrentDirectoryInExePath set (noProgramsFromCurrentFolder) the `node` an npm batch file names is never
  * looked for in the current folder either (T-39 QA8).
  */
-function runBatch(file: string, args: string[], cwd: string, timeoutMs: number): Promise<string | null> {
+function runBatch(file: string, args: string[], timeoutMs: number): Promise<string | null> {
   if (![file, ...args].every(isCmdSafe)) return Promise.resolve(null)
   const line = [file, ...args].map(arg => `"${arg}"`).join(' ')
 
   return new Promise(resolve => {
     // /d: no AutoRun commands; /v:off: no delayed expansion; /s /c "…": the outer quotes are taken off, the rest kept.
     noProgramsFromCurrentFolder()
-    execFile(systemCmd(), ['/d', '/v:off', '/s', '/c', `"${line}"`], { cwd: dirname(file), env: { ...process.env, NoDefaultCurrentDirectoryInExePath: '1' }, timeout: timeoutMs, windowsHide: true, windowsVerbatimArguments: true, maxBuffer: MAX_BUFFER, encoding: 'utf8' }, (err, stdout) =>
+    execFile(systemCmd(), ['/d', '/v:off', '/s', '/c', `"${line}"`], { cwd: dirname(file), env: childEnv(), timeout: timeoutMs, windowsHide: true, windowsVerbatimArguments: true, maxBuffer: MAX_BUFFER, encoding: 'utf8' }, (err, stdout) =>
       resolve(err ? null : String(stdout).trim()),
     )
   })
