@@ -38,6 +38,7 @@ import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import { NotPlainPathError, localRealpath } from './localpath'
 import { ct } from './messages'
 import type { ProjectRef } from './project'
+import { gitPath } from './project'
 import { paths, readJsonFile, withLock, writeAtomic } from './store'
 
 /** Larger than this, a file's bytes are not read (its size and time are compared) nor copied. */
@@ -319,7 +320,8 @@ const PLAIN_NAME = /^[A-Za-z0-9._/ -]+$/
 
 /** Where to see a project's file in git: a command to run only for a plain name, else the words alone. */
 function historyOf(repo: string, file: string): string {
-  const rel = relative(repo, file).replace(/\\/g, '/')
+  // As git names it: on Linux and macOS a backslash stays in the name, which then is not plain (T-39 QA6).
+  const rel = gitPath(repo, file)
 
   return PLAIN_NAME.test(rel) && !rel.startsWith('-') ? ct('guidelines.fix.history', { repo, rel }) : ct('guidelines.fix.historyPlain')
 }

@@ -248,7 +248,8 @@ for (const lang of LANGS) {
       const rel = relative(ref.path, file)
       let fix = copy ? ct(later ? 'guidelines.fix.copyLater' : 'guidelines.fix.copy', { copy, file }) : ct('guidelines.fix.noCopy')
       // Only a name of plain characters goes into a command (T-39 QA4 1).
-      const name = rel.replace(/\\/g, '/')
+      // A backslash is a separator only on Windows; elsewhere it is part of the name (T-39 QA6).
+      const name = process.platform === 'win32' ? rel.replace(/\\/g, '/') : rel
       if (!rel.startsWith('..')) fix += /^[A-Za-z0-9._/ -]+$/.test(name) ? ct('guidelines.fix.history', { repo: ref.path, rel: name }) : ct('guidelines.fix.historyPlain')
 
       return ct('guidelines.alert', { file, what: ct(`guidelines.what.${change}` as Parameters<typeof ct>[0]), fix })
@@ -438,6 +439,25 @@ for (const lang of LANGS) {
       }
       const plain = await watch('Acme Rules.md')
       assert.ok(plain.includes('git log -p -- "Acme Rules.md"'), plain)
+    })
+
+    test('on Linux and macOS a name with a backslash is that name: docs\\rules.md is not the docs/rules.md git tracks (T-39 QA6)', async t => {
+      if (process.platform === 'win32') return t.skip('a backslash is a separator on Windows; project.spec checks the rule there')
+      await pmTool(w.ctx(), { action: 'claim' })
+      watched = [w.repo]
+      // git tracks docs/rules.md; beside it, untracked, a file whose name is docs\rules.md (a .env-like file, say).
+      mkdirSync(join(w.repo, 'docs'))
+      writeFileSync(join(w.repo, 'docs', 'rules.md'), RULES)
+      git(w.repo, 'add', 'docs/rules.md')
+      writeFileSync(join(w.repo, 'docs\\rules.md'), 'ACME_SECRET=1\n')
+      writeFileSync(join(w.repo, '.project-pm.json'), JSON.stringify({ guidelines: 'docs\\rules.md' }))
+      // Not tracked: no guidelines from it, and nothing of it handed to the model.
+      const out = said(await speak(other, NOW))
+      assert.ok(!out.includes('ACME_SECRET'), out)
+      assert.ok(!out.includes(RULES.trim()), out)
+      // Nor is it watched: changing it says nothing (the setting is none).
+      writeFileSync(join(w.repo, 'docs\\rules.md'), 'ACME_SECRET=2\n')
+      assert.equal(said(await bash(NOW + 1000)), '')
     })
 
     test('once a day, baselines unused for a month and copies nothing points at go; a copy in use stays (T-39 QA3)', async () => {

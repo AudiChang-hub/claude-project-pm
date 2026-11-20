@@ -1,5 +1,5 @@
 /** Which project a folder belongs to: its git repository, a worktree counting as the repository it was made from. */
-import { basename, dirname, resolve } from 'node:path'
+import { basename, dirname, posix, resolve, win32 } from 'node:path'
 
 import { keyFile, projectKey } from '../../hooks/sessions'
 import type { Run } from './host'
@@ -41,4 +41,15 @@ export function projectRefOf(path: string, cwd = path): ProjectRef {
   const key = projectKey(path)
 
   return { path, name: basename(path) || path, key, file: keyFile(key), cwd }
+}
+
+/**
+ * `file`'s path inside `repo` as git names it: with forward slashes. A backslash is turned into one only on Windows,
+ * where it is a separator; on Linux and macOS it is part of a name, so docs\rules.md stays itself and is never taken
+ * for the docs/rules.md git tracks (T-39 QA6).
+ */
+export function gitPath(repo: string, file: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform !== 'win32') return posix.relative(posix.resolve(repo), posix.resolve(file))
+
+  return win32.relative(win32.resolve(repo), win32.resolve(file)).split(win32.sep).join('/')
 }

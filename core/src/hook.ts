@@ -22,7 +22,7 @@ import { dataHome, run as hostRun } from './host'
 import { NotPlainPathError, localRealpath, plainLocalPath } from './localpath'
 import { ct } from './messages'
 import type { ProjectRef } from './project'
-import { resolveProject } from './project'
+import { gitPath, resolveProject } from './project'
 import { changeActor, loadActor, loadProject, readJsonFile } from './store'
 import type { Actor } from './types'
 import { REPORT_TOOL } from './tools'
@@ -313,7 +313,8 @@ async function isTracked(file: string, repo: string, run: Run): Promise<boolean>
 
 /** Whether git tracks `file`; null when git did not answer (it failed, or took too long). */
 async function trackedBy(file: string, repo: string, run: Run): Promise<boolean | null> {
-  const rel = relative(resolve(repo), resolve(file)).replace(/\\/g, '/')
+  // As git names it: a backslash is a separator only on Windows (T-39 QA6).
+  const rel = gitPath(repo, file)
   // Literal: a name with * or : in it is that name, not a pattern matching some other file git tracks. -z: each name as
   // it is, ended by NUL; without it git quotes and escapes a name with " or \, a control character, or (core.quotepath,
   // on by default) any non-ASCII letter, so 開發準則.md was never found tracked (CI run 44716640045, `say "hi".md`).
