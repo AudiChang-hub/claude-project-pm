@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import type { Run } from './host'
+import { localRealpath } from './localpath'
 import { ct } from './messages'
 import { remoteTips } from './prepush'
 import type { ProjectRef } from './project'
@@ -120,9 +121,15 @@ export function prePushScript(command: string): string {
   ].join('\n')
 }
 
+/**
+ * A file's text, or null when there is none. A repository's AGENTS.md or CLAUDE.md may be a committed link that leads
+ * off this machine's disks: that is an error (NotPlainPathError) before anything is read, never "no file" (init would
+ * then write one through it).
+ */
 async function textOf(file: string): Promise<string | null> {
+  const real = await localRealpath(file)
   try {
-    return await readFile(file, 'utf8')
+    return await readFile(real ?? file, 'utf8')
   } catch {
     return null
   }
@@ -212,7 +219,8 @@ export async function planInstall(ref: ProjectRef, ie: InstallEnv, options: { ci
   const isShort = Buffer.byteLength(agents + override) + SECTION_LIMIT > AGENTS_LIMIT
   if (isShort) notes.push(ct('init.agentsLong'))
   // 2.1: the PM keeps nothing in the project, but a .project-pm/ folder someone made there must not reach git.
-  if (existsSync(join(ref.path, '.project-pm')) && (await ie.run(['git', 'check-ignore', '-q', '.project-pm/'], ref.path)) === null) notes.push(ct('init.gitignoreHint'))
+  const kept = await localRealpath(join(ref.path, '.project-pm'))
+  if (kept && existsSync(kept) && (await ie.run(['git', 'check-ignore', '-q', '.project-pm/'], ref.path)) === null) notes.push(ct('init.gitignoreHint'))
   changes.push({ kind: 'text', file: agentsFile, block: agentsSection(isShort) })
   const claudeFile = join(ref.path, 'CLAUDE.md')
   const claudeMd = await textOf(claudeFile)

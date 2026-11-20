@@ -12,12 +12,13 @@ import { afterEach, beforeEach, describe, test } from 'node:test'
 
 import type { InstallEnv } from '../src/install'
 import { AGENTS_LIMIT, END, binPath, deleteAfterExit, mcpLauncher, SECTION_LIMIT, START, agentsSection, init, readLog, shCommand, skillText, uninstall, withBlock, withoutBlock } from '../src/install'
+import { NotPlainPathError } from '../src/localpath'
 import { ct } from '../src/messages'
 import type { ProjectRef } from '../src/project'
 import { resolveProject } from '../src/project'
 import { paths } from '../src/store'
 import type { World } from './helpers'
-import { LANGS, fakeClaude, git, hostWith, world } from './helpers'
+import { LANGS, PROBE_HOST, fakeClaude, git, hostWith, watchFs, world } from './helpers'
 
 /** Every file under `dir` (but the core's own data folder and git's objects), with its bytes and, off Windows, its mode. */
 function snapshot(...dirs: string[]): Record<string, string> {
@@ -273,6 +274,28 @@ for (const lang of LANGS) {
       out = await init(ref, ie(), { yes: false, ci: false }, say)
       assert.ok(!out.notes.includes(ct('init.gitignoreHint')))
       assert.equal(readFileSync(join(w.repo, '.gitignore'), 'utf8'), 'node_modules/\n.project-pm/\n')
+    })
+
+    test('a committed AGENTS.md, CLAUDE.md or .project-pm that leads to a network share stops init before anything is read or written there (T-39)', async t => {
+      if (process.platform !== 'win32') return t.skip('only Windows reads \\\\host\\share as another machine')
+      for (const name of ['AGENTS.md', 'AGENTS.override.md', 'CLAUDE.md']) {
+        const before = snapshot(w.home, w.repo)
+        const fs = watchFs({ [join(w.repo, name)]: `\\\\${PROBE_HOST}\\share\\${name}` })
+        try {
+          await assert.rejects(init(ref, ie(), { yes: true, ci: false }, say), NotPlainPathError, name)
+          assert.deepEqual(fs.remote, [], name)
+        } finally {
+          fs.restore()
+        }
+        assert.deepEqual(snapshot(w.home, w.repo), before, name)
+      }
+      const fs = watchFs({ [join(w.repo, '.project-pm')]: `\\\\?\\UNC\\${PROBE_HOST}\\share` })
+      try {
+        await assert.rejects(init(ref, ie(), { yes: false, ci: false }, say), NotPlainPathError)
+        assert.deepEqual(fs.remote, [])
+      } finally {
+        fs.restore()
+      }
     })
 
     test('no .project-pm/ folder in the project: no reminder', async () => {

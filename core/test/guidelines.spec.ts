@@ -205,6 +205,46 @@ describe('guidelines named by the project', () => {
     }
   })
 
+  test('a .project-pm.json that is a committed link to a network share is not read (T-39)', async t => {
+    if (process.platform !== 'win32') return t.skip('only Windows reads \\\\host\\share as another machine')
+    git(w.repo, 'add', 'GUIDELINES.md')
+    aim('GUIDELINES.md')
+    const fs = watchFs({ [join(w.repo, '.project-pm.json')]: `\\\\${PROBE_HOST}\\share\\.project-pm.json` })
+    try {
+      const found = await readGuidelines(ref, w.env)
+      assert.deepEqual(fs.remote, [])
+      assert.equal(found, null)
+    } finally {
+      fs.restore()
+    }
+  })
+
+  test('the person\'s own file, named relative to the project through a link to a network share, is not read (T-39)', async t => {
+    if (process.platform !== 'win32') return t.skip('only Windows reads \\\\host\\share as another machine')
+    mkdirSync(w.env.PROJECT_PM_HOME!, { recursive: true })
+    writeFileSync(join(w.env.PROJECT_PM_HOME!, 'config.json'), JSON.stringify({ guidelines: 'shared/rules.md' }))
+    const fs = watchFs({ [join(w.repo, 'shared')]: `\\\\${PROBE_HOST}\\share` })
+    try {
+      const found = await readGuidelines(ref, w.env)
+      assert.deepEqual(fs.remote, [])
+      assert.ok(found && !('text' in found), JSON.stringify(found))
+    } finally {
+      fs.restore()
+    }
+    // Named as a share outright, or as a stream: refused unread too.
+    for (const named of [`\\\\${PROBE_HOST}\\share\\rules.md`, `${join(w.root, 'my-rules.md')}:hidden`]) {
+      writeFileSync(join(w.env.PROJECT_PM_HOME!, 'config.json'), JSON.stringify({ guidelines: named }))
+      const again = watchFs()
+      try {
+        const found = await readGuidelines(ref, w.env)
+        assert.deepEqual(again.remote, [])
+        assert.ok(found && !('text' in found), named)
+      } finally {
+        again.restore()
+      }
+    }
+  })
+
   test('a real committed link to a network share is refused (Windows with link rights: GitHub\'s runners)', async t => {
     if (process.platform !== 'win32') return t.skip('only Windows reads \\\\host\\share as another machine')
     const target = `\\\\${PROBE_HOST}\\share\\RULES.md`

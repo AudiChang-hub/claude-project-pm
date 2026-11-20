@@ -131,6 +131,10 @@ for (const lang of LANGS) {
         `\\\\.\\C:\\.\\..\\UNC\\${PROBE_HOST}\\share\\GUIDELINES.md`,
         // …and the guidelines file itself that way, through this machine's own share.
         `\\\\.\\${drive}:\\..\\UNC\\localhost\\${drive}$${w.repo.slice(2)}\\GUIDELINES.md`,
+        // Not plain on this machine either (T-39): its stream, a name Windows trims to it, a drive-relative spelling.
+        `${join(w.repo, 'GUIDELINES.md')}::$DATA`,
+        `${join(w.repo, 'GUIDELINES.md')}.`,
+        `${drive}:GUIDELINES.md`,
       ]
       const fs = watchFs()
       try {
@@ -140,6 +144,9 @@ for (const lang of LANGS) {
           assert.equal(decision?.hookSpecificOutput?.permissionDecision, 'deny', file)
           assert.equal(decision?.hookSpecificOutput?.permissionDecisionReason, tr('guidelines.remote', { path: file, file: join(w.repo, 'GUIDELINES.md') }), file)
         }
+        // With a trailing space (which Windows trims): the guidelines file by its name, refused too.
+        const spaced = (await hook('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: `${join(w.repo, 'GUIDELINES.md')} ` } })) as Decision
+        assert.equal(spaced?.hookSpecificOutput?.permissionDecision, 'deny')
         assert.deepEqual(fs.remote, [], 'looked up a network path')
         // Once the person asks about the guidelines the lock stands aside, and still nothing is looked up.
         await hook('UserPromptSubmit', { prompt: lang === 'en' ? 'Please update the guidelines' : '請改準則' })
@@ -166,11 +173,14 @@ for (const lang of LANGS) {
       }
     })
 
-    test('the long-path spellings of a local file (\\\\?\\C:\\, \\\\.\\C:\\) are still the file on this machine', async t => {
+    test('the long-path spellings of a local file (\\\\?\\C:\\, \\\\.\\C:\\) are refused while the lock stands, unread (T-39)', async t => {
       if (process.platform !== 'win32') return t.skip('the \\\\?\\ prefix is Windows\'')
       await lockGuidelines()
       const file = join(w.repo, 'GUIDELINES.md')
-      const spellings = [`\\\\?\\${file}`, `\\\\.\\${file}`, `\\\\?\\${file.toUpperCase()}`]
+      mkdirSync(join(w.root, 'elsewhere'))
+      writeFileSync(join(w.root, 'elsewhere', 'GUIDELINES.md'), 'other\n')
+      // Not plain paths (localpath.ts): the guidelines file in any of them, and any other file too, is refused.
+      const spellings = [`\\\\?\\${file}`, `\\\\.\\${file}`, `\\\\?\\${file.toUpperCase()}`, `\\\\?\\${join(w.root, 'elsewhere', 'GUIDELINES.md')}`]
       const short = shortPath(file)
       if (short && short !== file) spellings.push(`\\\\?\\${short}`)
       const fs = watchFs()
@@ -178,11 +188,8 @@ for (const lang of LANGS) {
         for (const spelling of spellings) {
           const decision = (await hook('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: spelling } })) as Decision
           assert.equal(decision?.hookSpecificOutput?.permissionDecision, 'deny', spelling)
-          assert.equal(decision?.hookSpecificOutput?.permissionDecisionReason, tr('guidelines.locked', { file }), spelling)
+          assert.equal(decision?.hookSpecificOutput?.permissionDecisionReason, tr('guidelines.remote', { path: spelling, file }), spelling)
         }
-        mkdirSync(join(w.root, 'elsewhere'))
-        writeFileSync(join(w.root, 'elsewhere', 'GUIDELINES.md'), 'other\n')
-        assert.equal(await hook('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: `\\\\?\\${join(w.root, 'elsewhere', 'GUIDELINES.md')}` } }), null)
         assert.deepEqual(fs.remote, [])
       } finally {
         fs.restore()

@@ -8,7 +8,7 @@ import type { Lang } from '../../hooks/messages'
 
 const zhTW = {
   'error.notGit': '這個資料夾（{path}）不在 git repo 裡，沒有交辦清單。請在專案的 git 資料夾裡使用，或先執行 git init。',
-  'error.remotePath': '這個路徑（{path}）不在這台電腦的磁碟上，而是網路位置或裝置路徑。Project PM 不會去開這種路徑：一開，Windows 就會連到那台主機並送出使用者的登入憑證。請用專案在這台電腦上的資料夾（以磁碟代號開頭，例如 C:）。',
+  'error.remotePath': '這個路徑（{path}）不是這台電腦磁碟上的一般路徑（可能是網路位置、裝置路徑、磁碟機相對路徑、資料流、保留名稱，或經由連結指到這些地方）。Project PM 不會去開這種路徑：網路位置一開，Windows 就會連到那台主機並送出使用者的登入憑證。請用專案在這台電腦上的資料夾（以磁碟代號開頭的完整路徑，例如 C:\\…）。',
   'error.cannotWrite': 'Project PM 寫不進資料檔（{reason}），這次的內容沒有存下來。',
   'error.corrupt': 'Project PM 的資料檔 {file} 無法讀取（{reason}）。檔案沒有被改動；請備份後修正或刪除它。',
   'error.unknownTool': '沒有名為 {name} 的工具。',
@@ -168,7 +168,7 @@ type CoreKey = keyof typeof zhTW
 
 const en: Record<CoreKey, string> = {
   'error.notGit': 'This folder ({path}) is not in a git repository, so it has no ledger. Use Project PM in the project\'s git folder, or run git init first.',
-  'error.remotePath': 'This path ({path}) is not on this computer\'s own disks but a network location or a device path. Project PM does not open such a path: opening it makes Windows connect to that host and send the user\'s sign-in credentials. Use the project\'s folder on this computer (one starting with a drive letter, such as C:).',
+  'error.remotePath': 'This path ({path}) is not a plain path on this computer\'s own disks (it may be a network location, a device path, a drive-relative path, a stream, a reserved name, or a link to one of these). Project PM does not open such a path: opening a network location makes Windows connect to that host and send the user\'s sign-in credentials. Use the project\'s folder on this computer (a full path starting with a drive letter, such as C:\\…).',
   'error.cannotWrite': 'Project PM could not write its data file ({reason}); nothing from this call was saved.',
   'error.corrupt': 'Project PM cannot read its data file {file} ({reason}). The file was left as it is; back it up, then fix or delete it.',
   'error.unknownTool': 'There is no tool named {name}.',

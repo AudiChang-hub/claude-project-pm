@@ -16,7 +16,7 @@ import { clip, finishedTasks, planFromTodos } from '../../hooks/sessions'
 import type { BackgroundTask, Step } from '../../types'
 import type { Run } from './host'
 import { dataHome, run as hostRun } from './host'
-import { RemotePathError, isLocalPath, localRealpath, plainDrivePath } from './localpath'
+import { NotPlainPathError, localRealpath, plainLocalPath } from './localpath'
 import { ct } from './messages'
 import type { ProjectRef } from './project'
 import { resolveProject } from './project'
@@ -209,7 +209,7 @@ async function preToolUse(id: string, ref: ProjectRef, input: HookInput, env: No
   if (!found) return null
   const which = await isGuidelinesFile(found.file, target, input.cwd || ref.cwd)
   if (which === 'other') return null
-  const reason = which === 'remote' ? t('guidelines.remote', { path: target, file: found.file }) : t('guidelines.locked', { file: found.file })
+  const reason = which === 'unplain' ? t('guidelines.remote', { path: target, file: found.file }) : t('guidelines.locked', { file: found.file })
 
   return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }
 }
@@ -219,21 +219,20 @@ async function preToolUse(id: string, ref: ProjectRef, input: HookInput, env: No
  * (an 8.3 short name such as C:\Users\RUNNER~1, a folder link, a subst drive, a path relative to the session's folder).
  * Git gives the repository's folder in one spelling and a tool may use another, so names alone let the lock be passed.
  *
- * `remote` when the target is not on this machine's disks as written (\\host\share, \\?\UNC\…, a device path) or a link
- * on the way leads off it: looking it up would connect to that host before the person allowed anything (see
- * localpath.ts), so it is never looked up, and since it cannot be told apart from the guidelines file (\\localhost\C$\…
- * is this machine's own disk), the lock refuses it.
+ * `unplain` when the target is not a plain path on this machine's disks (plainLocalPath: \\host\share, \\?\…, a device
+ * name, C:x, a stream) or a link on the way leads to one: looking it up could connect to another host before the
+ * person allowed anything (localpath.ts), so it is never looked up, and since it cannot be told apart from the
+ * guidelines file (\\localhost\C$\… is this machine's own disk), the lock refuses it.
  */
-async function isGuidelinesFile(guidelines: string, target: string, cwd: string): Promise<'same' | 'other' | 'remote'> {
+async function isGuidelinesFile(guidelines: string, target: string, cwd: string): Promise<'same' | 'other' | 'unplain'> {
   if (isSameFile(guidelines, target.replace(/\\/g, '/'))) return 'same'
-  if (!isLocalPath(target)) return 'remote'
-  const where = resolve(cwd, plainDrivePath(target))
+  const where = plainLocalPath(target, cwd)
+  if (where === null) return 'unplain'
   if (isSameFile(guidelines, where.replace(/\\/g, '/'))) return 'same'
-  if (!isLocalPath(where)) return 'remote'
-  // Where each really is. The guidelines file is the person's or the repository's: one that is not on this machine is
-  // matched by its name alone, above.
-  const [a, b] = await Promise.all([localRealpath(guidelines).catch(() => null), localRealpath(where).catch((err: unknown) => (err instanceof RemotePathError ? err : null))])
-  if (b instanceof RemotePathError) return 'remote'
+  // Where each really is. The guidelines file is the person's or the repository's: one that is not a plain local path
+  // is matched by its name alone, above.
+  const [a, b] = await Promise.all([localRealpath(guidelines).catch(() => null), localRealpath(where).catch((err: unknown) => (err instanceof NotPlainPathError ? err : null))])
+  if (b instanceof NotPlainPathError) return 'unplain'
 
   return !!a && !!b && isSameFile(a, b) ? 'same' : 'other'
 }
@@ -281,16 +280,20 @@ async function isTracked(file: string, repo: string, run: Run): Promise<boolean>
 
 /**
  * The development guidelines file: `guidelines` in the project's .project-pm.json (a file git tracks inside the
- * repository, not in .git, where a link leads checked too), else in ~/.project-pm/config.json (the person's own: any path).
+ * repository, not in .git, where a link leads checked too), else in ~/.project-pm/config.json (the person's own: any
+ * plain local path). `real` is where the file really is, the one read. Nothing is read through a path that is not a
+ * plain local path or a link that leads to one (localpath.ts): .project-pm.json, the file it names, the person's file.
  */
-export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = process.env, run: Run = hostRun): Promise<{ file: string; text: string; isClipped: boolean } | { file: string; error: string } | null> {
-  const fromProject = await readJsonFile<{ guidelines?: unknown }>(join(ref.path, '.project-pm.json')).catch(() => null)
+export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = process.env, run: Run = hostRun): Promise<{ file: string; real: string; text: string; isClipped: boolean } | { file: string; error: string } | null> {
+  // .project-pm.json is the repository's: a committed link there may lead to another machine.
+  const settings = await localRealpath(join(ref.path, '.project-pm.json')).catch(() => null)
+  const fromProject = settings ? await readJsonFile<{ guidelines?: unknown }>(settings).catch(() => null) : null
   let file: string | null = null
   if (typeof fromProject?.guidelines === 'string' && fromProject.guidelines.trim()) {
     const named = projectGuidelinesFile(fromProject.guidelines, ref.path)
     if (named) {
       // A link committed in the repository may lead anywhere: where it really goes must be inside too, and not in .git.
-      // One that leads to another machine (\\host\share) is refused unfollowed: following it connects there (localpath.ts).
+      // One that leads off this machine's disks (\\host\share) is refused unfollowed: following it connects there.
       const real = await localRealpath(named).then(
         found => found ?? named,
         () => null,
@@ -310,10 +313,13 @@ export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = p
   }
   if (!file) return null
   try {
-    const text = (await readFile(file, 'utf8')).replace(/^\uFEFF/, '').trim()
+    // The person's file may be named relative to the project, through a link the repository holds: checked the same.
+    const real = await localRealpath(file)
+    if (!real) return { file, error: 'not found' }
+    const text = (await readFile(real, 'utf8')).replace(/^\uFEFF/, '').trim()
     if (!text) return { file, error: 'empty' }
 
-    return text.length <= MAX_CHARS ? { file, text, isClipped: false } : { file, text: text.slice(0, MAX_CHARS), isClipped: true }
+    return text.length <= MAX_CHARS ? { file, real, text, isClipped: false } : { file, real, text: text.slice(0, MAX_CHARS), isClipped: true }
   } catch (err) {
     return { file, error: err instanceof Error ? err.message : String(err) }
   }

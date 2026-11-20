@@ -157,8 +157,25 @@ for (const lang of LANGS) {
       } finally {
         fs.restore()
       }
-      // The project's own folder, in its long-path spelling, still works.
-      const out = await ledgerTool(ctx, { action: 'list', project: `\\\\?\\${w.repo}` })
+      // A plain folder reached through a link that leads to a share: refused without git going there (T-39).
+      const linked = watchFs({ [join(w.root, 'shared')]: `\\\\${PROBE_HOST}\\share` })
+      try {
+        const out = await ledgerTool(ctx, { action: 'list', project: join(w.root, 'shared', 'acme') })
+        assert.equal(out.isError, true)
+        assert.deepEqual(linked.remote, [])
+        assert.deepEqual(visited.filter(cwd => cwd.includes('shared')), [])
+      } finally {
+        linked.restore()
+      }
+      // So is a drive-relative folder, a stream, a device name.
+      for (const project of ['C:acme', `${w.repo}:stream`, join(w.repo, 'NUL')]) {
+        const out = await ledgerTool(ctx, { action: 'list', project })
+        assert.equal(out.text, ct('error.remotePath', { path: project }), project)
+      }
+      // The project's own folder in its long-path spelling is not a plain path either (T-39); its plain one works.
+      const long = await ledgerTool(ctx, { action: 'list', project: `\\\\?\\${w.repo}` })
+      assert.equal(long.text, ct('error.remotePath', { path: `\\\\?\\${w.repo}` }))
+      const out = await ledgerTool(ctx, { action: 'list', project: w.repo })
       assert.notEqual(out.isError, true, out.text)
     })
 

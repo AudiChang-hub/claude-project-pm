@@ -3,7 +3,7 @@ import type { Facts } from './facts'
 import { newFacts } from './facts'
 import type { Run } from './host'
 import { run as hostRun } from './host'
-import { isLocalPath, plainDrivePath } from './localpath'
+import { localRealpath, plainLocalPath } from './localpath'
 import { initLang } from './messages'
 import type { ProjectRef } from './project'
 import { resolveProject } from './project'
@@ -40,12 +40,13 @@ export function newCtx(part: Partial<Ctx> & { actor: string; tool: string }): Ct
  */
 export async function projectOf(ctx: Ctx, input: Record<string, unknown>): Promise<ProjectRef | null> {
   if (typeof input.project === 'string' && input.project.trim()) {
-    // The model writes `project`: git is never started in another machine's folder (\\host\share), which would
-    // connect there before the person allowed anything (localpath.ts). Tools answer such a path with remotePathError.
-    const project = input.project.trim()
-    if (!isLocalPath(project)) return null
+    // The model writes `project`: git starts only in a plain folder on this machine's disks, reached through no link
+    // that leads off them (\\host\share would be connected to before the person allowed anything: localpath.ts).
+    // Tools answer any other path with error.remotePath.
+    const project = plainLocalPath(input.project.trim(), ctx.cwd)
+    if (project === null || !(await localRealpath(project).then(() => true, () => false))) return null
 
-    return resolveProject(plainDrivePath(project), ctx.run)
+    return resolveProject(project, ctx.run)
   }
   for (const folder of (await ctx.roots?.()) ?? []) {
     const ref = await resolveProject(folder, ctx.run)

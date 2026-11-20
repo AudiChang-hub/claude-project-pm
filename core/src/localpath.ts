@@ -1,77 +1,85 @@
 /**
- * Paths the model or a repository hands the core, looked up on disk only when they are on this machine's own disks.
+ * Paths the model or a repository hands the core, looked up on disk only when they are plain paths on this machine's
+ * own disks (T-39: a list of what is allowed, after six rounds of QA each found a spelling the list of what is
+ * refused had missed).
  *
- * On Windows, looking up a UNC path (\\host\share\x, //host/share/x, \\?\UNC\host\share\x) or a link that leads to one
- * makes the system connect to that host over SMB and offer the person's NTLM hash, before anyone has allowed anything.
- * Claude Code refuses such paths before its tools touch them; a hook runs ahead of that check, and an MCP tool's
- * arguments never pass it, so the core decides from the text alone and never asks the file system about them.
+ * On Windows, looking up a UNC path (\\host\share\x, //host/share/x, \\?\UNC\host\share\x, \\.\C:\..\UNC\host…) or a
+ * link that leads to one makes the system connect to that host over SMB and offer the person's NTLM hash, before
+ * anyone has allowed anything. Claude Code refuses such paths before its tools touch them; a hook runs ahead of that
+ * check, and an MCP tool's arguments never pass it, so the core decides from the text alone, and asks the file system
+ * nothing about a path until plainLocalPath has said yes.
  */
 import { lstat, readlink, realpath } from 'node:fs/promises'
-import { basename, dirname, join, parse, resolve } from 'node:path'
+import { basename, dirname, join, posix, win32 } from 'node:path'
 
-/** A path that names another machine, or a device other than a drive, or a link on the way that leads to one. */
-export class RemotePathError extends Error {
+/** A path that is not a plain local path, or a link on the way that leads to one: nothing about it was looked up. */
+export class NotPlainPathError extends Error {
   constructor(readonly path: string) {
-    super(`not a path on this machine: ${path}`)
+    super(`not a plain path on this computer's own disks: ${path}`)
   }
 }
 
 /** The most links followed on the way to one file, as the system's own limit (Windows stops at 63). */
 const MAX_LINKS = 40
 
-/**
- * Whether `path`, as written, names a place on this machine's own disks. On Windows that is a drive path, a
- * path from the current drive's root, a relative path, or a drive written as a device (\\?\C:\…, \\.\C:\…, \??\C:\…)
- * with no . or .. in it. Never a UNC path (\\host\share, //host/share, \\localhost\C$ too) or any other device or
- * namespace path (\\?\UNC\…, \\?\GLOBALROOT\…, \\?\Volume{…}\…, \\.\pipe\…). Elsewhere every path is: a POSIX
- * system reaches other machines only through folders the person mounted.
- *
- * Windows folds a device path's . and .. into its prefix, past the drive: \\.\C:\..\UNC\host\share opens
- * \\.\UNC\host\share, and with localhost that is this machine's own disk again. So after a device prefix any part
- * made only of dots (or dots and spaces, which Windows trims to dots) makes the path not local, whatever it climbs to.
- * A drive letter, here as everywhere, is taken as this machine's: one the person mapped to a share (Z: -> \\host\share)
- * or made with subst is theirs, already connected.
- */
-export function isLocalPath(path: string, platform: NodeJS.Platform = process.platform): boolean {
-  if (platform !== 'win32') return true
-  const text = path.trim().replace(/\//g, '\\')
-  const device = /^(?:\\\\[?.]\\|\\\?\?\\)/.exec(text)
-  if (device) {
-    const rest = text.slice(device[0].length)
+/** Windows' device names: a file of that name (with any extension, any trailing spaces) is the device. */
+const DEVICE_NAMES = /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$|clock\$)$/i
 
-    return /^[a-z]:(?:\\|$)/i.test(rest) && !rest.split('\\').some(part => /^[. ]+$/.test(part))
+/**
+ * The full path `raw` names, resolved against `cwd`, when it is a plain path on this machine's own disks; else null.
+ * The one test every path from the model or a repository passes before anything is looked up. Nothing outside the
+ * list below is let through, however it is spelled.
+ *
+ * Windows: the text may not start with two slashes either way (\\host, //host, \/host, \\?\, \\.\) nor with \??\,
+ * may hold no control character and none of < > " | ? *, and a colon only as a drive's, at the start. A drive-relative
+ * path (C:foo, C:) is refused: it means the folder that process last used on that drive, which the hook does not know
+ * and the tool may see differently, so neither a guess nor cwd is safe. Resolved by path.win32.resolve, the result
+ * must be X:\…, and no part of it may end in a dot or a space (Windows trims those, so the name opened is another),
+ * or be a device name (CON, NUL, COM1, LPT1, CONIN$, … with or without an extension).
+ * A drive letter is taken as this machine's own: one the person mapped to a share (Z: -> \\host\share) or made with
+ * subst is their setup, already connected; it is not one the model or a repository can make.
+ *
+ * Elsewhere: any path, absolute or relative, except one starting with // (POSIX lets a system read //host as another
+ * machine) or holding a NUL.
+ */
+export function plainLocalPath(raw: string, cwd: string, platform: NodeJS.Platform = process.platform): string | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null
+  if (platform !== 'win32') {
+    if (raw.startsWith('//') || raw.includes('\0') || cwd.startsWith('//')) return null
+
+    return posix.resolve(cwd, raw)
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f<>"|?*]/.test(raw)) return null
+  const text = raw.replace(/\//g, '\\')
+  if (text.startsWith('\\\\')) return null
+  if (text.lastIndexOf(':') > 1 || (text.includes(':') && !/^[a-z]:\\/i.test(text))) return null
+  const full = win32.resolve(cwd, raw)
+  if (!/^[a-z]:\\/i.test(full) || full.includes('\\\\') || full.lastIndexOf(':') !== 1) return null
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f<>"|?*]/.test(full)) return null
+  for (const part of full.slice(3).split('\\')) {
+    if (!part) continue
+    if (/[. ]$/.test(part)) return null
+    if (DEVICE_NAMES.test(part.split('.')[0]!.trimEnd())) return null
   }
 
-  return !text.startsWith('\\\\')
-}
-
-/**
- * A local drive written as a device (\\?\C:\x, \\.\C:\x, \??\C:\x), as the plain drive path (C:\x); others as given,
- * among them one with . or .. after the prefix (\\.\C:\..\UNC\host is not on drive C: at all; isLocalPath refuses it).
- */
-export function plainDrivePath(path: string, platform: NodeJS.Platform = process.platform): string {
-  if (platform !== 'win32' || !isLocalPath(path, platform)) return path
-  const device = /^(?:[\\/][\\/][?.][\\/]|\\\?\?\\)(?=[a-z]:(?:[\\/]|$))/i.exec(path)
-
-  return device ? path.slice(device[0].length) : path
+  return full
 }
 
 /**
  * Where `path` really is on disk (links followed, Windows' 8.3 names and letter case as the disk keeps them), or null
  * when nothing of it is on disk to ask. A part not there yet keeps its name after where the part before it really is.
- * Throws RemotePathError, having asked nothing about it, for a path that is not local or a link on the way that
- * leads off this machine: on Windows each link is read (not followed) and its target checked before going on. Throws
+ * Throws NotPlainPathError, having asked nothing about it, for a path plainLocalPath refuses, or a link on the way
+ * whose target it refuses: on Windows each link is read (not followed) and its target checked before going on. Throws
  * too for a link that cannot be read, or too many links in a row: what cannot be checked is not taken.
  */
-export async function localRealpath(path: string): Promise<string | null> {
-  if (!isLocalPath(path)) throw new RemotePathError(path)
-  if (process.platform !== 'win32') {
-    const where = resolve(path)
-
-    return (await realOf(where, [])) ?? realOf(dirname(where), [basename(where)])
-  }
-  let { root, names } = split(resolve(plainDrivePath(path)))
-  let at = root
+export async function localRealpath(path: string, cwd: string = process.cwd()): Promise<string | null> {
+  const plain = plainLocalPath(path, cwd)
+  if (plain === null) throw new NotPlainPathError(path)
+  if (process.platform !== 'win32') return (await realOf(plain, [])) ?? realOf(dirname(plain), [basename(plain)])
+  let names = plain.slice(3).split('\\').filter(Boolean)
+  let at = plain.slice(0, 3)
   let links = 0
   while (names.length) {
     const name = names.shift()!
@@ -86,13 +94,10 @@ export async function localRealpath(path: string): Promise<string | null> {
     if (++links > MAX_LINKS) throw new Error(`too many links on the way to ${path}`)
     // A link whose target cannot be read cannot be checked: an error, never left for the system to follow.
     const target = await readlink(next)
-    if (!isLocalPath(target)) throw new RemotePathError(target)
-    const to = resolve(dirname(next), plainDrivePath(target))
-    if (!isLocalPath(to)) throw new RemotePathError(to)
-    const parts = split(to)
-    root = parts.root
-    at = root
-    names = [...parts.names, ...names]
+    const to = plainLocalPath(target, dirname(next))
+    if (to === null) throw new NotPlainPathError(target)
+    at = to.slice(0, 3)
+    names = [...to.slice(3).split('\\').filter(Boolean), ...names]
   }
 
   return realOf(at, [])
@@ -103,10 +108,4 @@ async function realOf(at: string, rest: string[]): Promise<string | null> {
   const real = await realpath(at).catch(() => null)
 
   return real === null ? null : rest.length ? join(real, ...rest) : real
-}
-
-function split(path: string): { root: string; names: string[] } {
-  const { root } = parse(path)
-
-  return { root, names: path.slice(root.length).split(/[\\/]+/).filter(Boolean) }
 }
