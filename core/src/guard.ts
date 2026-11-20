@@ -1,11 +1,18 @@
 /**
  * The guidelines file, checked after the fact (T-39 2). The lock (hook.ts, PreToolUse) refuses an edit through the
- * writing tools; anything it cannot see (a shell command, a spelling it has no word for) is caught here: after every
- * tool that can write, the file is compared with the snapshot taken when the person last spoke. Changed without the
- * person having asked about the guidelines this turn, it is put back, the changed text kept, and the board says so.
- * Changed with their asking, the snapshot follows it.
+ * writing tools; anything it cannot see (a shell command, a spelling it has no word for) is caught here.
  *
- * The snapshot lives in the person's own data folder (~/.project-pm/guidelines), never in the repository.
+ * One snapshot per file, not per project: the person's own guidelines file serves every project, so a change they
+ * ask for in one project is what every other project's sessions are checked against (T-39 QA 1). It is keyed by
+ * where the file really is, taken again whenever the person speaks in any project (an edit, clearing or deletion of
+ * their own between turns thereby stands), and followed when they ask for a change. After a tool that can write, and
+ * when a turn stops, the file the project names now is compared with it; a snapshot from before the person last spoke
+ * in this session is not a judgment of this turn and is only taken again. A file no longer named is not looked at,
+ * so turning the guidelines off, or naming another file, ends the checking of the old one (T-39 QA 2).
+ *
+ * Changed without the person having asked about the guidelines this turn: the changed bytes are kept, the file is
+ * written back, and the board says so. Snapshots live in the person's own data folder (~/.project-pm/guidelines),
+ * never in the repository.
  */
 import { createHash } from 'node:crypto'
 import { readFile, rm } from 'node:fs/promises'
@@ -26,17 +33,23 @@ export const GUARDED_TOOLS: ReadonlySet<string> = new Set(['Edit', 'MultiEdit', 
 
 export type Restore = { at: number; file: string; backup: string | null; by: string; isRestored: boolean }
 
-type Kept = {
-  /** Where the file really is (localRealpath), and what it held: base64 of its bytes, or null when there was none. */
-  snapshot?: { file: string; sha256: string | null; bytes: string | null; at: number }
-  restored?: Restore[]
+/** What a file held when the snapshot was taken: base64 of its bytes, or null when there was no file. */
+type Snapshot = { file: string; sha256: string | null; bytes: string | null; at: number }
+
+const sha256 = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex')
+
+/** Two real paths, as the system compares them: letter case aside on Windows. */
+const isSamePath = (a: string, b: string) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b)
+
+/** One snapshot per file, wherever it is named from. */
+function snapshotFile(real: string, env: NodeJS.ProcessEnv): string {
+  return join(paths(env).home, 'guidelines', 'files', `${sha256(process.platform === 'win32' ? real.toLowerCase() : real).slice(0, 40)}.json`)
 }
 
-function keptFile(ref: ProjectRef, env: NodeJS.ProcessEnv): string {
+/** The restores made for a project, for its board. */
+function restoresFile(ref: ProjectRef, env: NodeJS.ProcessEnv): string {
   return join(paths(env).home, 'guidelines', `${ref.file}.json`)
 }
-
-const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
 
 /** The file's bytes now: null when it is not there, undefined when it cannot be read safely or is too large to keep. */
 async function bytesOf(file: string): Promise<Buffer | null | undefined> {
@@ -52,68 +65,85 @@ async function bytesOf(file: string): Promise<Buffer | null | undefined> {
   }
 }
 
+const snapshotOf = (real: string, bytes: Buffer | null, now: number): Snapshot => ({ file: real, sha256: bytes === null ? null : sha256(bytes), bytes: bytes?.toString('base64') ?? null, at: now })
+
+async function writeSnapshot(file: string, snapshot: Snapshot | null): Promise<void> {
+  if (snapshot) await writeAtomic(file, `${JSON.stringify(snapshot, null, 2)}\n`)
+  else await rm(file, { force: true })
+}
+
 /**
- * When the person speaks: what the guidelines file holds now is what they let stand (an edit of their own between
- * turns included). `real` is where readGuidelines found it.
+ * When the person speaks: what the guidelines file (`real`, where readGuidelines found it) holds now is what they let
+ * stand, an edit, clearing or deletion of their own between turns included. A file that cannot be read safely, or is
+ * too large to keep, has no snapshot, so nothing is judged against an old one.
  */
-export async function keepGuidelines(ref: ProjectRef, real: string, env: NodeJS.ProcessEnv, now: number): Promise<void> {
-  const bytes = await bytesOf(real)
-  if (bytes === undefined) return
-  const file = keptFile(ref, env)
+export async function keepGuidelines(real: string, env: NodeJS.ProcessEnv, now: number): Promise<void> {
+  const file = snapshotFile(real, env)
   await withLock(file, async () => {
-    const kept = (await readJsonFile<Kept>(file).catch(() => null)) ?? {}
-    const sha = bytes === null ? null : sha256(bytes)
-    if (kept.snapshot?.file === real && kept.snapshot.sha256 === sha) return
-    await writeAtomic(file, `${JSON.stringify({ ...kept, snapshot: { file: real, sha256: sha, bytes: bytes?.toString('base64') ?? null, at: now } }, null, 2)}\n`)
+    const bytes = await bytesOf(real)
+    await writeSnapshot(file, bytes === undefined ? null : snapshotOf(real, bytes, now))
   })
 }
 
 /**
- * After a tool that can write: the file compared with the snapshot. Asked about (`isAsked`), a change is kept as the
- * new snapshot; not asked about, the file is put back as the snapshot has it, the changed text saved beside the
- * snapshot, and the restore recorded for the board. The restore, or null when nothing changed.
+ * After a tool that can write, or when a turn stops: the file the project names now (`real`) compared with its
+ * snapshot. `since` is when the person last spoke in this session: a snapshot from before then (or none) judges
+ * nothing and is only taken again. Asked about (`isAsked`), a change becomes the snapshot every project checks against;
+ * not asked about, the changed bytes are kept beside the snapshot, the file is written back, and the restore is
+ * recorded for the board. The restore, or null when nothing was put back or reported.
  */
-export async function checkGuidelines(ref: ProjectRef, by: string, isAsked: boolean, env: NodeJS.ProcessEnv, now: number): Promise<Restore | null> {
-  const file = keptFile(ref, env)
+export async function checkGuidelines(ref: ProjectRef, real: string, by: string, isAsked: boolean, since: number, env: NodeJS.ProcessEnv, now: number): Promise<Restore | null> {
+  const file = snapshotFile(real, env)
 
-  return withLock(file, async () => {
-    const kept = (await readJsonFile<Kept>(file).catch(() => null)) ?? {}
-    const snapshot = kept.snapshot
-    if (!snapshot) return null
-    const bytes = await bytesOf(snapshot.file)
-    const sha = bytes ? sha256(bytes) : null
-    if (bytes !== undefined && sha === snapshot.sha256) return null
-    if (isAsked) {
-      if (bytes !== undefined) await writeAtomic(file, `${JSON.stringify({ ...kept, snapshot: { ...snapshot, sha256: sha, bytes: bytes?.toString('base64') ?? null, at: now } }, null, 2)}\n`)
+  const restore = await withLock(file, async (): Promise<Restore | null> => {
+    const snapshot = await readJsonFile<Snapshot>(file).catch(() => null)
+    const bytes = await bytesOf(real)
+    if (!snapshot || !isSamePath(snapshot.file, real) || !(snapshot.at >= since)) {
+      await writeSnapshot(file, bytes === undefined ? null : snapshotOf(real, bytes, now))
 
       return null
     }
-    // Not asked: the changed text is kept for the person, then the file goes back as it was. A rename puts a plain file
-    // in place even where a link was left; a file that was not there before goes again.
+    const sha = bytes ? sha256(bytes) : null
+    if (bytes !== undefined && sha === snapshot.sha256) return null
+    if (isAsked) {
+      await writeSnapshot(file, bytes === undefined ? null : snapshotOf(real, bytes, now))
+
+      return null
+    }
+    // Not asked: the changed bytes are kept for the person first, then the file goes back as it was.
     let backup: string | null = null
     if (bytes) {
       backup = join(paths(env).home, 'guidelines', 'changed', `${ref.file}-${new Date(now).toISOString().replace(/[:.]/g, '-')}.txt`)
       await writeAtomic(backup, bytes)
     }
-    // Written only into the folder where it really is, checked as any path: a folder swapped for a link to a share
-    // since is not written through (the change is then reported, not undone).
-    const folder = await localRealpath(dirname(snapshot.file)).catch(() => null)
-    const isRestored = folder !== null
-    if (folder !== null) {
-      const target = join(folder, basename(snapshot.file))
+    // Written only into the folder the file was found in, and only while that folder still is where it was: one
+    // swapped since for a link (to a share, or to another folder here, whose file of the same name would be
+    // overwritten) is not written through; the change is then reported, not undone. A rename puts a plain file in
+    // place even where a link to the file itself was left.
+    const folder = dirname(real)
+    const now_ = await localRealpath(folder).catch(() => null)
+    const isRestored = now_ !== null && isSamePath(now_, folder)
+    if (isRestored) {
+      const target = join(folder, basename(real))
       if (snapshot.bytes === null) await rm(target, { force: true })
       else await writeAtomic(target, Buffer.from(snapshot.bytes, 'base64'))
     }
-    const restore: Restore = { at: now, file: snapshot.file, backup, by, isRestored }
-    await writeAtomic(file, `${JSON.stringify({ ...kept, restored: [...(kept.restored ?? []), restore].slice(-10) }, null, 2)}\n`)
 
-    return restore
+    return { at: now, file: real, backup, by, isRestored }
   })
+  if (!restore) return null
+  const list = restoresFile(ref, env)
+  await withLock(list, async () => {
+    const kept = (await readJsonFile<{ restored?: Restore[] }>(list).catch(() => null)) ?? {}
+    await writeAtomic(list, `${JSON.stringify({ restored: [...(kept.restored ?? []), restore].slice(-10) }, null, 2)}\n`)
+  })
+
+  return restore
 }
 
 /** The restores of the last week, for the board's attention section. */
 export async function guidelinesRestores(ref: ProjectRef, env: NodeJS.ProcessEnv, now: number): Promise<Restore[]> {
-  const kept = await readJsonFile<Kept>(keptFile(ref, env)).catch(() => null)
+  const kept = await readJsonFile<{ restored?: Restore[] }>(restoresFile(ref, env)).catch(() => null)
 
   return (kept?.restored ?? []).filter(r => typeof r.at === 'number' && typeof r.file === 'string' && now - r.at < RESTORE_SHOWN_MS)
 }

@@ -41,8 +41,11 @@ export type HookInput = {
 /** What the hook prints for Claude Code to read; null prints nothing. */
 export type HookOutput = Record<string, unknown> | null
 
-/** An actor record's extras the hooks keep for themselves: when the turn began, and the task tools' ids. */
-type HookActor = Actor & { promptAt?: number; askedGuidelinesAt?: number; taskIds?: string[] }
+/**
+ * An actor record's extras the hooks keep for themselves: when the turn began, when the person last spoke (a
+ * notification starts a turn too), and the task tools' ids.
+ */
+type HookActor = Actor & { promptAt?: number; spokeAt?: number; askedGuidelinesAt?: number; taskIds?: string[] }
 
 const TITLE_CHARS = 60
 
@@ -60,12 +63,15 @@ export async function runHook(tool: string, event: string, input: HookInput, env
       return promptSubmit(id, ref, input, env, now, base, run)
     case 'PostToolUse':
       await postToolUse(id, input, env, now, base)
-      return guardAfter(id, ref, input, env, now)
+      return guardAfter(id, ref, input, env, now, run)
     case 'PreToolUse':
       return preToolUse(id, ref, input, env, run)
     case 'Stop':
     case 'SubagentStop':
       if (event === 'Stop') await stop(id, input, env, now, base)
+      // A change made after the turn's last tool (a background command, say) is caught before the person speaks again.
+      await guardAfter(id, ref, input, env, now, run, true)
+
       return null
     default:
       return null
@@ -84,6 +90,7 @@ async function promptSubmit(id: string, ref: ProjectRef, input: HookInput, env: 
       next.state = 'running'
       next.promptAt = now
       if (isOwn) {
+        next.spokeAt = now
         next.lastPrompt = clip(prompt, 500)
         if (!next.title) next.title = clip(prompt.replace(/\s+/g, ' ').trim(), TITLE_CHARS)
         if (asksForGuidelines(prompt)) next.askedGuidelinesAt = now
@@ -103,7 +110,7 @@ async function promptSubmit(id: string, ref: ProjectRef, input: HookInput, env: 
   const found = await readGuidelines(ref, env, run)
   // The person speaking lets the guidelines stand as they are now (their own edit between turns included): the
   // snapshot later writes are checked against (guard.ts). A notification waking the turn is not the person.
-  if (isOwn && found && 'real' in found) await keepGuidelines(ref, found.real, env, now).catch(() => {})
+  if (isOwn && found?.real) await keepGuidelines(found.real, env, now).catch(() => {})
   if (found && 'text' in found) {
     parts.push(t('guidelines.section', { file: found.file, project: ref.name }))
     if (isPm) parts.push(t('guidelines.pm'))
@@ -173,16 +180,22 @@ async function postToolUse(id: string, input: HookInput, env: NodeJS.ProcessEnv,
 }
 
 /**
- * After a tool that can write (T-39 2): the guidelines file compared with its snapshot. Changed without the person
- * asking about the guidelines this turn, it is put back (guard.ts) and the model told; asked about, the change stands.
+ * After a tool that can write, or when a turn stops (T-39 2): the guidelines file the project names now compared with
+ * its snapshot. None named now (turned off, or another file named): nothing is compared or put back. Changed without
+ * the person asking about the guidelines this turn, it is put back (guard.ts) and the model told; asked about, the
+ * change stands for every project.
  */
-async function guardAfter(id: string, ref: ProjectRef, input: HookInput, env: NodeJS.ProcessEnv, now: number): Promise<HookOutput> {
-  if (!GUARDED_TOOLS.has(input.tool_name ?? '')) return null
+async function guardAfter(id: string, ref: ProjectRef, input: HookInput, env: NodeJS.ProcessEnv, now: number, run: Run, isStop = false): Promise<HookOutput> {
+  if (!isStop && !GUARDED_TOOLS.has(input.tool_name ?? '')) return null
   const project = await loadProject(ref, env)
   if (!project.pmId) return null
+  const found = await readGuidelines(ref, env, run).catch(() => null)
+  if (!found?.real) return null
   const actor = (await loadActor(id, env).catch(() => null)) as HookActor | null
-  const restore = await checkGuidelines(ref, id, !!actor?.askedGuidelinesAt, env, now).catch(() => null)
-  if (!restore) return null
+  // A snapshot from before the person last spoke in this session judges nothing (none spoken yet: none does).
+  const since = actor?.spokeAt ?? Number.POSITIVE_INFINITY
+  const restore = await checkGuidelines(ref, found.real, id, !!actor?.askedGuidelinesAt, since, env, now).catch(() => null)
+  if (!restore || isStop) return null
   const said = restore.isRestored ? ct('guidelines.restored', { file: restore.file, backup: restore.backup ?? '-' }) : ct('guidelines.changed', { file: restore.file, backup: restore.backup ?? '-' })
 
   return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: said } }
@@ -304,7 +317,7 @@ async function isTracked(file: string, repo: string, run: Run): Promise<boolean>
  * plain local path). `real` is where the file really is, the one read. Nothing is read through a path that is not a
  * plain local path or a link that leads to one (localpath.ts): .project-pm.json, the file it names, the person's file.
  */
-export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = process.env, run: Run = hostRun): Promise<{ file: string; real: string; text: string; isClipped: boolean } | { file: string; error: string } | null> {
+export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = process.env, run: Run = hostRun): Promise<{ file: string; real: string; text: string; isClipped: boolean } | { file: string; real?: string; error: string } | null> {
   // .project-pm.json is the repository's: a committed link there may lead to another machine.
   const settings = await localRealpath(join(ref.path, '.project-pm.json')).catch(() => null)
   const fromProject = settings ? await readJsonFile<{ guidelines?: unknown }>(settings).catch(() => null) : null
@@ -332,16 +345,23 @@ export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = p
     if (typeof fromUser?.guidelines === 'string' && fromUser.guidelines.trim()) file = guidelinesPath(fromUser.guidelines, homedir().replace(/\\/g, '/'), ref.path.replace(/\\/g, '/'))
   }
   if (!file) return null
+  const failed = (err: unknown) => (err instanceof Error ? err.message : String(err))
+  // The person's file may be named relative to the project, through a link the repository holds: checked the same.
+  let real: string | null
   try {
-    // The person's file may be named relative to the project, through a link the repository holds: checked the same.
-    const real = await localRealpath(file)
-    if (!real) return { file, error: 'not found' }
+    real = await localRealpath(file)
+  } catch (err) {
+    return { file, error: failed(err) }
+  }
+  if (!real) return { file, error: 'not found' }
+  // From here `real` is where the file is, or would be: an empty or missing file is still the one named (guard.ts).
+  try {
     const text = (await readFile(real, 'utf8')).replace(/^\uFEFF/, '').trim()
-    if (!text) return { file, error: 'empty' }
+    if (!text) return { file, real, error: 'empty' }
 
     return text.length <= MAX_CHARS ? { file, real, text, isClipped: false } : { file, real, text: text.slice(0, MAX_CHARS), isClipped: true }
   } catch (err) {
-    return { file, error: err instanceof Error ? err.message : String(err) }
+    return { file, real, error: failed(err) }
   }
 }
 

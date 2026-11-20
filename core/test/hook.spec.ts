@@ -259,6 +259,85 @@ for (const lang of LANGS) {
       assert.equal(readFileSync(guidelines(), 'utf8'), 'nothing\n')
     })
 
+    /** A second project with its own PM and session, and the person's own guidelines file shared by both. */
+    const SESSION2 = '7c41d2a0-5b1e-4f7a-9d3e-2a6b8c0e4f11'
+    const hookIn = (session: string, cwd: string, name: string, extra: Partial<HookInput>, at: number) => runHook('claude-code', name, { session_id: session, cwd, hook_event_name: name, ...extra }, w.env, at, hostWith())
+    const sharedRules = async () => {
+      const repo2 = join(w.root, 'acme-admin')
+      mkdirSync(repo2)
+      git(repo2, 'init', '-q')
+      await pmTool(w.ctx(), { action: 'claim' })
+      await pmTool(w.ctx('claude-code:pm2', { cwd: repo2 }), { action: 'claim' })
+      const mine = join(w.root, 'acme-rules.md')
+      writeFileSync(mine, RULES)
+      mkdirSync(w.env.PROJECT_PM_HOME!, { recursive: true })
+      writeFileSync(join(w.env.PROJECT_PM_HOME!, 'config.json'), JSON.stringify({ guidelines: mine }))
+
+      return { repo2, mine }
+    }
+    const asks = lang === 'en' ? 'Please update the guidelines: add rule 2' : '請改準則，加第二條'
+    const other = lang === 'en' ? 'Fix the checkout bug' : '修結帳的 bug'
+
+    test('a change asked for in one project is not put back by another project\'s session (T-39 QA 1)', async () => {
+      const { repo2, mine } = await sharedRules()
+      await hookIn(SESSION2, repo2, 'UserPromptSubmit', { prompt: other }, NOW)
+      await hook('UserPromptSubmit', { prompt: asks }, NOW + 1000)
+      writeFileSync(mine, `${RULES}2. Small commits.\n`)
+      await hook('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: mine }, tool_response: {} }, NOW + 2000)
+      await hookIn(SESSION2, repo2, 'PostToolUse', { tool_name: 'Bash', tool_input: { command: 'npm test' }, tool_response: {} }, NOW + 3000)
+      assert.equal(readFileSync(mine, 'utf8'), `${RULES}2. Small commits.\n`)
+    })
+
+    test('the person\'s own edit, clearing or deletion between turns stands, in whichever project they speak (T-39 QA 1)', async () => {
+      const { repo2, mine } = await sharedRules()
+      await hookIn(SESSION2, repo2, 'UserPromptSubmit', { prompt: other }, NOW)
+      const bash = (at: number) => hookIn(SESSION2, repo2, 'PostToolUse', { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: {} }, at)
+      writeFileSync(mine, `${RULES}2. Mine.\n`)
+      await hook('UserPromptSubmit', { prompt: other }, NOW + 1000)
+      await bash(NOW + 2000)
+      assert.equal(readFileSync(mine, 'utf8'), `${RULES}2. Mine.\n`)
+      writeFileSync(mine, '')
+      await hook('UserPromptSubmit', { prompt: other }, NOW + 3000)
+      await bash(NOW + 4000)
+      assert.equal(readFileSync(mine, 'utf8'), '')
+      rmSync(mine)
+      await hook('UserPromptSubmit', { prompt: other }, NOW + 5000)
+      await bash(NOW + 6000)
+      assert.equal(existsSync(mine), false)
+    })
+
+    test('guidelines turned off: the old file is neither put back nor listed (T-39 QA 2)', async () => {
+      const { mine } = await sharedRules()
+      await hook('UserPromptSubmit', { prompt: other }, NOW)
+      // `/pm guidelines off`: the person's config names none.
+      writeFileSync(join(w.env.PROJECT_PM_HOME!, 'config.json'), JSON.stringify({}))
+      writeFileSync(mine, 'my notes now\n')
+      const out = await hook('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: {} }, NOW + 1000)
+      assert.equal(readFileSync(mine, 'utf8'), 'my notes now\n')
+      assert.equal(said(out), '')
+      const board = await boardTool(w.ctx(), {})
+      assert.ok(!board.text.includes(mine), board.text)
+    })
+
+    test('the project names another file: the old one is no longer put back (T-39 QA 2)', async () => {
+      await lockGuidelines()
+      await hook('UserPromptSubmit', { prompt: other }, NOW)
+      writeFileSync(join(w.repo, 'RULES.md'), '1. Rules elsewhere.\n')
+      git(w.repo, 'add', 'RULES.md')
+      writeFileSync(join(w.repo, '.project-pm.json'), JSON.stringify({ guidelines: 'RULES.md' }))
+      writeFileSync(guidelines(), 'old file, free now\n')
+      await hook('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: {} }, NOW + 1000)
+      assert.equal(readFileSync(guidelines(), 'utf8'), 'old file, free now\n')
+    })
+
+    test('a change made after the last tool is put back when the turn stops; emptied counts as changed (T-39 QA)', async () => {
+      await lockGuidelines()
+      await hook('UserPromptSubmit', { prompt: other }, NOW)
+      writeFileSync(guidelines(), '')
+      await hook('Stop', { last_assistant_message: 'done' }, NOW + 1000)
+      assert.equal(readFileSync(guidelines(), 'utf8'), RULES)
+    })
+
     test('TaskCreate and TaskUpdate (Claude Code 2.1.326) and TodoWrite keep the task list', async () => {
       await hook('PostToolUse', { tool_name: 'TaskCreate', tool_input: { subject: 'Step A' }, tool_response: { task: { id: '1', subject: 'Step A' } } })
       await hook('PostToolUse', { tool_name: 'TaskCreate', tool_input: { subject: 'Step B' }, tool_response: { task: { id: '2', subject: 'Step B' } } })
