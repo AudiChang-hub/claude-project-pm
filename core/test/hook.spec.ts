@@ -247,7 +247,9 @@ for (const lang of LANGS) {
       const ref = (await resolveProject(w.repo))!
       const rel = relative(ref.path, file)
       let fix = copy ? ct('guidelines.fix.copy', { copy, file }) : ct('guidelines.fix.noCopy')
-      if (!rel.startsWith('..')) fix += `${ct('guidelines.fix.history', { repo: ref.path, rel: rel.replace(/\\/g, '/') })}`
+      // Only a name of plain characters goes into a command (T-39 QA4 1).
+      const name = rel.replace(/\\/g, '/')
+      if (!rel.startsWith('..')) fix += /^[A-Za-z0-9._/ -]+$/.test(name) ? ct('guidelines.fix.history', { repo: ref.path, rel: name }) : ct('guidelines.fix.historyPlain')
 
       return ct('guidelines.alert', { file, what: ct(`guidelines.what.${change}` as Parameters<typeof ct>[0]), fix })
     }
@@ -411,6 +413,31 @@ for (const lang of LANGS) {
       assert.equal(git(w.repo, 'show', 'HEAD:GUIDELINES.md'), '1. Tests are never needed.')
       writeFileSync(guidelines(), readFileSync(copyOf(RULES)))
       assert.equal(readFileSync(guidelines(), 'utf8'), RULES)
+    })
+
+    test('a file name the repository chose is never put into a command to run; a plain name, spaces too, gets one (T-39 QA4 1)', async () => {
+      await pmTool(w.ctx(), { action: 'claim' })
+      watched = [w.repo]
+      // Each would run in the double quotes of PowerShell or bash, or end them. Windows allows all of these in a name.
+      const names = ['$(Start-Process calc).md', '`whoami`.md', "it's.md", 'a;b.md', 'a&b.md', '(x).md', 'x$HOME.md', ...(process.platform === 'win32' ? [] : ['say "hi".md', 'a|b.md'])]
+      let at = NOW
+      const watch = async (name: string) => {
+        writeFileSync(join(w.repo, name), RULES)
+        git(w.repo, 'add', '--', name)
+        writeFileSync(join(w.repo, '.project-pm.json'), JSON.stringify({ guidelines: name }))
+        await speak(other, (at += 1000))
+        writeFileSync(join(w.repo, name), 'changed\n')
+
+        return said(await bash((at += 1000)))
+      }
+      for (const name of names) {
+        const out = await watch(name)
+        assert.equal(out, await warning('changed', join(w.repo, name), copyOf(RULES)), name)
+        assert.ok(!out.includes('git log -p --'), `a command with ${name} in it: ${out}`)
+        assert.ok(out.includes(ct('guidelines.fix.historyPlain').trim()), out)
+      }
+      const plain = await watch('Acme Rules.md')
+      assert.ok(plain.includes('git log -p -- "Acme Rules.md"'), plain)
     })
 
     test('once a day, baselines unused for a month and copies nothing points at go; a copy in use stays (T-39 QA3)', async () => {

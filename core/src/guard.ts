@@ -271,6 +271,20 @@ export async function guidelinesAlerts(ref: ProjectRef, env: NodeJS.ProcessEnv, 
   return (kept?.alerts ?? []).filter(a => isAlert(a) && now - a.at < ALERT_SHOWN_MS)
 }
 
+/**
+ * The characters a name may have to be put into a command the person or the model might run: none that PowerShell or
+ * a POSIX shell reads inside double quotes ($ ` " \), ends a command with (; & |), or groups with ( ). A repository
+ * chooses its file names, so `$(Start-Process calc).md` is one (T-39 QA4 1).
+ */
+const PLAIN_NAME = /^[A-Za-z0-9._/ -]+$/
+
+/** Where to see a project's file in git: a command to run only for a plain name, else the words alone. */
+function historyOf(repo: string, file: string): string {
+  const rel = relative(repo, file).replace(/\\/g, '/')
+
+  return PLAIN_NAME.test(rel) && !rel.startsWith('-') ? ct('guidelines.fix.history', { repo, rel }) : ct('guidelines.fix.historyPlain')
+}
+
 /** A setting in plain words. */
 function settingWords(setting: GuidelinesSetting): string {
   if (isFileSetting(setting)) return ct(setting.from === 'project' ? 'guidelines.setting.project' : 'guidelines.setting.user', { file: setting.file })
@@ -294,7 +308,7 @@ export function alertText(alert: GuidelinesAlert, when?: string): string {
   // The copy from when the person last let the file stand; for a project's file, also where to see its history in git.
   let fix = alert.copy ? ct('guidelines.fix.copy', { copy: alert.copy, file: alert.file }) : ct('guidelines.fix.noCopy')
   // Each language's sentence carries its own spacing (the English one starts with a space).
-  if (alert.from === 'project') fix += `${ct('guidelines.fix.history', { repo: alert.repo, rel: relative(alert.repo, alert.file).replace(/\\/g, '/') })}`
+  if (alert.from === 'project') fix += historyOf(alert.repo, alert.file)
   const words = { file: alert.file, what: ct(`guidelines.what.${alert.change}`), fix }
 
   return when === undefined ? ct('guidelines.alert', words) : ct('board.guidelinesAlert', { ...words, when, by: alert.by })
