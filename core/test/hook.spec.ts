@@ -13,10 +13,12 @@ import type { HookInput } from '../src/hook'
 import { loadActor } from '../src/store'
 import { boardTool, pmTool, reportTool } from '../src/tools'
 import type { World } from './helpers'
-import { LANGS, NOW, git, hostWith, shortPath, world } from './helpers'
+import { LANGS, NOW, PROBE_HOST, git, hostWith, shortPath, watchFs, world } from './helpers'
 
 const SESSION = '1f0ba5e3-d73c-4a06-ab9f-283b7537d1be'
 const ID = `claude-code:${SESSION}`
+/** `t`, under a name a test's own `t` does not hide. */
+const tr = t
 
 for (const lang of LANGS) {
   describe(`hooks (${lang})`, () => {
@@ -95,6 +97,87 @@ for (const lang of LANGS) {
       mkdirSync(join(w.root, 'elsewhere'))
       writeFileSync(join(w.root, 'elsewhere', name), 'other\n')
       assert.equal(await hook('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: join(w.root, 'elsewhere', name) } }), null)
+    })
+
+    /** A project with a PM whose guidelines file is GUIDELINES.md, committed. */
+    const lockGuidelines = async () => {
+      await pmTool(w.ctx(), { action: 'claim' })
+      writeFileSync(join(w.repo, 'GUIDELINES.md'), '1. Tests first.\n')
+      git(w.repo, 'add', 'GUIDELINES.md')
+      writeFileSync(join(w.repo, '.project-pm.json'), JSON.stringify({ guidelines: 'GUIDELINES.md' }))
+    }
+    type Decision = { hookSpecificOutput?: { permissionDecision: string; permissionDecisionReason: string } } | null
+
+    test('a network path is never looked up before the person allows it: the lock refuses it unread (T-37 QA5)', async t => {
+      // Windows connects to the host (SMB, with the person's NTLM hash) the moment such a path is looked up.
+      if (process.platform !== 'win32') return t.skip('only Windows reads \\\\host\\share as another machine')
+      await lockGuidelines()
+      const drive = w.repo.slice(0, 1)
+      const targets = [
+        `\\\\${PROBE_HOST}\\share\\GUIDELINES.md`,
+        `//${PROBE_HOST}/share/GUIDELINES.md`,
+        `\\\\?\\UNC\\${PROBE_HOST}\\share\\GUIDELINES.md`,
+        `\\\\.\\UNC\\${PROBE_HOST}\\share\\GUIDELINES.md`,
+        `\\\\?\\GLOBALROOT\\Device\\Mup\\${PROBE_HOST}\\share\\GUIDELINES.md`,
+        `\\??\\UNC\\${PROBE_HOST}\\share\\GUIDELINES.md`,
+        // This machine's own disk, reached as a share: the same file in another spelling (QA5's bypass).
+        `\\\\localhost\\${drive}$${w.repo.slice(2)}\\GUIDELINES.md`,
+      ]
+      const fs = watchFs()
+      try {
+        for (const file of targets) {
+          const decision = (await hook('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: file } })) as Decision
+          assert.deepEqual(fs.remote, [], `looked up ${file}`)
+          assert.equal(decision?.hookSpecificOutput?.permissionDecision, 'deny', file)
+          assert.equal(decision?.hookSpecificOutput?.permissionDecisionReason, tr('guidelines.remote', { path: file, file: join(w.repo, 'GUIDELINES.md') }), file)
+        }
+        assert.deepEqual(fs.remote, [], 'looked up a network path')
+        // Once the person asks about the guidelines the lock stands aside, and still nothing is looked up.
+        await hook('UserPromptSubmit', { prompt: lang === 'en' ? 'Please update the guidelines' : '請改準則' })
+        for (const file of targets) assert.equal(await hook('PreToolUse', { tool_name: 'Write', tool_input: { file_path: file } }), null, file)
+        assert.deepEqual(fs.remote, [], 'looked up a network path')
+      } finally {
+        fs.restore()
+      }
+    })
+
+    test('a link on the way to the file that leads to a network share is not followed (T-37 QA5)', async t => {
+      if (process.platform !== 'win32') return t.skip('only Windows reads \\\\host\\share as another machine')
+      await lockGuidelines()
+      const fs = watchFs({ [join(w.repo, 'shared')]: `\\\\${PROBE_HOST}\\share` })
+      try {
+        const file = join(w.repo, 'shared', 'notes.md')
+        const decision = (await hook('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: file } })) as Decision
+        assert.deepEqual(fs.remote, [], 'followed a link to a network share')
+        assert.equal(decision?.hookSpecificOutput?.permissionDecision, 'deny')
+        // A file on this machine beside it is the person's to allow, as before.
+        assert.equal(await hook('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: join(w.repo, 'coupon.js') } }), null)
+      } finally {
+        fs.restore()
+      }
+    })
+
+    test('the long-path spellings of a local file (\\\\?\\C:\\, \\\\.\\C:\\) are still the file on this machine', async t => {
+      if (process.platform !== 'win32') return t.skip('the \\\\?\\ prefix is Windows\'')
+      await lockGuidelines()
+      const file = join(w.repo, 'GUIDELINES.md')
+      const spellings = [`\\\\?\\${file}`, `\\\\.\\${file}`, `\\\\?\\${file.toUpperCase()}`]
+      const short = shortPath(file)
+      if (short && short !== file) spellings.push(`\\\\?\\${short}`)
+      const fs = watchFs()
+      try {
+        for (const spelling of spellings) {
+          const decision = (await hook('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: spelling } })) as Decision
+          assert.equal(decision?.hookSpecificOutput?.permissionDecision, 'deny', spelling)
+          assert.equal(decision?.hookSpecificOutput?.permissionDecisionReason, tr('guidelines.locked', { file }), spelling)
+        }
+        mkdirSync(join(w.root, 'elsewhere'))
+        writeFileSync(join(w.root, 'elsewhere', 'GUIDELINES.md'), 'other\n')
+        assert.equal(await hook('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: `\\\\?\\${join(w.root, 'elsewhere', 'GUIDELINES.md')}` } }), null)
+        assert.deepEqual(fs.remote, [])
+      } finally {
+        fs.restore()
+      }
     })
 
     test('TaskCreate and TaskUpdate (Claude Code 2.1.326) and TodoWrite keep the task list', async () => {

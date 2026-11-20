@@ -32,6 +32,7 @@ import type { Ctx, ToolResult } from './context'
 import { projectOf } from './context'
 import { checkCi, checkPush, heldCi } from './facts'
 import { GIT_TIMEOUT_MS } from './host'
+import { isLocalPath } from './localpath'
 import { prePushInstalled, pushProblems, pushedUnchecked, withAttention } from './prepush'
 import { authorOf, uuidv7 } from './identity'
 import { ct } from './messages'
@@ -48,6 +49,8 @@ const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : und
 
 function notGit(ctx: Ctx, input: Record<string, unknown>): ToolResult {
   const path = str(input.project)?.trim() || ctx.cwd
+  // A network folder was never asked about (projectOf): say why, not that it has no git.
+  if (!isLocalPath(path)) return { text: ct('error.remotePath', { path }), structured: { error: 'remote_path', path }, isError: true }
 
   return { text: ct('error.notGit', { path }), structured: { error: 'not_git', path }, isError: true }
 }

@@ -10,7 +10,7 @@ import { changeActor, loadProject, paths } from '../src/store'
 import { boardTool, ledgerTool, pmTool, reportTool } from '../src/tools'
 import type { CoreProject } from '../src/types'
 import type { World } from './helpers'
-import { LANGS, world } from './helpers'
+import { LANGS, PROBE_HOST, hostWith, watchFs, world } from './helpers'
 
 /** Words each language must say, written out, so a test fails when a message loses its meaning, not only its key. */
 const SAYS = {
@@ -133,6 +133,33 @@ for (const lang of LANGS) {
       const out = await ledgerTool(w.ctx('claude-code:pm1', { cwd: w.home }), { action: 'list' })
       assert.equal(out.isError, true)
       assert.ok(out.text.includes(says.notGit), out.text)
+    })
+
+    test('a network folder given as `project` is refused before git or the file system goes there (T-37 QA5)', async t => {
+      // The model fills `project`; on Windows git starting in \\host\share connects to it (SMB, the person's NTLM hash).
+      if (process.platform !== 'win32') return t.skip('only Windows reads \\\\host\\share as another machine')
+      const visited: string[] = []
+      const run = hostWith()
+      const ctx = w.ctx('claude-code:pm1', { run: async (argv: string[], cwd: string, timeoutMs?: number) => (visited.push(cwd), cwd.startsWith(w.root) ? run(argv, cwd, timeoutMs) : null) })
+      const fs = watchFs()
+      try {
+        for (const project of [`\\\\${PROBE_HOST}\\share\\acme`, `//${PROBE_HOST}/share/acme`, `\\\\?\\UNC\\${PROBE_HOST}\\share\\acme`, `\\\\.\\pipe\\acme`]) {
+          for (const call of [() => ledgerTool(ctx, { action: 'list', project }), () => boardTool(ctx, { project }), () => reportTool(ctx, { status: 'done', summary: 'x', project }), () => pmTool(ctx, { action: 'status', project })]) {
+            const out = await call()
+            assert.deepEqual(visited.filter(cwd => !cwd.startsWith(w.root)), [], `ran a command in ${project}`)
+            assert.deepEqual(fs.remote, [], `looked up ${project}`)
+            assert.equal(out.isError, true, project)
+            assert.equal(out.text, ct('error.remotePath', { path: project }), project)
+          }
+        }
+        assert.deepEqual(visited.filter(cwd => !cwd.startsWith(w.root)), [], 'ran a command in a network folder')
+        assert.deepEqual(fs.remote, [], 'looked up a network path')
+      } finally {
+        fs.restore()
+      }
+      // The project's own folder, in its long-path spelling, still works.
+      const out = await ledgerTool(ctx, { action: 'list', project: `\\\\?\\${w.repo}` })
+      assert.notEqual(out.isError, true, out.text)
     })
 
     test('a data file that is not JSON is the core failing, and it is left as it was', async () => {

@@ -4,6 +4,7 @@
  * project may only name a file inside itself. Any path stays open to the person's own ~/.project-pm/config.json.
  */
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
@@ -12,7 +13,7 @@ import { projectGuidelinesFile, readGuidelines } from '../src/hook'
 import type { ProjectRef } from '../src/project'
 import { resolveProject } from '../src/project'
 import type { World } from './helpers'
-import { git, world } from './helpers'
+import { PROBE_HOST, git, watchFs, world } from './helpers'
 
 describe('guidelines named by the project', () => {
   let w: World
@@ -175,6 +176,47 @@ describe('guidelines named by the project', () => {
     aim('GUIDELINES.md')
     const found = await readGuidelines(ref, w.env)
     assert.ok(found && 'text' in found && found.text.includes('Acme rule 1'))
+  })
+
+  test('a committed link that leads to a network share is refused without looking there (T-37 QA5)', async t => {
+    // Windows connects to the host (SMB, with the person's NTLM hash) the moment anything follows such a link.
+    if (process.platform !== 'win32') return t.skip('only Windows reads \\\\host\\share as another machine')
+    writeFileSync(join(w.repo, 'RULES.md'), 'Acme rule 1: tests first.\n')
+    git(w.repo, 'add', 'RULES.md')
+    aim('RULES.md')
+    for (const target of [`\\\\${PROBE_HOST}\\share\\RULES.md`, `\\\\?\\UNC\\${PROBE_HOST}\\share\\RULES.md`, `//${PROBE_HOST}/share/RULES.md`]) {
+      const fs = watchFs({ [join(w.repo, 'RULES.md')]: target })
+      try {
+        const found = await readGuidelines(ref, w.env)
+        assert.deepEqual(fs.remote, [], `followed the link to ${target}`)
+        assert.equal(found, null, target)
+      } finally {
+        fs.restore()
+      }
+    }
+    // A folder link on the way counts the same: docs -> \\host\share.
+    aim('docs/RULES.md')
+    const fs = watchFs({ [join(w.repo, 'docs')]: `\\\\${PROBE_HOST}\\share` })
+    try {
+      assert.equal(await readGuidelines(ref, w.env), null)
+      assert.deepEqual(fs.remote, [])
+    } finally {
+      fs.restore()
+    }
+  })
+
+  test('a real committed link to a network share is refused (Windows with link rights: GitHub\'s runners)', async t => {
+    if (process.platform !== 'win32') return t.skip('only Windows reads \\\\host\\share as another machine')
+    const target = `\\\\${PROBE_HOST}\\share\\RULES.md`
+    if (!fileLink(target, join(w.repo, 'RULES.md'), t)) return
+    // Recorded in git as a link without git reading it (git add would follow it where links are off).
+    const blob = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: w.repo, input: target.replace(/\\/g, '/'), encoding: 'utf8' }).trim()
+    git(w.repo, 'update-index', '--add', '--cacheinfo', `120000,${blob},RULES.md`)
+    aim('RULES.md')
+    const started = Date.now()
+    assert.equal(await readGuidelines(ref, w.env), null)
+    // Following it would have waited on name lookups for the host: refusing it reads nothing.
+    assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`)
   })
 
   test('the project\'s own file is read', async () => {

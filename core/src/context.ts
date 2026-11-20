@@ -3,6 +3,7 @@ import type { Facts } from './facts'
 import { newFacts } from './facts'
 import type { Run } from './host'
 import { run as hostRun } from './host'
+import { isLocalPath, plainDrivePath } from './localpath'
 import { initLang } from './messages'
 import type { ProjectRef } from './project'
 import { resolveProject } from './project'
@@ -38,7 +39,14 @@ export function newCtx(part: Partial<Ctx> & { actor: string; tool: string }): Ct
  * repository; else the folder the server runs in.
  */
 export async function projectOf(ctx: Ctx, input: Record<string, unknown>): Promise<ProjectRef | null> {
-  if (typeof input.project === 'string' && input.project.trim()) return resolveProject(input.project.trim(), ctx.run)
+  if (typeof input.project === 'string' && input.project.trim()) {
+    // The model writes `project`: git is never started in another machine's folder (\\host\share), which would
+    // connect there before the person allowed anything (localpath.ts). Tools answer such a path with remotePathError.
+    const project = input.project.trim()
+    if (!isLocalPath(project)) return null
+
+    return resolveProject(plainDrivePath(project), ctx.run)
+  }
   for (const folder of (await ctx.roots?.()) ?? []) {
     const ref = await resolveProject(folder, ctx.run)
     if (ref) return ref

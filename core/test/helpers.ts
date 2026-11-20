@@ -4,6 +4,7 @@
  */
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { createRequire, syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -156,4 +157,95 @@ export function shortPath(path: string): string | null {
   const short = out.status === 0 ? out.stdout.trim() : ''
 
   return short && !short.includes('"') ? short : null
+}
+
+/** The made-up host every network path in the tests names: `.invalid` never resolves, so nothing could answer. */
+export const PROBE_HOST = 'pm-unc-probe.invalid'
+
+/** Whether a path, as handed to the file system, names another machine (or a device other than a drive). */
+function isRemoteSpelling(value: unknown): boolean {
+  const text = value instanceof URL ? value.href : Buffer.isBuffer(value) ? value.toString() : typeof value === 'string' ? value : ''
+  const path = text.replace(/\//g, '\\')
+  if (path.toLowerCase().includes(PROBE_HOST)) return true
+  if (/^\\\\[?.]\\[a-z]:(\\|$)/i.test(path)) return false
+
+  return path.startsWith('\\\\')
+}
+
+/**
+ * Watches every way the program could look a path up on disk (node:fs and node:fs/promises, sync and async) and
+ * records each call that names another machine, failing it at once, so a test proves the program never asks without
+ * ever waiting on the network. `links` makes a local path look like a link to the target given (Windows: any link
+ * a repository or a person could leave, without Developer Mode). `restore` puts the real functions back.
+ */
+export function watchFs(links: Record<string, string> = {}): { remote: string[]; restore: () => void } {
+  const require = createRequire(import.meta.url)
+  const fs = require('node:fs') as Record<string, unknown> & { realpathSync: { native: unknown } }
+  const fsp = require('node:fs/promises') as Record<string, unknown>
+  const remote: string[] = []
+  const undo: (() => void)[] = []
+  const fakeLink = { isSymbolicLink: () => true, isDirectory: () => false, isFile: () => false }
+  /** The link a path is (`self`) or goes through (`under`), and where the system would really go for it. */
+  const through = (value: unknown): { self: boolean; to: string } | null => {
+    if (typeof value !== 'string') return null
+    const path = value.toLowerCase()
+    for (const [link, target] of Object.entries(links)) {
+      const name = link.toLowerCase()
+      if (path === name) return { self: true, to: target }
+      if (path.startsWith(`${name}\\`) || path.startsWith(`${name}/`)) return { self: false, to: target + value.slice(link.length) }
+    }
+
+    return null
+  }
+  const refuse = (path: unknown) => {
+    remote.push(String(path))
+    return Object.assign(new Error(`test: ${String(path)} names another machine`), { code: 'ENOENT' })
+  }
+  const swap = (target: Record<string, unknown>, name: string, async: boolean) => {
+    const real = target[name] as (...args: unknown[]) => unknown
+    if (typeof real !== 'function') return
+    const native = (real as unknown as { native?: unknown }).native
+    const guard = (name: string, args: unknown[]): { value: unknown } | { err: Error } | null => {
+      const [path, dest] = args
+      if (isRemoteSpelling(path) || isRemoteSpelling(dest)) return { err: refuse(isRemoteSpelling(path) ? path : dest) }
+      const link = through(path) ?? through(dest)
+      if (!link) return null
+      // A link itself may be looked at (lstat, readlink); anything else goes where it leads, as the system would.
+      if (link.self && /^lstat/.test(name)) return { value: fakeLink }
+      if (link.self && /^readlink/.test(name)) return { value: link.to }
+
+      return { err: refuse(link.to) }
+    }
+    const wrapped = function (this: unknown, ...args: unknown[]) {
+      const hit = guard(name, args)
+      if (!hit) return real.apply(this, args)
+      if ('value' in hit) return async ? Promise.resolve(hit.value) : hit.value
+      if (async) return Promise.reject(hit.err)
+      if (name === 'existsSync') return false
+      throw hit.err
+    }
+    if (native) {
+      ;(wrapped as unknown as { native: unknown }).native = function (this: unknown, ...args: unknown[]) {
+        const hit = guard(name, args)
+        if (!hit) return (native as (...a: unknown[]) => unknown).apply(this, args)
+        if ('value' in hit) return hit.value
+        throw hit.err
+      }
+    }
+    target[name] = wrapped
+    undo.push(() => {
+      target[name] = real
+    })
+  }
+  for (const name of ['realpath', 'lstat', 'stat', 'readlink', 'access', 'open', 'opendir', 'readdir', 'readFile', 'writeFile', 'appendFile', 'copyFile', 'cp', 'mkdir', 'rename', 'rm', 'unlink', 'statfs']) swap(fsp, name, true)
+  for (const name of ['realpathSync', 'lstatSync', 'statSync', 'readlinkSync', 'accessSync', 'existsSync', 'openSync', 'opendirSync', 'readdirSync', 'readFileSync', 'writeFileSync', 'copyFileSync', 'mkdirSync', 'renameSync', 'rmSync', 'unlinkSync', 'statfsSync']) swap(fs, name, false)
+  syncBuiltinESMExports()
+
+  return {
+    remote,
+    restore: () => {
+      for (const step of undo.reverse()) step()
+      syncBuiltinESMExports()
+    },
+  }
 }

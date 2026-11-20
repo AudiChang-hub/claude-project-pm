@@ -6,9 +6,9 @@
  * the guidelines file from being edited unless the person asked about the guidelines this turn. A hook never fails
  * the tool's turn: whatever goes wrong, it exits 0 and says nothing.
  */
-import { readFile, realpath } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 
 import { MAX_CHARS, WRITING_TOOLS, asksForGuidelines, guidelinesPath, isSameFile } from '../../hooks/guidelines'
 import { t } from '../../hooks/messages'
@@ -16,6 +16,7 @@ import { clip, finishedTasks, planFromTodos } from '../../hooks/sessions'
 import type { BackgroundTask, Step } from '../../types'
 import type { Run } from './host'
 import { dataHome, run as hostRun } from './host'
+import { RemotePathError, isLocalPath, localRealpath, plainDrivePath } from './localpath'
 import { ct } from './messages'
 import type { ProjectRef } from './project'
 import { resolveProject } from './project'
@@ -201,28 +202,40 @@ async function preToolUse(id: string, ref: ProjectRef, input: HookInput, env: No
   if (typeof target !== 'string') return null
   const project = await loadProject(ref, env)
   if (!project.pmId) return null
-  const found = await readGuidelines(ref, env, run)
-  if (!found || !(await isGuidelinesFile(found.file, target, input.cwd || ref.cwd))) return null
+  // Asked about this turn: the lock stands aside, and nothing about the target need be looked up.
   const actor = (await loadActor(id, env).catch(() => null)) as HookActor | null
   if (actor?.askedGuidelinesAt) return null
+  const found = await readGuidelines(ref, env, run)
+  if (!found) return null
+  const which = await isGuidelinesFile(found.file, target, input.cwd || ref.cwd)
+  if (which === 'other') return null
+  const reason = which === 'remote' ? t('guidelines.remote', { path: target, file: found.file }) : t('guidelines.locked', { file: found.file })
 
-  return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: t('guidelines.locked', { file: found.file }) } }
+  return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }
 }
 
 /**
  * Whether a tool's target is the guidelines file: written the same way, or the same file on disk however it is written
  * (an 8.3 short name such as C:\Users\RUNNER~1, a folder link, a subst drive, a path relative to the session's folder).
  * Git gives the repository's folder in one spelling and a tool may use another, so names alone let the lock be passed.
+ *
+ * `remote` when the target is not on this machine's disks as written (\\host\share, \\?\UNC\…, a device path) or a link
+ * on the way leads off it: looking it up would connect to that host before the person allowed anything (see
+ * localpath.ts), so it is never looked up, and since it cannot be told apart from the guidelines file (\\localhost\C$\…
+ * is this machine's own disk), the lock refuses it.
  */
-async function isGuidelinesFile(guidelines: string, target: string, cwd: string): Promise<boolean> {
-  if (isSameFile(guidelines, target.replace(/\\/g, '/'))) return true
-  const where = resolve(cwd, target)
-  if (isSameFile(guidelines, where.replace(/\\/g, '/'))) return true
-  // Where each really is: a file not there yet is where its folder really is.
-  const real = async (path: string) => realpath(path).catch(() => realpath(dirname(path)).then(folder => join(folder, basename(path))).catch(() => null))
-  const [a, b] = await Promise.all([real(guidelines), real(where)])
+async function isGuidelinesFile(guidelines: string, target: string, cwd: string): Promise<'same' | 'other' | 'remote'> {
+  if (isSameFile(guidelines, target.replace(/\\/g, '/'))) return 'same'
+  if (!isLocalPath(target)) return 'remote'
+  const where = resolve(cwd, plainDrivePath(target))
+  if (isSameFile(guidelines, where.replace(/\\/g, '/'))) return 'same'
+  if (!isLocalPath(where)) return 'remote'
+  // Where each really is. The guidelines file is the person's or the repository's: one that is not on this machine is
+  // matched by its name alone, above.
+  const [a, b] = await Promise.all([localRealpath(guidelines).catch(() => null), localRealpath(where).catch((err: unknown) => (err instanceof RemotePathError ? err : null))])
+  if (b instanceof RemotePathError) return 'remote'
 
-  return !!a && !!b && isSameFile(a, b)
+  return !!a && !!b && isSameFile(a, b) ? 'same' : 'other'
 }
 
 /**
@@ -277,11 +290,18 @@ export async function readGuidelines(ref: ProjectRef, env: NodeJS.ProcessEnv = p
     const named = projectGuidelinesFile(fromProject.guidelines, ref.path)
     if (named) {
       // A link committed in the repository may lead anywhere: where it really goes must be inside too, and not in .git.
-      const real = await realpath(named).catch(() => named)
-      const repo = await realpath(ref.path).catch(() => ref.path)
+      // One that leads to another machine (\\host\share) is refused unfollowed: following it connects there (localpath.ts).
+      const real = await localRealpath(named).then(
+        found => found ?? named,
+        () => null,
+      )
+      const repo = real && (await localRealpath(ref.path).then(
+        found => found ?? ref.path,
+        () => null,
+      ))
       // Only what the project keeps in git: never a .env or another file the person keeps beside the code. Both the
       // name and the file it really is: a committed link (RULES.md -> .env) is tracked, the file it leads to may not be.
-      if (isInside(real, repo) && !isInGit(real, repo) && (await isTracked(named, ref.path, run)) && (await isTracked(real, repo, run))) file = named
+      if (real && repo && isInside(real, repo) && !isInGit(real, repo) && (await isTracked(named, ref.path, run)) && (await isTracked(real, repo, run))) file = named
     }
   }
   if (!file) {
