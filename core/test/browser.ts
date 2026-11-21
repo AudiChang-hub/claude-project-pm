@@ -51,7 +51,7 @@ function end(child: ChildProcess) {
 }
 
 export type Browser = {
-  /** Opens `url` at `width`, waits until `ready` (a JS expression) holds, and evaluates `expression` there. */
+  /** Opens `url` at `width`, waits until `ready` (a JS expression) holds, and evaluates `expression` there. The page sees `scheme` (light unless given) and reduced motion only when `reducedMotion` is true, whatever the system says. */
   evaluate: <T>(url: string, ready: string, expression: string, options?: { width?: number; scheme?: 'light' | 'dark'; reducedMotion?: boolean }) => Promise<T>
   close: () => Promise<void>
 }
@@ -102,8 +102,14 @@ export async function openBrowser(exe: string): Promise<Browser> {
     const value = async (expr: string) => ((await send('Runtime.evaluate', { expression: expr, returnByValue: true })).result as { value?: unknown } | undefined)?.value
     try {
       await send('Emulation.setDeviceMetricsOverride', { width: options.width ?? 1280, height: 900, deviceScaleFactor: 1, mobile: false })
-      const features = [...(options.scheme ? [{ name: 'prefers-color-scheme', value: options.scheme }] : []), ...(options.reducedMotion ? [{ name: 'prefers-reduced-motion', value: 'reduce' }] : [])]
-      if (features.length) await send('Emulation.setEmulatedMedia', { features })
+      // Both media features are always set, so a page looks the same on every machine: left unset, the browser takes
+      // the system's own (the macOS and Windows CI runners say reduce motion), and "motion on" would depend on the host.
+      await send('Emulation.setEmulatedMedia', {
+        features: [
+          { name: 'prefers-color-scheme', value: options.scheme ?? 'light' },
+          { name: 'prefers-reduced-motion', value: options.reducedMotion ? 'reduce' : 'no-preference' },
+        ],
+      })
       await send('Page.navigate', { url })
       for (let i = 0; i < 150 && !(await value(ready)); i++) await sleep(100)
       await sleep(300)
