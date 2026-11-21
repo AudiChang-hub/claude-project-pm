@@ -63,19 +63,19 @@ Every change is recorded in `~/.project-pm/install-log.json`.
 Run it in your project's folder, the same one where you ran `init`:
 
 ```
-~/.project-pm/bin/project-pm-1.0.0 uninstall --yes
+~/.project-pm/bin/project-pm-1.1.0 uninstall --yes
 ```
 
-(on Windows, `project-pm-1.0.0.exe`). Every file goes back to how it was. `uninstall --hooks` removes only the git hook.
+(on Windows, `project-pm-1.1.0.exe`; the file name carries the version you installed). Every file goes back to how it was. `uninstall --hooks` removes only the git hook.
 
 ## npm version (later)
 
-An npm version for developers with Node.js 20 or later (`npx -y project-pm@<version> init`) is planned but **not published yet**: 1.0.0 is not on npm. Use the program above for now.
+An npm version for developers with Node.js 20 or later (`npx -y project-pm@<version> init`) is planned but **not published yet**: no version is on npm. Use the program above for now.
 
-## Known limits of 1.0
+## Known limits
 
 - The programs are not code-signed (see above). With Windows Smart App Control on, the program may be blocked, and there is no other way to run it yet: the npm version comes in a later release.
-- 1.0.0 is not on npm yet.
+- Project PM is not on npm yet.
 - The development guidelines file is locked against the AI's edit tools. A change that gets past the lock (a shell command, another session, you in your editor), or a change of which file the guidelines are (`git rm`, an edit of `.project-pm.json`, turning them off), is only noticed afterwards and listed on the board under *Needs attention*; Project PM never puts the file back. To undo one, the warning names a read-only copy in `~/.project-pm/guidelines/copies/` of what the file held when you last spoke: ask the AI to copy it back. Not caught: a change made on purpose to get past the check, and a change a background command makes after a turn ends and before you speak again.
 - The Windows steps to allow a program downloaded from the web (SmartScreen) have not been checked yet. The program itself, built on Windows, has been run there.
 - The Mac steps to allow the program have not been checked on a real Mac. The Mac programs themselves are built and tested on GitHub's Mac machines.

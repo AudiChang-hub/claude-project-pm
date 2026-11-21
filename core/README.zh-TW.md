@@ -63,19 +63,19 @@ Project PM **只支援 Claude Code**；1.0 版幫你設定 Claude Code 的命令
 請在專案的資料夾裡執行，也就是當初執行 `init` 的那個資料夾：
 
 ```
-~/.project-pm/bin/project-pm-1.0.0 uninstall --yes
+~/.project-pm/bin/project-pm-1.1.0 uninstall --yes
 ```
 
-（Windows 是 `project-pm-1.0.0.exe`）。每個檔都會回到安裝前的樣子。`uninstall --hooks` 只移除 git hook。
+（Windows 是 `project-pm-1.1.0.exe`；檔名帶的是你安裝的版號）。每個檔都會回到安裝前的樣子。`uninstall --hooks` 只移除 git hook。
 
 ## npm 版（之後提供）
 
-給有 Node.js 20 以上的開發者用的 npm 版（`npx -y project-pm@<版號> init`）已經規劃，但**還沒推出**：1.0.0 沒有發到 npm。目前請用上面的執行檔。
+給有 Node.js 20 以上的開發者用的 npm 版（`npx -y project-pm@<版號> init`）已經規劃，但**還沒推出**：目前沒有任何版本發到 npm。目前請用上面的執行檔。
 
-## 1.0 已知限制
+## 已知限制
 
 - 程式沒有程式碼簽章（見上面）。Windows 開著「智慧型應用程式控制」時可能直接擋下，目前沒有其他方式可以執行；npm 版要之後的版本才推出。
-- 1.0.0 還沒有發到 npm。
+- Project PM 還沒有發到 npm。
 - 開發準則檔會擋住 AI 用編輯工具去改。繞過這道擋的修改（用指令改、其他 Session 改、你自己用編輯器改），以及準則設定被改（`git rm` 準則檔、改了 `.project-pm.json`、關掉準則），只會在事後被發現，列在看板的「需要處理」；Project PM 不會自動把檔案改回去。要還原的話，警告裡會附上 `~/.project-pm/guidelines/copies/` 裡的唯讀備份，是你上一次說話時這個檔的內容，請 AI 把它複製回去。抓不到的情況：故意繞過偵測的修改，以及背景指令在一輪結束後、你下一次說話前做的修改。
 - Windows 從網路下載後的放行步驟（SmartScreen）還沒實際驗證過。程式本身在 Windows 上建置後實際執行過。
 - Mac 的放行步驟沒有在實機驗證過。Mac 版程式本身有在 GitHub 的 Mac 機器上建置並跑過測試。
