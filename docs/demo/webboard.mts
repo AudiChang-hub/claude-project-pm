@@ -41,8 +41,15 @@ const images = join(root, 'docs/images')
 
 // ── The made-up project ──
 
-const PATH = '~/code/acme-storefront'
+// The web board takes in only plain absolute folders on this computer's disks (T-47: plainLocalPath), so the project
+// is kept at a made-up absolute folder that is never read. Pictures show it as SHOWN, the way a project in the home
+// folder reads: shown() maps it, and whatever path follows it, in the core's text and on the page.
+const PATH = process.platform === 'win32' ? 'C:\\code\\acme-storefront' : '/code/acme-storefront'
+const SHOWN = '~/code/acme-storefront'
 const KEY = projectKey(PATH)
+/** PATH and the path below it, its separators either way (source of a RegExp, for the page too). */
+const PATH_SOURCE = `${PATH.replace(/[\\^$.*+?()[\]{}|/]/g, '\\$&')}((?:[\\\\/][\\w.-]+)*)`
+const shown = (text: string) => text.replace(new RegExp(PATH_SOURCE, 'g'), (_, rest: string) => SHOWN + rest.replace(/\\/g, '/'))
 const PM = 'claude-code:6f1d3b2a-8c4e-4f7a-9b21-0d5e7c3a1f48'
 const ID = {
   coupon: 'claude-code:1c7e9a40-5b2d-4e8f-a316-27d0b9e4c5f1',
@@ -52,6 +59,8 @@ const ID = {
   payouts: 'claude-code:5f9a2c7e-6b1d-4e03-8c4f-1d2e7a9b3c85',
   emails: 'claude-code:9d3c5e1b-7a2f-4c86-b0d9-3e6f1a8c4b27',
 }
+/** Each session's context, tokens (T-48). */
+const CONTEXT = { coupon: 118_000, tax: 96_000, search: 186_000, banner: 74_000, payouts: 64_000, emails: 52_000 }
 const C = 'completed'
 const P = 'in_progress'
 const _ = 'pending'
@@ -125,8 +134,11 @@ type Scene = 'board' | 'qa' | 'guidelines'
 async function seed(home: string, lang: Lang, scene: Scene, now: number) {
   const w = WORDS[lang]
   const min = (n: number) => now - n * 60_000
+  // Each session's context at its last turn (T-48), as the core's Stop hook records it: the same made-up figures as
+  // board.html's, all under the 200k hand-over threshold.
   const actor = (key: keyof typeof ID, at: number, extra: Record<string, unknown>) => ({
-    id: ID[key], tool: 'claude-code', title: w.titles[key], cwd: PATH, projectKey: KEY, lastSeenAt: at, turnAt: at, ...extra,
+    id: ID[key], tool: 'claude-code', title: w.titles[key], cwd: PATH, projectKey: KEY, lastSeenAt: at, turnAt: at,
+    context: { tokens: CONTEXT[key], at }, ...extra,
   })
   const report = (at: number, r: Record<string, unknown>) => ({ report: r, reportAt: at })
   const all = {
@@ -172,7 +184,7 @@ async function seed(home: string, lang: Lang, scene: Scene, now: number) {
     actors = [all.payouts]
     ledger = [item(10, ID.payouts, 'open')]
     const alert = {
-      at: min(20), by: w.guidelinesBy, repo: PATH, change: 'changed', file: `${PATH}/docs/GUIDELINES.md`, from: 'project',
+      at: min(20), by: w.guidelinesBy, repo: PATH, change: 'changed', file: join(PATH, 'docs', 'GUIDELINES.md'), from: 'project',
       copy: '~/.project-pm/guidelines/copies/9c1e5a7d3b.md', since: 'start',
     }
     await write(join(home, 'guidelines', `${keyFile(KEY)}.json`), { alerts: [alert] })
@@ -246,13 +258,41 @@ async function capture(url: string, shot: Shot) {
     if (await evaluate(`!!document.getElementById('board') && !document.getElementById('board').hidden && document.fonts.status === 'loaded'`)) break
     await sleep(100)
   }
+  // The project's folder as SHOWN, kept so while the page refreshes itself (shown() on the page's text).
+  await evaluate(`(() => {
+    const re = new RegExp(${JSON.stringify(PATH_SOURCE)}, 'g')
+    const fix = () => {
+      const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+      for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+        const text = node.nodeValue.replace(re, (_, rest) => ${JSON.stringify(SHOWN)} + rest.replace(/\\\\/g, '/'))
+        if (text !== node.nodeValue) node.nodeValue = text
+      }
+    }
+    fix()
+    new MutationObserver(fix).observe(document.body, { subtree: true, childList: true, characterData: true })
+  })()`)
   await sleep(600)
+  // Nothing of the made-up folder's real spelling and no full session id may reach a picture.
+  const leak = await evaluate(`(() => { const text = document.body.innerText; return new RegExp(${JSON.stringify(PATH_SOURCE)}).test(text) || /claude-code:[0-9a-f]{8}-/.test(text) })()`)
+  if (leak) throw new Error(`${shot.out}: the page shows the project's folder or a full session id`)
   const height = await evaluate('document.documentElement.scrollHeight')
   await p.send('Emulation.setDeviceMetricsOverride', { width: shot.width, height, deviceScaleFactor: 2, mobile: false })
   await sleep(300)
   const pad = shot.pad ?? 0
   const box = shot.selector
-    ? await evaluate(`(() => { const r = document.querySelector(${JSON.stringify(shot.selector)}).getBoundingClientRect(); return { x: r.x - ${pad}, y: r.y + scrollY - ${pad}, width: r.width + ${pad * 2}, height: r.height + ${pad * 2} } })()`)
+    ? await evaluate(`(() => {
+        const el = document.querySelector(${JSON.stringify(shot.selector)})
+        const r = el.getBoundingClientRect()
+        // The padding above stops short of the element above it, so no sliver of that one's border is caught.
+        let top = r.y - ${pad}
+        for (let n = el; n; n = n.parentElement) {
+          if (!n.previousElementSibling) continue
+          const above = n.previousElementSibling.getBoundingClientRect().bottom
+          if (above <= r.y) top = Math.max(top, above + 2)
+          break
+        }
+        return { x: r.x - ${pad}, y: top + scrollY, width: r.width + ${pad * 2}, height: r.bottom + ${pad} - top }
+      })()`)
     : shot.until
       ? { x: 0, y: 0, width: shot.width, height: await evaluate(`(() => {
           // A clean break: the first work item that ends below the element, so no card or row is cut in two.
@@ -280,7 +320,7 @@ async function cliText(env: NodeJS.ProcessEnv): Promise<{ model: string; people:
   const { text, peopleText } = await boardOf(ctx, ref, false)
   const project = await loadProject(ref, env)
 
-  return { model: text, people: peopleText, ledger: ledgerText(project.ledger, false) }
+  return { model: shown(text), people: shown(peopleText), ledger: shown(ledgerText(project.ledger, false)) }
 }
 
 /** docs/demo/terminal.html filled with the core's output (`scene`: the PM in Claude Code, or `git pm board`), captured. */

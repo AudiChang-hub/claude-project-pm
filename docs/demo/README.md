@@ -24,7 +24,10 @@ session, `~/.claude/project-pm/` or `~/.project-pm/`.
   `hooks/sessions.ts`, its words from `hooks/messages.ts` (only the keys the pane uses), and its
   layout follows `renderPane()`. The line under the progress counts the open items by kind as
   `openBreakdown` in `hooks/qa.ts` does (T-42: "5 open: 2 awaiting QA · 3 on track"), each item once,
-  in `OPEN_COLOR`'s colors. When those change, update this page to match. `view=states` shows
+  in `OPEN_COLOR`'s colors. Each session card has its context line as `contextLine` in
+  `hooks/context.ts` writes it (T-48: "context 118k · idle 12m · wake ≈12k"), from the page's
+  `CONTEXT` figures, which `webboard.mts` seeds too, all under the 200k hand-over threshold so
+  *Needs attention* holds no hand-over. When those change, update this page to match. `view=states` shows
   only the session cards of the statuses under *Needs attention*, with a usage limit (whose words are
   Claude Code's own error, in English in either language) and a session waiting on CI added.
 - `hero.html` is a schematic Claude Code desktop window: the person asks the PM whether anything is
@@ -41,7 +44,12 @@ session, `~/.claude/project-pm/` or `~/.project-pm/`.
   temporary `PROJECT_PM_HOME` (and a temporary home folder), starts `serve()` from
   `core/src/http.ts` on it, and captures the page with headless Edge or Chrome over the DevTools
   protocol. Only git and gh are answered by the script (gh says the CI run failed), so every word on
-  the page is the core's. The project's path is shown as `~/code/acme-storefront`.
+  the page is the core's, with one exception: the project's folder. Since T-47 the web board takes in
+  only plain absolute folders, so the project is kept at a made-up one (`C:\code\acme-storefront`,
+  never read) and the script shows it, in the page's text and in the CLI output, as
+  `~/code/acme-storefront`. Each session carries a made-up context size (T-48), as the core's Stop
+  hook records it. A shot fails if the page still shows that folder's real spelling or a full session
+  id.
 
 To regenerate (Windows, with Edge or Chrome), from the repository root:
 
@@ -67,4 +75,6 @@ The hero images are scaled to 1600 px wide and `how-states*.png` kept at 1000 px
 web board's shots are rectangles: round their corners (radius 28 px for the README ones, 24 px for
 the how-it-works crops), scale them to 1600 px (README) or 1100 px (crops) wide, then reduce them the
 same way. The README ones end on a clean break, below the first work item past the Sessions column,
-so no fade is needed (a fade reduced to 256 colors shows as grey bands).
+so no fade is needed (a fade reduced to 256 colors shows as grey bands); when the Sessions column is
+the longer one, as now, the whole page is kept. The how-it-works crops stop their top padding short
+of the element above, so no sliver of its border shows.
