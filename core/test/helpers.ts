@@ -59,7 +59,8 @@ export function world(lang: Lang, { legacy = false } = {}): World {
   // A test of the desktop app sets these itself.
   delete process.env.CLAUDE_CODE_HOST_SESSION_ID
   delete process.env.CLAUDE_CODE_ENTRYPOINT
-  const env: NodeJS.ProcessEnv = { ...process.env, PROJECT_PM_HOME: join(home, '.project-pm'), PROJECT_PM_NO_GH: '1' }
+  // LOCALAPPDATA too, as HOME: the machine's own would hold the desktop app's Claude Code, which init finds (T-50).
+  const env: NodeJS.ProcessEnv = { ...process.env, LOCALAPPDATA: join(home, 'AppData', 'Local'), PROJECT_PM_HOME: join(home, '.project-pm'), PROJECT_PM_NO_GH: '1' }
   git(repo, 'init', '-q', '-b', 'main')
   git(repo, 'config', 'user.name', 'Acme Dev')
   git(repo, 'config', 'user.email', 'dev@acme.example')

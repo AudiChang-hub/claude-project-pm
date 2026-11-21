@@ -4,9 +4,9 @@
  * keeps its data under.
  */
 import { execFile } from 'node:child_process'
-import { statSync } from 'node:fs'
+import { lstatSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, win32 } from 'node:path'
 
 import { plainLocalPath } from './localpath'
 
@@ -157,6 +157,63 @@ function runBatch(file: string, args: string[], timeoutMs: number): Promise<stri
       resolve(err ? null : String(stdout).trim()),
     )
   })
+}
+
+/** A version folder's name (2.1.328): compared part by part, newest first. */
+const VERSION_DIR = /^\d+\.\d+\.\d+$/
+const newestFirst = (a: string, b: string) => {
+  const [x, y] = [a, b].map(v => v.split('.').map(Number))
+
+  return (y![0]! - x![0]!) || (y![1]! - x![1]!) || (y![2]! - x![2]!)
+}
+
+/** The entries of `dir` that are folders (not links) with a name `pattern` takes: none when it cannot be read. */
+function foldersIn(dir: string, pattern: RegExp): string[] {
+  try {
+    // A folder that is a link is not looked into: it could lead off this machine's disks.
+    if (!lstatSync(dir, { throwIfNoEntry: false })?.isDirectory()) return []
+
+    return readdirSync(dir, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && pattern.test(entry.name))
+      .map(entry => entry.name)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * The Claude Code the desktop app bundles, by its full path, for a person who has no `claude` on PATH (T-50: the desktop
+ * app keeps its own claude.exe, and installs none on PATH). Windows only, and only in the app's own install folder:
+ * %LOCALAPPDATA%\Claude-Data\<profile>\claude-code\<version>\<build>\claude.exe, LOCALAPPDATA taken only when it is a plain
+ * path on this machine's own disks (plainLocalPath), and every folder name on the way a plain name. Inside a session
+ * CLAUDE_CODE_EXECPATH names the one that runs it: taken first, and only when it is one of those. Else the newest
+ * version found. Null when there is none, or off Windows.
+ */
+export function desktopClaude(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string | null {
+  if (platform !== 'win32') return null
+  const local = env.LOCALAPPDATA?.trim()
+  const root = local && /^[A-Za-z]:\\/.test(local) ? plainLocalPath(local, local, 'win32') : null
+  if (!root) return null
+  const data = win32.join(root, 'Claude-Data')
+  // A link is not followed (readdir's folders are none either): nothing here may lead off this machine's disks.
+  const isFile = (file: string) => !!lstatSync(file, { throwIfNoEntry: false })?.isFile()
+  const found: { file: string; version: string }[] = []
+  for (const profile of foldersIn(data, /^[\w.-]+$/)) {
+    if (/^\.+$/.test(profile)) continue
+    const versions = win32.join(data, profile, 'claude-code')
+    for (const version of foldersIn(versions, VERSION_DIR)) {
+      for (const build of foldersIn(win32.join(versions, version), /^[0-9a-f]{6,64}$/i)) {
+        const file = win32.join(versions, version, build, 'claude.exe')
+        if (isFile(file)) found.push({ file, version })
+      }
+    }
+  }
+  const named = env.CLAUDE_CODE_EXECPATH?.trim()
+  const own = named && found.find(one => one.file.toLowerCase() === win32.normalize(named).toLowerCase())
+  if (own) return own.file
+  found.sort((a, b) => newestFirst(a.version, b.version))
+
+  return found[0]?.file ?? null
 }
 
 /** Where the core keeps its data: PROJECT_PM_HOME, else ~/.project-pm. */

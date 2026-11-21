@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import type { Run } from './host'
-import { childEnv, noProgramsFromCurrentFolder, systemCmd } from './host'
+import { childEnv, desktopClaude, noProgramsFromCurrentFolder, systemCmd } from './host'
 import { localRealpath } from './localpath'
 import { claudeDir, isModInstalled, isModOnCore } from './mod'
 import { ct } from './messages'
@@ -163,6 +163,28 @@ export function withoutBlock(text: string, sep = ''): string {
   return text.slice(0, from) + text.slice(to)
 }
 
+const claudeOf = new WeakMap<InstallEnv, Promise<string | null>>()
+
+/**
+ * The Claude Code init and uninstall run: `claude` on PATH, else the one the desktop app bundles (desktopClaude: a
+ * desktop user has no `claude` on PATH, T-50), by its full path; null when neither answers `--version`. Asked once per
+ * InstallEnv.
+ */
+export function claudeProgram(ie: InstallEnv, cwd: string): Promise<string | null> {
+  let found = claudeOf.get(ie)
+  if (!found) {
+    found = (async () => {
+      if ((await ie.run(['claude', '--version'], cwd, 15_000)) !== null) return 'claude'
+      const bundled = desktopClaude(ie.env)
+
+      return bundled && (await ie.run([bundled, '--version'], cwd, 15_000)) !== null ? bundled : null
+    })()
+    claudeOf.set(ie, found)
+  }
+
+  return found
+}
+
 /**
  * How Claude Code starts the MCP server: as `self`, except npx on Windows, which is a .cmd file that Claude Code
  * starts only through `cmd /c` (git's sh, which runs the hooks and the alias, finds npx as it is).
@@ -184,8 +206,9 @@ export async function planInstall(ref: ProjectRef, ie: InstallEnv, options: { ci
   const self = ie.exe ? [bin] : ie.self
   if (ie.exe) changes.push({ kind: 'copy', file: bin, from: ie.exe })
   const command = shCommand(self)
-  const claude = claudeDir(ie)
-  const hasClaude = (await ie.run(['claude', '--version'], ref.path, 15_000)) !== null
+  const claudeHome = claudeDir(ie)
+  const claude = await claudeProgram(ie, ref.path)
+  const hasClaude = claude !== null
   // A desktop mod from v1.1 on uses the core's tools (E2): the MCP server and the hooks go in beside it (the hooks
   // stand aside in its desktop sessions). An older mod serves its own tools under the same names (3.7).
   const isOldMod = isModInstalled(ie) && !isModOnCore(ie)
@@ -193,12 +216,12 @@ export async function planInstall(ref: ProjectRef, ie: InstallEnv, options: { ci
   if (isOldMod) notes.push(ct('init.modInstalled'))
   else {
     if (isModInstalled(ie)) notes.push(ct('init.modOnCore'))
-    if (hasClaude) {
-      const existing = await ie.run(['claude', 'mcp', 'get', 'project-pm'], ref.path, 20_000)
+    if (claude) {
+      const existing = await ie.run([claude, 'mcp', 'get', 'project-pm'], ref.path, 20_000)
       if (existing !== null && !log.entries.some(e => e.kind === 'mcp')) notes.push(ct('init.mcpTaken'))
       else changes.push({ kind: 'mcp', command: [...mcpLauncher(self), 'mcp'] })
     }
-    changes.push({ kind: 'hooks', file: join(claude, 'settings.json'), command })
+    changes.push({ kind: 'hooks', file: join(claudeHome, 'settings.json'), command })
   }
   // 2.1: the PM keeps nothing in the project, but a .project-pm/ folder someone made there must not reach git.
   const kept = await localRealpath(join(ref.path, '.project-pm'))
@@ -213,7 +236,7 @@ export async function planInstall(ref: ProjectRef, ie: InstallEnv, options: { ci
   // Read now: a committed CLAUDE.md that leads off this machine's disks stops init before anything is changed (T-39).
   await textOf(claudeFile)
   changes.push({ kind: 'text', file: claudeFile, block: claudeSection() })
-  const skill = join(claude, 'skills', 'project-pm', 'SKILL.md')
+  const skill = join(claudeHome, 'skills', 'project-pm', 'SKILL.md')
   const skillNow = await textOf(skill)
   if (skillNow !== null && !skillNow.includes(START)) notes.push(ct('init.skillTaken', { file: skill }))
   else changes.push({ kind: 'whole', file: skill, text: skillText() })
@@ -308,9 +331,10 @@ export async function apply(change: Change, ie: InstallEnv, ref: ProjectRef): Pr
       return { ...change, at, root: paths(ie.env).home }
     }
     case 'mcp': {
-      const before = await ie.run(['claude', 'mcp', 'get', 'project-pm'], ref.path, 20_000)
-      if (before !== null) await ie.run(['claude', 'mcp', 'remove', '--scope', 'user', 'project-pm'], ref.path, 20_000)
-      const added = await ie.run(['claude', 'mcp', 'add', '--scope', 'user', 'project-pm', '--', ...change.command], ref.path, 20_000)
+      const claude = (await claudeProgram(ie, ref.path)) ?? 'claude'
+      const before = await ie.run([claude, 'mcp', 'get', 'project-pm'], ref.path, 20_000)
+      if (before !== null) await ie.run([claude, 'mcp', 'remove', '--scope', 'user', 'project-pm'], ref.path, 20_000)
+      const added = await ie.run([claude, 'mcp', 'add', '--scope', 'user', 'project-pm', '--', ...change.command], ref.path, 20_000)
       if (added === null) throw new Error(ct('init.mcpFailed'))
 
       return { ...change, at, existed: false }
@@ -383,7 +407,7 @@ export async function undo(done: Done, ie: InstallEnv): Promise<string | void> {
       await removeEmptyDirs(dirname(done.file), done.root ?? dirname(done.file))
       return
     case 'mcp':
-      await ie.run(['claude', 'mcp', 'remove', '--scope', 'user', 'project-pm'], ie.home, 20_000)
+      await ie.run([(await claudeProgram(ie, ie.home)) ?? 'claude', 'mcp', 'remove', '--scope', 'user', 'project-pm'], ie.home, 20_000)
       return
     case 'text':
     case 'whole':
@@ -519,7 +543,7 @@ export async function init(ref: ProjectRef, ie: InstallEnv, options: { yes: bool
   await writeLog(ie.env, log)
   // Claude Code must now list the server (no model, no cost).
   if (applied.some(d => d.kind === 'mcp')) {
-    const listed = await ie.run(['claude', 'mcp', 'list'], ref.path, 60_000)
+    const listed = await ie.run([(await claudeProgram(ie, ref.path)) ?? 'claude', 'mcp', 'list'], ref.path, 60_000)
     if (!listed || !listed.includes('project-pm')) {
       const entry = log.entries.find(e => e.kind === 'mcp')
       if (entry) await undo(entry, ie)

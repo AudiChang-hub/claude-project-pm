@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
-import { run, systemProgram } from '../src/host'
+import { desktopClaude, run, systemProgram } from '../src/host'
 import { PROBE_HOST, watchFs } from './helpers'
 
 describe('a command installed as a .cmd file, on Windows (CI run 44723838413)', { skip: process.platform === 'win32' ? false : 'a .cmd file is Windows\'' }, () => {
@@ -180,5 +180,55 @@ describe('Windows\' own programs, by their full path (T-39 QA9)', { skip: proces
       process.env.SystemRoot = saved.SystemRoot
       process.env.windir = saved.windir
     }
+  })
+})
+
+describe('the Claude Code the desktop app bundles (T-50)', () => {
+  let root: string
+  const exe = (profile: string, version: string, build: string) => {
+    const dir = join(root, 'Claude-Data', profile, 'claude-code', version, build)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'claude.exe'), '')
+
+    return join(dir, 'claude.exe')
+  }
+  beforeEach(() => {
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'pm-desktop-')))
+  })
+  afterEach(() => rmSync(root, { recursive: true, force: true }))
+
+  test('off Windows there is none to find', () => {
+    assert.equal(desktopClaude({ LOCALAPPDATA: 'C:\Users\dev\AppData\Local' }, 'linux'), null)
+  })
+
+  test('a LOCALAPPDATA that is not a plain path on this machine\'s disks is never looked in', () => {
+    for (const bad of ['\\acme-files\share\AppData', '//acme-files/share', 'AppData\Local', 'C:AppData', '']) {
+      assert.equal(desktopClaude({ LOCALAPPDATA: bad }, 'win32'), null, bad)
+    }
+  })
+
+  describe('on Windows', { skip: process.platform === 'win32' ? false : 'the desktop app\'s folder is Windows\'' }, () => {
+    test('the newest version in the app\'s own folder, by its full path', () => {
+      exe('claude_acme01', '2.1.9', 'a1b2c3d4e5f6')
+      const newest = exe('claude_acme01', '2.1.10', 'f6e5d4c3b2a1')
+      assert.equal(desktopClaude({ LOCALAPPDATA: root }, 'win32'), newest)
+    })
+
+    test('CLAUDE_CODE_EXECPATH first, but only when it is one in the app\'s folder', () => {
+      const older = exe('claude_acme01', '2.1.9', 'a1b2c3d4e5f6')
+      const newest = exe('claude_acme01', '2.1.10', 'f6e5d4c3b2a1')
+      assert.equal(desktopClaude({ LOCALAPPDATA: root, CLAUDE_CODE_EXECPATH: older }, 'win32'), older)
+      const elsewhere = join(root, 'acme-tools', 'claude.exe')
+      mkdirSync(join(root, 'acme-tools'))
+      writeFileSync(elsewhere, '')
+      assert.equal(desktopClaude({ LOCALAPPDATA: root, CLAUDE_CODE_EXECPATH: elsewhere }, 'win32'), newest)
+    })
+
+    test('folders of other names, and no claude.exe, are passed over', () => {
+      mkdirSync(join(root, 'Claude-Data', 'claude_acme01', 'claude-code', 'latest', 'a1b2c3d4e5f6'), { recursive: true })
+      writeFileSync(join(root, 'Claude-Data', 'claude_acme01', 'claude-code', 'latest', 'a1b2c3d4e5f6', 'claude.exe'), '')
+      mkdirSync(join(root, 'Claude-Data', 'claude_acme01', 'claude-code', '2.1.10', 'a1b2c3d4e5f6'), { recursive: true })
+      assert.equal(desktopClaude({ LOCALAPPDATA: root }, 'win32'), null)
+    })
   })
 })

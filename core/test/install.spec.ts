@@ -192,6 +192,31 @@ for (const lang of LANGS) {
       assert.ok(out.applied.some(d => d.kind === 'hooks'))
     })
 
+    test('the local-mods entry Claude Code keeps for the local copy is that copy: its stale version is not read (T-50)', async () => {
+      // As on a desktop machine: the app's local-mods marketplace is the local-mods folder itself, enabled, and
+      // installed_plugins.json still lists the version it held when first installed.
+      write(join(claude(), 'local-mods', 'project-pm', '.claude-plugin', 'plugin.json'), '{"name":"project-pm","version":"1.1.0"}\n')
+      write(join(claude(), 'local-mods', '.claude-plugin', 'marketplace.json'), JSON.stringify({ name: 'local-mods', plugins: [{ name: 'project-pm', source: './project-pm' }] }))
+      write(join(claude(), 'plugins', 'known_marketplaces.json'), JSON.stringify({ 'local-mods': { source: { source: 'directory', path: join(claude(), 'local-mods') }, installLocation: join(claude(), 'local-mods') } }))
+      write(join(claude(), 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'project-pm@local-mods': [{ scope: 'user', installPath: join(claude(), 'plugins', 'cache', 'local-mods', 'project-pm', '0.7.0'), version: '0.7.0' }] } }))
+      const settings = join(claude(), 'settings.json')
+      writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), enabledPlugins: { 'project-pm@local-mods': true } }, null, 2))
+      const out = await roundTrip()
+      assert.ok(!out.notes.includes(ct('init.modInstalled')))
+      assert.ok(out.applied.some(d => d.kind === 'mcp'))
+      assert.ok(out.applied.some(d => d.kind === 'hooks'))
+    })
+
+    test('without the marketplace record, an enabled local-mods entry is still the local copy (T-50)', async () => {
+      write(join(claude(), 'local-mods', 'project-pm', '.claude-plugin', 'plugin.json'), '{"name":"project-pm","version":"1.1.0"}\n')
+      write(join(claude(), 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'project-pm@local-mods': [{ scope: 'user', version: '0.7.0' }] } }))
+      const settings = join(claude(), 'settings.json')
+      writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), enabledPlugins: { 'project-pm@local-mods': true } }, null, 2))
+      const out = await roundTrip()
+      assert.ok(!out.notes.includes(ct('init.modInstalled')))
+      assert.ok(out.applied.some(d => d.kind === 'mcp'))
+    })
+
     test('an enabled marketplace copy older than 1.1 still keeps the MCP server and the hooks out (3.7)', async () => {
       write(join(claude(), 'local-mods', 'project-pm', '.claude-plugin', 'plugin.json'), '{"name":"project-pm","version":"1.1.0"}\n')
       write(join(claude(), 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'project-pm@acme-market': [{ scope: 'user', version: '1.0.0' }] } }))
@@ -207,6 +232,18 @@ for (const lang of LANGS) {
       assert.ok(out.notes.includes(ct('init.noClaude')))
       assert.ok(!out.applied.some(d => d.kind === 'mcp'))
       assert.ok(out.applied.some(d => d.kind === 'prepush'))
+    })
+
+    test('without claude on PATH, the Claude Code the desktop app bundles adds the MCP server (T-50)', { skip: process.platform === 'win32' ? false : 'the desktop app folder is a Windows one' }, async () => {
+      const local = join(w.home, 'AppData', 'Local')
+      const bundled = join(local, 'Claude-Data', 'claude_acme01', 'claude-code', '2.1.328', '23e64dd91c09', 'claude.exe')
+      write(bundled, '')
+      const asClaude = fakeClaude(w.home, hostWith())
+      const run: InstallEnv['run'] = (argv, cwd, timeoutMs) => (argv[0] === 'claude' ? Promise.resolve(null) : argv[0] === bundled ? asClaude(['claude', ...argv.slice(1)], cwd, timeoutMs) : asClaude(argv, cwd, timeoutMs))
+      const env = { ...w.env, LOCALAPPDATA: local }
+      const out = await roundTrip({ env, run })
+      assert.ok(!out.notes.includes(ct('init.noClaude')))
+      assert.ok(out.applied.some(d => d.kind === 'mcp'))
     })
 
     test('a project-pm MCP server init did not add is left alone', async () => {

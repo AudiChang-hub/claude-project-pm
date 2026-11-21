@@ -51,8 +51,8 @@ export function isAtLeast(a: string, b: string): boolean {
 
 /**
  * The versions of the desktop mod on this machine: the local copy's (local-mods), and each one Claude Code installed
- * from a marketplace (plugins/installed_plugins.json) that settings.json has enabled. A copy whose version cannot be
- * read counts as "0.0.0".
+ * from a marketplace (plugins/installed_plugins.json) that settings.json has enabled, but the local copy's own entry
+ * there (isLocalCopy). A copy whose version cannot be read counts as "0.0.0".
  */
 export function modVersions(ie: { env: NodeJS.ProcessEnv; home: string }): string[] {
   const dir = claudeDir(ie)
@@ -76,6 +76,8 @@ export function modVersions(ie: { env: NodeJS.ProcessEnv; home: string }): strin
     const installed = JSON.parse(readFileSync(join(dir, 'plugins', 'installed_plugins.json'), 'utf8')) as { plugins?: Record<string, unknown> }
     for (const [name, entries] of Object.entries(installed.plugins ?? {})) {
       if (!name.startsWith('project-pm@') || enabled[name] !== true || !Array.isArray(entries)) continue
+      // The local copy, already counted by its own plugin.json: the entry keeps the version it was first installed at.
+      if (existsSync(local) && isLocalCopy(dir, name.slice('project-pm@'.length))) continue
       for (const entry of entries) versions.push(typeof (entry as { version?: unknown })?.version === 'string' ? (entry as { version: string }).version : '0.0.0')
     }
   } catch {
@@ -83,6 +85,42 @@ export function modVersions(ie: { env: NodeJS.ProcessEnv; home: string }): strin
   }
 
   return versions
+}
+
+/** A folder as a path to compare: forward slashes, no slash at the end, any case. */
+const sameFolder = (a: string, b: string) => {
+  const key = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+
+  return key(a) === key(b)
+}
+
+/**
+ * Whether marketplace `market`'s project-pm is the local copy (local-mods/project-pm) itself: the desktop app's
+ * local-mods marketplace is that folder (a directory source, plugins/known_marketplaces.json), and
+ * installed_plugins.json keeps the version the copy had when first installed there, not the one it has now (T-50:
+ * 0.7.0 listed, 1.1.0 loaded). Without a record of the marketplace, one named local-mods is taken as that folder.
+ */
+function isLocalCopy(dir: string, market: string): boolean {
+  const folder = join(dir, 'local-mods')
+  type Known = Record<string, { source?: { source?: unknown; path?: unknown } } | undefined>
+  let known: Known | null
+  try {
+    known = JSON.parse(readFileSync(join(dir, 'plugins', 'known_marketplaces.json'), 'utf8')) as Known
+  } catch {
+    known = null
+  }
+  const record = known && typeof known === 'object' ? known[market] : undefined
+  if (!record) return market === 'local-mods'
+  const source = record.source
+  if (source?.source !== 'directory' || typeof source.path !== 'string' || !sameFolder(source.path, folder)) return false
+  try {
+    const listing = JSON.parse(readFileSync(join(folder, '.claude-plugin', 'marketplace.json'), 'utf8')) as { plugins?: { name?: unknown; source?: unknown }[] }
+    const entry = (listing.plugins ?? []).find(p => p?.name === 'project-pm')
+
+    return typeof entry?.source === 'string' && sameFolder(join(folder, entry.source), join(folder, 'project-pm'))
+  } catch {
+    return false
+  }
 }
 
 /**
