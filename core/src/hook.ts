@@ -27,6 +27,9 @@ import { gitPath, resolveProject } from './project'
 import { changeActor, loadActor, loadProject, readJsonFile } from './store'
 import type { Actor } from './types'
 import { REPORT_TOOL } from './tools'
+import { coreThresholds, transcriptContext } from './quota'
+import { effectiveTokens, hasWorkLeft, needsHandoff, tokensText } from '../../hooks/context'
+import { trackOf } from './actors'
 
 export type HookInput = {
   session_id?: string
@@ -39,6 +42,7 @@ export type HookInput = {
   tool_use_id?: string
   last_assistant_message?: string
   background_tasks?: unknown
+  transcript_path?: string
 }
 
 /** What the hook prints for Claude Code to read; null prints nothing. */
@@ -122,6 +126,14 @@ async function promptSubmit(id: string, ref: ProjectRef, input: HookInput, env: 
   if (alert) parts.push(alertText(alert))
   const isPm = project.pmId === id
   if (!isPm && !project.isDismissed) parts.push(t('role.delivery', { project: ref.name, tool: REPORT_TOOL, template: t('handover.template') }), ct('hook.actorHint', { actor: id }))
+  // Past the hand-over threshold with work left (T-48): asked to hand over, as the mod asks a desktop session.
+  if (!isPm && !project.isDismissed && me.context) {
+    const { handoff } = await coreThresholds(env)
+    const track = trackOf(me)
+    if (needsHandoff(me.context, track, handoff, hasWorkLeft(id, track, project.ledger))) {
+      parts.push(t('context.handoffAsk', { tokens: tokensText(effectiveTokens(me.context, track)), threshold: tokensText(handoff), template: t('handover.template') }))
+    }
+  }
   const found = await readGuidelines(ref, env, run)
   if (found && 'text' in found) {
     parts.push(t('guidelines.section', { file: found.file, project: ref.name }))
@@ -212,6 +224,8 @@ async function guardAfter(id: string, ref: ProjectRef, input: HookInput, env: No
 
 async function stop(id: string, input: HookInput, env: NodeJS.ProcessEnv, now: number, base: (old: Actor | null) => HookActor) {
   const said = input.last_assistant_message ?? ''
+  // The context the turn left (T-48): the CLI has no mod to record it, so the transcript's tail says it.
+  const tokens = await transcriptContext(input.transcript_path)
   await changeActor(
     id,
     old => {
@@ -220,6 +234,7 @@ async function stop(id: string, input: HookInput, env: NodeJS.ProcessEnv, now: n
       next.turnAt = now
       next.lastAnswer = clip(said, 2000)
       next.ask = null
+      if (tokens !== null) next.context = { tokens, at: now }
       // A report from before this turn began spoke of the work as it stood then (the mod drops it the same way).
       if (next.report && (next.reportAt ?? 0) < (next.promptAt ?? 0)) {
         delete next.report

@@ -74,7 +74,18 @@ export type Track = {
   /** The context at which compacting the PM failed every way: not tried again before RETRY_AFTER more. */
   compactFailedAt?: number
   /** The PM was told to hand itself over (compaction failed): when, at what context, and the new PM once it started. */
-  selfHandoff?: { at: number; tokens: number; to?: string }
+  selfHandoff?: {
+    at: number
+    tokens: number
+    /** The new PM session, once start_session started it. */
+    to?: string
+    /** When the PM was first told to hand over (a turn of the person's own: start_session works only there). */
+    shownAt?: number
+    /** That turn ended without a new PM: the pane's button is the last way left. */
+    failedAt?: number
+  }
+  /** The pane's button wrote `autoCompactWindow` to this settings file: its text before, for an exact undo. */
+  autoCompactSet?: { path: string; before: string | null; at: number }
   /** The sessions the PM was woken to ask for hand-over notes, and when (once each). */
   handoffAsked?: Record<string, number>
   /** Hand-overs the app would not start in the turn they came up in: started at the user's next message. */

@@ -5,6 +5,8 @@ import type { AgentRecord, AgentState, BackgroundTask, CiCheck, LastWord, Ledger
 import { agentName, isSettledAgent } from './agents'
 import { MESSAGES, t } from './messages'
 import { isAgentId, isSameId, openBreakdown, qaAttention, qaShown, qaText } from './qa'
+import { DEFAULT_THRESHOLDS, compactedLine, contextLine, contextOf, effectiveTokens, hasWorkLeft, needsHandoff, tokensText } from './context'
+import type { ContextMark, Thresholds } from './context'
 
 export type Status = 'running' | 'asking' | 'failed' | 'limit' | 'open' | 'unreleased' | 'ci' | 'waiting' | 'done' | 'stale'
 
@@ -1238,6 +1240,28 @@ export type BoardInput = {
   isIncludingDone: boolean
   /** Words for people (the web board): sessions by name alone, never by id (T-43). The model's board keeps the ids. */
   isForPeople?: boolean
+  /** The desktop app's live context of running sessions (get_usage), by id: newer than a track's own figure (T-48). */
+  live?: Record<string, ContextMark>
+  /** The hand-over and compaction thresholds (T-48); absent, the defaults. */
+  thresholds?: Thresholds
+  /** The project's PM: its track holds the hand-overs waiting to start, and its card its last compaction. */
+  pmId?: string | null
+}
+
+/** The sessions past the hand-over threshold with work left, as "Needs attention" lists them, and the hand-overs to start (T-48). */
+export function quotaAttention(input: BoardInput, rows: { one: Session; track: Track | undefined }[], nameOf: (one: Session, track: Track | undefined) => string): string[] {
+  const threshold = (input.thresholds ?? DEFAULT_THRESHOLDS).handoff
+  const lines: string[] = []
+  for (const { one, track } of rows) {
+    if (input.pmId && one.id === input.pmId) continue
+    const mark = contextOf(track, input.live?.[one.id])
+    if (!mark || !needsHandoff(mark, track, threshold, hasWorkLeft(one.id, track, input.ledger))) continue
+    lines.push(t('board.attention.handingOver', { name: nameOf(one, track), tokens: tokensText(effectiveTokens(mark, track)) }))
+  }
+  const pm = input.pmId ? input.tracks[input.pmId] : undefined
+  for (const one of pm?.pendingHandoffs ?? []) lines.push(t('board.attention.handoffPending', { title: one.title }))
+
+  return lines
 }
 
 /** How long a done agent stays on the board before it folds away (include_done shows it). */
@@ -1398,6 +1422,11 @@ export function boardText(input: BoardInput): string {
     if (caveat && settled(r.one.id) === undefined && !['running', 'ci', 'failed', 'limit', 'unreleased'].includes(r.status)) attention.push(t('board.attention.caveat', { name, said: clip(caveat, QUOTE) }))
     if (r.one.hasOpenPr && r.status !== 'running') attention.push(t('board.attention.pr', { name }))
   }
+  attention.push(...quotaAttention(input, rows, (one, track) => {
+    const title = sessionName(one, track)
+
+    return input.isForPeople ? t('board.namePeople', { title }) : t('board.name', { title, id: one.id })
+  }))
   const openLedger = ledger.filter(item => item.status === 'open')
   // The PM's agents that need it: failed, interrupted, waiting on the person, or committed for the PM to verify.
   const agents = input.agents ?? []
@@ -1457,6 +1486,11 @@ export function boardText(input: BoardInput): string {
     const heading = `### [${statusText(r.status, r.limit, 'tag')}] ${sessionName(r.one, r.track)}`
     lines.push(input.isForPeople ? heading : `${heading} (${r.one.id})`)
     lines.push(t('board.lastActive', { ago: ago(r.one.lastActivityAt, now), flags: flags ? t('board.flags', { flags }) : '' }))
+    // Its context, idle time and what waking it costs (T-48); the PM's card, its last compaction too.
+    const context = contextLine(r.one, r.track, input.live?.[r.one.id], now)
+    if (context) lines.push(context)
+    const compacted = input.pmId === r.one.id ? compactedLine(r.track) : null
+    if (compacted) lines.push(compacted)
     if (r.track) {
       if (r.track.plan.length) {
         // The steps left, on one line: the ticked ones are in the count.

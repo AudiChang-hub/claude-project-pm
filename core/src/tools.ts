@@ -46,6 +46,8 @@ import {
 import type { BoardInput, Kpi, Status } from '../../hooks/sessions'
 import type { AgentRecord, AgentState, CiCheck, LastWord, PushCheck, Session, Step, Track } from '../../types'
 import { activeAt, projectSessions, trackOf } from './actors'
+import { compactedLine, contextLine } from '../../hooks/context'
+import { coreThresholds } from './quota'
 import type { Ctx, ToolResult } from './context'
 import { projectOf } from './context'
 import { checkCi, checkPush, heldCi } from './facts'
@@ -347,6 +349,20 @@ export function roleText(ref: ProjectRef): string {
   return t('role.text', { project: ref.name, path: ref.path, board: BOARD_TOOL, ledger: LEDGER_TOOL })
 }
 
+/**
+ * Why `pm claim` with `handover_from` is refused, or null: the project's PM must be that session, and its own record
+ * (the mod's track, or the core's actor) must say it started this one (`selfHandoff.to`).
+ */
+export async function handoverRefusal(ctx: Ctx, ref: ProjectRef, from: string): Promise<string | null> {
+  const project = await loadProject(ref, ctx.env)
+  if (project.pmId !== from) return ct('pm.handoverNotPm', { from, project: ref.name })
+  const track = await readJsonFile<Track>(paths(ctx.env).legacySession(from)).catch(() => null)
+  const actor = await readJsonFile<Actor & { selfHandoff?: { to?: string } }>(paths(ctx.env).actor(from)).catch(() => null)
+  const to = track?.selfHandoff?.to ?? actor?.selfHandoff?.to
+
+  return to === ctx.actor ? null : ct('pm.handoverNotStarted', { from, actor: ctx.actor })
+}
+
 export async function pmTool(ctx: Ctx, input: Record<string, unknown>): Promise<ToolResult> {
   const action = str(input.action)
   if (action !== 'claim' && action !== 'release' && action !== 'status') return { text: ct('pm.badAction'), structured: { error: 'bad_action' } }
@@ -354,6 +370,12 @@ export async function pmTool(ctx: Ctx, input: Record<string, unknown>): Promise<
   if (!ref) return notGit(ctx, input)
   try {
     if (action === 'claim') {
+      // A PM's own hand-over (T-48): only the session the old PM started takes over from it, and only while it is the PM.
+      const from = str(input.handover_from)?.trim()
+      if (from) {
+        const refusal = await handoverRefusal(ctx, ref, from)
+        if (refusal) return { text: refusal, structured: { error: 'handover_refused' } }
+      }
       const done = await changeProject(ref, project => ({ project: { ...project, pmId: ctx.actor, isDismissed: false }, result: project.pmId }), ctx.env)
       const before = done!.result
       const said = before && before !== ctx.actor ? ct('pm.tookOver', { actor: ctx.actor, project: ref.name, before }) : ct('pm.claimed', { actor: ctx.actor, project: ref.name })
@@ -451,6 +473,10 @@ export type BoardActor = {
   /** Listed among the active sessions, not folded with the ended ones. */
   isActive: boolean
   untracked: boolean
+  /** "context 213k · idle 2h · wake ≈277k" (T-48), null with no figure. */
+  context: string | null
+  /** The PM's last compaction: "Compacted the conversation: 310k → 21k", else null. */
+  compacted: string | null
 }
 
 export type AgentCard = { id: string; name: string; state: AgentState; label: string; look: string; hex: string; time: string; meta: string[]; line: string; usage: string | null; isRunning: boolean }
@@ -556,6 +582,8 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     agents: agents.length ? agents : undefined,
     now,
     isIncludingDone,
+    thresholds: await coreThresholds(ctx.env),
+    pmId: project.pmId,
   }
   // The model's board names sessions with their ids; the web board's words, for people, by name alone (T-43).
   let text = boardText(input)
@@ -625,6 +653,8 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
         summary: clip(cardSummary(kept, words[s.id]), 160),
         isActive: isActive(status) || !!caveat || s.hasOpenPr || isOwner(s),
         untracked: !kept,
+        context: contextLine(s, track, undefined, now),
+        compacted: s.id === project.pmId ? compactedLine(track) : null,
       }
     })
     .sort((a, b) => STATUS[a.status].rank - STATUS[b.status].rank || b.at - a.at)

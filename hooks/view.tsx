@@ -13,6 +13,8 @@ import type { Project, Status } from './sessions'
 import { archive, claim, dismissBand, refresh, startPmSession } from './actions'
 import { t } from './messages'
 import { RELEASES_URL, openWebBoard } from './webboard'
+import { compactedLine, contextLine } from './context'
+import { needsButton, setAutoCompact, undoAutoCompact } from './quota'
 
 // The engine reads each module's state refs from its own source: these name the same values as the other modules'.
 const me = atom({ plugin: 'project-pm', key: 'me' } as const, null as Me | null)
@@ -32,6 +34,7 @@ const detailShown = atom({ plugin: 'project-pm', key: 'detailShown' } as const, 
 const agents = atom({ plugin: 'project-pm', key: 'agents' } as const, [] as AgentRecord[])
 const webOpening = atom({ plugin: 'project-pm', key: 'webOpening' } as const, false)
 const webHelp = atom({ plugin: 'project-pm', key: 'webHelp' } as const, false)
+const liveContext = atom({ plugin: 'project-pm', key: 'liveContext' } as const, {} as Record<string, { tokens: number; at: number }>)
 
 /** An agent state's look, in the hues of the session statuses that mean the same (hooks/sessions.ts AGENT_STATUS). */
 const AGENT_LOOK = Object.fromEntries(
@@ -159,6 +162,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const detail = await read($, detailShown)
   const isWebOpening = await read($, webOpening)
   const isWebHelp = await read($, webHelp)
+  const live = await read($, liveContext)
   const now = await $.clock.now()
 
   if (state.fetchedAt === 0 && !state.error) {
@@ -369,6 +373,38 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
 
   const summaryOf = (track: Track | undefined, one: Session) => cardSummary(track, words[one.id])
 
+  // The last resort of the PM's context (T-48): its compaction and its own hand-over both failed. One plain sentence
+  // and one button; what it changes is said under it, and once pressed it can be undone.
+  const compactButton = (track: Track | undefined) => {
+    if (track?.autoCompactSet) {
+      return (
+        <Box key="autocompact" flexDirection="row" flexWrap="wrap" columnGap="sm" rowGap="xs" alignItems="center">
+          <Text size="caption" dimColor>
+            {t('context.buttonDone')}
+          </Text>
+          <Button key="autocompact:undo" plain dimColor label={t('context.buttonUndo')} onPress={() => pressed(undoAutoCompact)} />
+        </Box>
+      )
+    }
+    if (!needsButton(track)) return null
+
+    return (
+      <Box key="autocompact" flexDirection="column" rowGap="xs">
+        <Box flexDirection="row">
+          <Button key="autocompact:set" variant="primary" label={t('context.button')} onPress={() => pressed(setAutoCompact)} />
+        </Box>
+        <Text size="caption" dimColor wrap="wrap">
+          {t('context.buttonScope', { project: self?.projectName ?? '' })}
+        </Text>
+      </Box>
+    )
+  }
+  const pressed = async (act: (engine: EngineInterface) => Promise<string>) => {
+    const text = await act($)
+    const isBad = text.startsWith(t('context.buttonFailed', { reason: '' }).trim())
+    await update($, notice, () => ({ tone: isBad ? 'bad' : 'good', text }))
+  }
+
   const card = (one: Session) => {
     const status = statusOfOne(one)
     const look = STATUS[status]
@@ -388,6 +424,9 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
       .filter(Boolean)
       .join(t('list.joiner'))
     const current = left.find(s => s.status === 'in_progress') ?? left[0]
+    // Its context, idle time and what waking it costs (T-48); the PM's, its last compaction too.
+    const context = contextLine(one, track, live[one.id], now)
+    const compacted = isPm ? compactedLine(track) : null
 
     return (
       <Box
@@ -417,6 +456,16 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
           </Text>
           {meta.length > 0 && <Text dimColor>{`　·　${meta.join('　·　')}`}</Text>}
         </Text>
+        {context && (
+          <Text key={`context:${one.id}`} size="footnote" dimColor tabular wrap="truncate-end">
+            {context}
+          </Text>
+        )}
+        {compacted && (
+          <Text key={`compacted:${one.id}`} size="footnote" dimColor tabular wrap="truncate-end">
+            {compacted}
+          </Text>
+        )}
         {plan.length > 0 && svg(`steps:${one.id}`, stepsSvg(plan, look.hex), t('pane.steps', { done: plan.length - left.length, total: plan.length }))}
         {current && (
           <Text size="footnote" wrap="truncate-end" color={status === 'open' ? 'claude' : undefined}>
@@ -451,6 +500,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
             {detail.text}
           </Text>
         )}
+        {isPm && self?.id === one.id && compactButton(track)}
         {archiveControls(one, status, warn)}
       </Box>
     )

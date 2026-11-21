@@ -73,7 +73,10 @@ for (const lang of LANGS) {
       assert.equal(refused.isError, false)
       assert.ok(refused.content[0]!.text.startsWith(t('ledger.qaNone', { code: 'T-01' }).slice(0, 12)), refused.content[0]!.text)
       const closed = await call('ledger', { action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'agent:qa1' })
-      assert.equal((closed.structuredContent!.item as { status: string }).status, 'done')
+      // An update answers in one line; its structured part is the item's id and revisions alone (T-48).
+      assert.deepEqual(Object.keys(closed.structuredContent!).sort(), ['id', 'rev', 'revision'])
+      const listed = await call('ledger', { action: 'list', id: 1 })
+      assert.equal((listed.structuredContent!.item as { status: string }).status, 'done')
       const board = await call('board', { include_done: true })
       assert.deepEqual(board.structuredContent!.progress, { done: 1, total: 1 })
       assert.ok(board.content[0]!.text.includes('Add the Acme coupon field'))

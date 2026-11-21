@@ -51,6 +51,8 @@ import { READ_ONLY_TYPES, briefOf, itemOf } from './agents'
 import { isQaDescription } from './qa'
 import { getLang, resolveLang, setLang, systemLocale, t } from './messages'
 import { reloadIfUpdated } from './update'
+import { getThresholds, handoverFromOf, parseThresholds, setThresholds, thresholdsWords } from './context'
+import { afterStartSession, afterTurn, claimHandover, compactedSizes, heldSendReason, noteSubmit, quotaRound, quotaSections, recordCompaction } from './quota'
 import { renderBand, renderPane } from './view'
 
 // The engine reads each module's state refs from its own source: these name the same values as the other modules'.
@@ -64,6 +66,32 @@ const LANGUAGE_ROW = 'project-pm.language'
 
 /** The `/config` row of the `guidelines` option: the path of the development guidelines, empty for none. */
 const GUIDELINES_ROW = 'project-pm.guidelines'
+
+/** The `/config` row of the `context` option: the hand-over and compaction thresholds ("200k 300k"), empty for the defaults. */
+const CONTEXT_ROW = 'project-pm.context'
+
+/**
+ * `/pm context <handoff> <compact>` sets the thresholds (saved as the `context` option), `/pm context default` puts the
+ * defaults back, and `/pm context` alone says what they are.
+ */
+async function changeContext($: EngineInterface, args: string): Promise<string> {
+  const parsed = parseThresholds(args)
+  if ('show' in parsed || 'error' in parsed) return t('context.usage', { now: thresholdsWords(getThresholds()) })
+  const value = 'set' in parsed ? thresholdsWords(parsed.set) : ''
+  setThresholds(value)
+  let failure: string | null = null
+  try {
+    const result = await $.config.set({ key: CONTEXT_ROW, value })
+    if ('deny' in result && result.deny) failure = result.deny
+  } catch (err) {
+    failure = reason(err)
+  }
+  if (failure !== null) return t('context.notSaved', { reason: failure })
+  const now = getThresholds()
+  const words = { handoff: thresholdsWords(now).split(' ')[0]!, compact: thresholdsWords(now).split(' ')[1]! }
+
+  return 'set' in parsed ? t('context.set', words) : t('context.reset', words)
+}
 
 /** The `guidelines` option as this copy of the module was loaded with it, or as /pm guidelines just set it. */
 let guidelinesOption = ''
@@ -211,6 +239,7 @@ async function start($: EngineInterface) {
   // A round still running when its copy of the module goes (a reload) has nowhere left to report.
   $.clock.every(POLL_MS, () => void keepBoard($, 'poll')
     .then(() => refresh($))
+    .then(() => quotaRound($))
     .then(() => reloadIfUpdated($))
     .catch(() => undefined))
   refreshSoon($, 300)
@@ -224,6 +253,7 @@ export const register: Register = (on, options) => {
   // and a change to the option reloads the module.
   setLang(resolveLang(options.language, systemLocale()))
   guidelinesOption = typeof options.guidelines === 'string' ? options.guidelines : ''
+  setThresholds(options.context)
 
   on('session.start', async ($, e, next) => {
     await start($)
@@ -247,6 +277,10 @@ export const register: Register = (on, options) => {
       }
     }
     if (!e.command && !e.isMeta) lastOwnPrompt = e.text
+    noteSubmit(e as unknown as Parameters<typeof noteSubmit>[0])
+    // The brief of a PM's own hand-over: this session takes the project over, when that PM started it (quota.ts).
+    const from = handoverFromOf(e.text)
+    if (from) await claimHandover($, from).catch(err => $.ui.log(`project-pm: ${reason(err)}`))
     // A new turn starts: last turn's recap and question no longer stand (a background wake-up included).
     if (!e.command) await changeMine($, t => ({ ...t, ask: null, recap: null, ...(e.isMeta ? {} : { lastPrompt: clip(e.text, 400) }) }))
     // A background command's notification: it has finished, one way or another.
@@ -386,6 +420,8 @@ export const register: Register = (on, options) => {
           // The title is a nicety.
         }
       }
+      // The context this turn left: the card's figure, the hand-over's and the PM's own compaction's (quota.ts).
+      await afterTurn($, e.usage).catch(err => $.ui.log(`project-pm: ${reason(err)}`))
       refreshSoon($, 500)
       // The PM hears of it now, not at its next poll.
       try {
@@ -396,6 +432,41 @@ export const register: Register = (on, options) => {
     }
 
     return next(e)
+  })
+
+  // A compaction of the main conversation, any trigger: the PM's summary keeps what it needs, and the size it left is
+  // recorded (quota.ts). A failure to record never stops the compaction or runs it twice.
+  on('session.compact', async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e)
+    let input = e
+    try {
+      if ((await read($, me))?.isPm && !e.instructions?.trim()) input = { ...e, instructions: t('context.compactInstructions') }
+    } catch {
+      input = e
+    }
+    const result = await next(input)
+    const sizes = compactedSizes(result)
+    if (sizes) await recordCompaction($, sizes.tokensBefore, sizes.tokensAfter, e.trigger).catch(() => undefined)
+
+    return result
+  })
+
+  // The PM's message to an idle session that is costly to wake waits once, for the PM to weigh it (quota.ts).
+  on('tool.call', { tool: 'SendMessage' }, async ($, e, next) => {
+    if (e.agentId === undefined) {
+      const held = await heldSendReason($, e as unknown as Record<string, unknown>)
+      if (held) return { deny: held }
+    }
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // The PM's start_session: a hand-over the app would not start is kept for the person's next message (quota.ts).
+  on('tool.call', { tool: 'mcp__ccd_session__start_session' }, async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId === undefined) await afterStartSession($, e as unknown as Record<string, unknown>, result).catch(err => $.ui.log(`project-pm: ${reason(err)}`))
+
+    return result
   })
 
   on('tool.call', { tool: REPORT_TOOL }, async ($, e, next) => {
@@ -479,22 +550,26 @@ export const register: Register = (on, options) => {
       const ask = await deliveryAsk($)
       if (!self || !ask) return composed
       const rules = await guidelinesSection($, self)
+      const quota = await quotaSections($).catch(() => [])
 
       return {
         sections: [
           ...composed.sections,
           { id: 'project-pm:delivery', text: ask, scope: 'session' as const },
           ...(rules ? [{ id: 'project-pm:guidelines', text: rules, scope: 'session' as const }] : []),
+          ...quota,
         ],
       }
     }
     const rules = await guidelinesSection($, self)
+    const quota = await quotaSections($).catch(() => [])
 
     return {
       sections: [
         ...composed.sections,
         { id: 'project-pm:role', text: ROLE(self), scope: 'session' as const },
         ...(rules ? [{ id: 'project-pm:guidelines', text: rules, scope: 'session' as const }] : []),
+        ...quota,
       ],
     }
   })
@@ -506,6 +581,8 @@ export const register: Register = (on, options) => {
     if (lang) return { text: await changeLanguage($, lang[1] ?? '') }
     const rules = /^\s*(?:guidelines?|rules|準則)(?:\s+([\s\S]+))?$/i.exec(e.args)
     if (rules) return { text: await changeGuidelines($, rules[1] ?? '') }
+    const context = /^\s*(?:context|上下文|門檻)(?:\s+([\s\S]+))?$/i.exec(e.args)
+    if (context) return { text: await changeContext($, context[1] ?? '') }
     const text = await claim($)
     const self = await read($, me)
     if (!self?.isPm) return { text }

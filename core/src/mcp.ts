@@ -103,7 +103,11 @@ export function toolDefinitions(env: NodeJS.ProcessEnv = process.env) {
       description: ct('tool.pm.description'),
       inputSchema: {
         type: 'object',
-        properties: { action: { type: 'string', enum: ['claim', 'release', 'status'], description: ct('tool.pm.action') }, project: project() },
+        properties: {
+          action: { type: 'string', enum: ['claim', 'release', 'status'], description: ct('tool.pm.action') },
+          project: project(),
+          handover_from: { type: 'string', description: ct('tool.pm.handoverFrom') },
+        },
         required: ['action'],
       },
       outputSchema: OBJECT,

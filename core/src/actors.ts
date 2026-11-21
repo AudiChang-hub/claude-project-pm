@@ -50,6 +50,7 @@ export function trackOf(actor: Actor): Track {
     ...(actor.background ? { background: actor.background } : {}),
     ...(actor.agents ? { agents: actor.agents } : {}),
     ...(actor.report ? { report: actor.report, reportAt: actor.reportAt ?? actor.lastSeenAt } : {}),
+    ...(actor.context ? { context: actor.context } : {}),
   }
 }
 

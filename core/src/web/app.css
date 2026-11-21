@@ -627,6 +627,14 @@ ol {
   -webkit-box-orient: vertical;
   overflow-wrap: anywhere;
 }
+.scard__context {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .scard__current {
   font-size: 13px;
   color: var(--ink-2);

@@ -449,6 +449,9 @@
     head.append(mark(one.hex, false, one.status === 'running'), el('span', 'scard__title', one.title), el('span', 'card__time', words.ago(Date.now() - one.at)))
     const meta = [one.stepsText, one.untracked ? words.untracked : '']
     li.append(head, statusLine(one.label, one.look, meta))
+    // Its context, idle time and what waking it costs (T-48); the PM's card, its last compaction too.
+    if (one.context) li.append(el('p', 'scard__context', one.context))
+    if (one.compacted) li.append(el('p', 'scard__context', one.compacted))
     if (one.steps.length) li.append(stepsBar(one.steps, one.hex))
     if (one.current) li.append(el('p', `scard__current${one.status === 'open' ? ' is-open' : ''}`, one.current))
     if (one.caveat) {

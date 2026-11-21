@@ -2083,7 +2083,9 @@ test('the ledger answers with what changed, lists open items by default, and sho
   const added = await ledger({ action: 'add', text: '匯出 CSV' })
   expect(added.split('\n')).toEqual(['已新增工作項目 T-31（id 31）。', 'T-31 (id 31) [open] 匯出 CSV｜負責：未指派'])
   const updated = await ledger({ action: 'update', id: 26, note: '進行中' })
-  expect(updated.split('\n')).toEqual(['已更新工作項目 T-26。', 'T-26 (id 26) [open] 工作項目 26｜負責：未指派｜備註：進行中'])
+  // An update answers in one line, with the fields it changed (T-48); the item itself is the list's to show.
+  expect(updated).toBe('已更新工作項目 T-26（note）。')
+  expect(await ledger({ action: 'list', id: 26 })).toMatch(/^T-26 \(id 26\) \[open\] 工作項目 26｜負責：未指派｜備註：進行中$/m)
   expect(await ledger({ action: 'update', id: 99 })).toBe('找不到工作項目 id 99。')
   // A refusal: the reason and the item, nothing else.
   const refused = await ledger({ action: 'update', id: 30, status: 'done' })
@@ -2510,10 +2512,12 @@ const QA_WORDS = {
     needsBy: /^qa 為 pass 或 fail 時要填 qa_by/,
     needsNote: /^qa 為 skip 時要在 qa_note 寫理由/,
     byOwner: /^驗收者不能是負責人（local_open），這次沒有修改。派一個獨立的「T-01 QA」Agent 驗收。/,
-    updated: /^已更新工作項目 T-01。\nT-01 \(id 1\) \[open\] 清單批次修改｜負責：local_open｜QA 不通過（agent:q1，於 3fa1c2e）$/,
+    updated: /^已更新工作項目 T-01（qa）。$/,
+    updatedRow: /^T-01 \(id 1\) \[open\] 清單批次修改｜負責：local_open｜QA 不通過（agent:q1，於 3fa1c2e）$/m,
     failed: /- \[QA 不通過\] T-01「清單批次修改」：沒有重現測試（agent:q1）/,
     refusedFail: /^無法將 T-01 標記為完成：驗收不通過（沒有重現測試）。交回負責人修正/,
-    closed: /^已更新工作項目 T-01。\nT-01 \(id 1\) \[done\] 清單批次修改｜負責：local_open｜QA 通過（agent:q2，於 3fa1c2e）｜驗收條件：批次改價後列表即時更新$/,
+    closed: /^已更新工作項目 T-01（status、criteria、qa）。$/,
+    closedRow: /^T-01 \(id 1\) \[done\] 清單批次修改｜負責：local_open｜QA 通過（agent:q2，於 3fa1c2e）｜驗收條件：批次改價後列表即時更新$/m,
     skipped: /\[done\] 文件錯字｜負責：未指派｜QA 略過：只改文件/,
     paneAwaiting: '1 項待 QA',
     paneFailed: '1 項 QA 不通過',
@@ -2529,10 +2533,12 @@ const QA_WORDS = {
     needsBy: /^qa pass or fail needs qa_by/,
     needsNote: /^qa skip needs its reason in qa_note/,
     byOwner: /^Whoever checks an item may not be its owner \(local_open\); nothing was changed\. Start an independent "T-01 QA" agent\./,
-    updated: /^Updated work item T-01\.\nT-01 \(id 1\) \[open\] Batch edit \| owner: local_open \| QA failed \(agent:q1 at 3fa1c2e\)$/,
+    updated: /^Updated work item T-01 \(qa\)\.$/,
+    updatedRow: /^T-01 \(id 1\) \[open\] Batch edit \| owner: local_open \| QA failed \(agent:q1 at 3fa1c2e\)$/m,
     failed: /- \[QA failed\] T-01 "Batch edit": 沒有重現測試 \(agent:q1\)/,
     refusedFail: /^Cannot mark T-01 done: it failed QA \(沒有重現測試\)\. Hand it back to its owner/,
-    closed: /^Updated work item T-01\.\nT-01 \(id 1\) \[done\] Batch edit \| owner: local_open \| QA passed \(agent:q2 at 3fa1c2e\) \| criteria: 批次改價後列表即時更新$/,
+    closed: /^Updated work item T-01 \(status, criteria, qa\)\.$/,
+    closedRow: /^T-01 \(id 1\) \[done\] Batch edit \| owner: local_open \| QA passed \(agent:q2 at 3fa1c2e\) \| criteria: 批次改價後列表即時更新$/m,
     skipped: /\[done\] Typo in docs \| owner: unassigned \| QA skipped: 只改文件/,
     paneAwaiting: '1 awaiting QA',
     paneFailed: '1 failed QA',
@@ -2593,6 +2599,8 @@ async function qaGate($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en') {
 
   // A failed verdict is kept and shown; the item stays open.
   expect(await ledger({ action: 'update', id: 1, qa: 'fail', qa_by: 'agent:q1', qa_note: '沒有重現測試' })).toMatch(w.updated)
+  // The reply is one line (T-48); the whole row is the list's to show.
+  expect(await ledger({ action: 'list', id: 1 })).toMatch(w.updatedRow)
   expect(saved()[0]!.qa).toEqual({ result: 'fail', by: 'agent:q1', at: NOW + 61_000, note: '沒有重現測試', commit: '3fa1c2e' })
   text = await board()
   expect(text).toMatch(w.failed)
@@ -2609,6 +2617,7 @@ async function qaGate($: Parameters<TestBody>[0], on: On, lang: 'zh' | 'en') {
 
   // Passed by someone else, criteria written, and closed in one call.
   expect(await ledger({ action: 'update', id: 1, qa: 'pass', qa_by: 'agent:q2', criteria: '批次改價後列表即時更新', status: 'done' })).toMatch(w.closed)
+  expect(await ledger({ action: 'list', id: 1 })).toMatch(w.closedRow)
   expect(saved()[0]).toMatchObject({ status: 'done', criteria: '批次改價後列表即時更新', qa: { result: 'pass', by: 'agent:q2' } })
   // Skipped for a reason: the PM's own word closes it.
   await ledger({ action: 'update', id: 2, qa: 'skip', qa_note: '只改文件', status: 'done' })
@@ -2935,7 +2944,7 @@ async function prunedAgentOwner($: Parameters<TestBody>[0], on: On, lang: 'zh' |
   await ui.unmount()
   // Delivered for the close as well: once it passes QA it closes, with no force needed.
   const closed = String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'update', id: 1, qa: 'pass', qa_by: 'agent:q1', status: 'done' } as never)) as { result?: unknown }).result)
-  expect(closed).toMatch(lang === 'zh' ? /^已更新工作項目 T-01。/ : /^Updated work item T-01\./)
+  expect(closed).toBe(lang === 'zh' ? '已更新工作項目 T-01（status、qa）。' : 'Updated work item T-01 (status, qa).')
   expect(JSON.parse(files.get(PROJECT_FILE)!).ledger[0]).toMatchObject({ status: 'done', qa: { result: 'pass' } })
 }
 

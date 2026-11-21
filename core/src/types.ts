@@ -54,5 +54,7 @@ export type Actor = {
   agents?: AgentRecord[]
   report?: Report
   reportAt?: number
+  /** The context its last main-loop request read (the Stop hook, from the transcript's tail: T-48), and when. */
+  context?: { tokens: number; at: number }
 }
 

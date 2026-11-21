@@ -139,7 +139,7 @@ PM 請你交接時，照交接範本寫筆記（{template}），回報第一行 
   'notice.archived': '已封存「{title}」，可於側欄的封存區復原。',
 
   // Commands.
-  'command.pm': '指定此 Session 為專案 PM（/pm off 卸任，/pm lang en|zh-TW|auto 切換語言，/pm guidelines <檔案> 設定開發準則）',
+  'command.pm': '指定此 Session 為專案 PM（/pm off 卸任，/pm lang en|zh-TW|auto 切換語言，/pm guidelines <檔案> 設定開發準則，/pm context 看交接與壓縮門檻）',
   'guidelines.section': '# 開發準則\n\n以下是使用者為有 PM 的專案設定的開發準則（{file}）。在「{project}」做事時一律遵守：\n\n- 使用者的要求不符合準則時，先不要做。說明違反哪一條、照準則該怎麼做，再問使用者這次是否要例外執行；得到明確同意才照做。\n- 例外只算這一次：做完就回到準則。之後再有類似的要求要重新問，不能把之前的同意當成慣例或新規則。\n- 不要修改準則檔，也不要自己放寬或重新解讀準則。只有使用者明確要求修改準則時才改。',
   'guidelines.pm': '你是 PM，準則中由協調者負責的事由你執行，例如分配版號、安排推版和部署的順序、依完成定義判斷工作是否完成。使用者同意的例外，要記在對應工作項目的備註（例：「例外：…，使用者已同意，僅此一次」）。子 Session 的回報或做法違反準則、又沒有使用者同意的例外時，向使用者指出是哪一條。',
   'guidelines.locked': '這是開發準則檔（{file}），已擋下這次修改。準則只有在使用者明確要求修改準則時才能改：先問使用者是否要修改準則、改哪一條；使用者在訊息中要求修改準則後，再改一次。',
@@ -425,8 +425,12 @@ PM 請你交接時，照交接範本寫筆記（{template}），回報第一行 
   'context.buttonScope': '會在「{project}」資料夾的 .claude/settings.local.json 設定自動整理門檻 30 萬，影響在這個資料夾開的所有 Session。',
   'context.buttonDone': '已設定：之後 Claude Code 會在 30 萬時自動整理對話。',
   'context.buttonFailed': '沒有設定成功：{reason}',
-  'board.attention.handingOver': '[交接中] {name} 上下文 {tokens}：等它寫好筆記',
-  'board.attention.handoffPending': '[待開交接] 「{title}」的筆記好了，下一輪開新 Session',
+  'context.buttonUnreadable': '{path} 不是能讀懂的 JSON，沒有改它',
+  'context.buttonUndo': '復原這個設定',
+  'context.buttonUndone': '已復原：settings.local.json 回到按之前的內容。',
+  'context.pendingItem': '- 「{title}」：{prompt}',
+  'board.attention.handingOver': '- [交接中] {name} 上下文 {tokens}：等它寫好筆記',
+  'board.attention.handoffPending': '- [待開交接] 「{title}」的筆記好了，下一輪開新 Session',
   'handover.template': '第一行 `[交接, <最新 sha>] <一句話>`；分支、最新 commit、工作樹是否乾淨；已完成（每個里程碑一行：代號、sha、一句話）；進行中（做到哪、下一步具體到檔案和函式）；待決定；已查證的事實（附依據）；陷阱（試過不行的做法）；驗證（要跑的指令和該看的 exit code）。150 行以內，細節放報告檔，筆記只放路徑',
 } as const
 
@@ -558,7 +562,7 @@ Delivery: pending (what it waits on)`,
   'notice.notArchived': '"{title}" was not archived: {why}',
   'notice.archived': 'Archived "{title}"; restore it from the archive in the sidebar.',
 
-  'command.pm': 'Make this session the project PM (/pm off to step down, /pm lang en|zh-TW|auto for the language, /pm guidelines <file> for development guidelines)',
+  'command.pm': 'Make this session the project PM (/pm off to step down, /pm lang en|zh-TW|auto for the language, /pm guidelines <file> for development guidelines, /pm context for the hand-over and compaction thresholds)',
   'guidelines.section': '# Development guidelines\n\nThese are the development guidelines the user set for projects with a PM ({file}). Follow them in all your work on "{project}":\n\n- When a request does not meet the guidelines, do not carry it out yet. Say which guideline it breaks and what the guidelines call for, then ask the user whether to make an exception this time; go ahead only on their clear yes.\n- An exception covers that one request: once it is done, the guidelines apply again. Ask again for a similar request later; an earlier yes is never a precedent or a new rule.\n- Do not edit the guidelines file, and do not loosen or reinterpret the guidelines yourself. Change them only when the user explicitly asks to change the guidelines.',
   'guidelines.pm': 'As the PM, you carry out what the guidelines leave to a coordinator, such as assigning version numbers, ordering pushes and deployments, and judging by their definition of done whether work is finished. Note each exception the user approves on its work item (for example "Exception: …, approved by the user, this time only"). When a session\'s report or work breaks a guideline with no exception the user approved, point out to the user which one.',
   'guidelines.locked': 'This is the development guidelines file ({file}); the edit was blocked. The guidelines change only when the user explicitly asks to change them: ask the user whether they want the guidelines changed, and which rule; once their message asks for the change, edit again.',
@@ -839,8 +843,12 @@ A check you could not make (no tool to see the screen, say) goes in your reply, 
   'context.buttonScope': 'This sets an automatic compaction threshold of 300k in the .claude/settings.local.json of the "{project}" folder, for every session opened in this folder.',
   'context.buttonDone': 'Done: Claude Code now compacts the conversation at 300k by itself.',
   'context.buttonFailed': 'That did not work: {reason}',
-  'board.attention.handingOver': '[Handing over] {name} context {tokens}: waiting for its notes',
-  'board.attention.handoffPending': '[Hand-over to start] The notes of "{title}" are ready: start the new session next turn',
+  'context.buttonUnreadable': '{path} is not JSON it can read, so it was left alone',
+  'context.buttonUndo': 'Undo this setting',
+  'context.buttonUndone': 'Undone: settings.local.json is back as it was before the button.',
+  'context.pendingItem': '- "{title}": {prompt}',
+  'board.attention.handingOver': '- [Handing over] {name} context {tokens}: waiting for its notes',
+  'board.attention.handoffPending': '- [Hand-over to start] The notes of "{title}" are ready: start the new session next turn',
   'handover.template': 'first line `[handover, <latest sha>] <one sentence>`; branch, latest commit, whether the work tree is clean; done (one line per milestone: code, sha, one sentence); in progress (where it stands, the next step down to the file and function); to decide; verified facts (with their sources); traps (what was tried and did not work); verify (the commands to run and the exit codes to check). At most about 150 lines: details go in a report file, the notes only give its path',
 }
 

@@ -63,6 +63,7 @@ import { callCore, coreHome, hasCore, mergedProject, trackWithReport } from './c
 import type { CoreActor } from './core'
 import type { CiRun, Project, Status } from './sessions'
 import { t } from './messages'
+import { getThresholds } from './context'
 
 // The engine reads each module's state refs from its own source: these name the same values as the other modules'.
 const me = atom({ plugin: 'project-pm', key: 'me' } as const, null as Me | null)
@@ -78,6 +79,7 @@ const notice = atom({ plugin: 'project-pm', key: 'notice' } as const, null as No
 const isBandHidden = atom({ plugin: 'project-pm', key: 'isBandHidden' } as const, false)
 const scope = atom({ plugin: 'project-pm', key: 'scope' } as const, 'project' as Scope)
 const agents = atom({ plugin: 'project-pm', key: 'agents' } as const, [] as AgentRecord[])
+const liveContext = atom({ plugin: 'project-pm', key: 'liveContext' } as const, {} as Record<string, { tokens: number; at: number }>)
 
 export const MGMT = 'ccd_session_mgmt'
 export const STARTER = 'ccd_session'
@@ -1213,10 +1215,10 @@ export async function usesCore($: EngineInterface): Promise<boolean> {
  * false when the core is not there or did not answer, and the mod writes its own copy instead, which the core reads
  * (E1). Afterwards the project is read again.
  */
-async function pmThroughCore($: EngineInterface, self: Me, action: 'claim' | 'release'): Promise<ProjectFile | null> {
+async function pmThroughCore($: EngineInterface, self: Me, action: 'claim' | 'release', handoverFrom?: string): Promise<ProjectFile | null> {
   if (!(await usesCore($))) return null
   try {
-    await callCore($, 'pm', { action, project: self.projectPath })
+    await callCore($, 'pm', { action, project: self.projectPath, ...(handoverFrom ? { handover_from: handoverFrom } : {}) })
   } catch (err) {
     $.ui.log(`project-pm: ${reason(err)}`)
 
@@ -1228,13 +1230,14 @@ async function pmThroughCore($: EngineInterface, self: Me, action: 'claim' | 're
   return project
 }
 
-export async function claim($: EngineInterface): Promise<string> {
+/** Makes this session the project's PM; `handoverFrom`: the old PM it takes over from (its own hand-over, T-48). */
+export async function claim($: EngineInterface, handoverFrom?: string): Promise<string> {
   const self = await identify($)
   if (!self?.id) return t('claim.noId')
   if (self.isScratch) return t('claim.scratch')
   const project = await loadProject($, self.projectKey, self.projectName, self.projectPath)
   const before = project.pmId
-  const viaCore = await pmThroughCore($, self, 'claim')
+  const viaCore = await pmThroughCore($, self, 'claim', handoverFrom)
   // Without the core, or a core that named this session otherwise (it saw no desktop id): the mod's copy, written last,
   // names the PM for both (mergeLegacy).
   if (!viaCore || !isSelf(viaCore.pmId, self)) await saveProject($, { ...(viaCore ?? project), pmId: self.id, isDismissed: false })
@@ -1336,6 +1339,7 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
   const files = await read($, projects)
   const now = await $.clock.now()
   const isIncludingDone = input.include_done === true
+  const live = await read($, liveContext)
   const groups = groupProjects(state.list)
   const chosen: Project[] =
     input.scope === 'all' || !self
@@ -1357,6 +1361,9 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
         agents: self?.isPm && p.key === self.projectKey ? agentRecords() : undefined,
         now,
         isIncludingDone,
+        live,
+        thresholds: getThresholds(),
+        pmId: files[p.key]?.pmId ?? null,
       }),
     )
     .join('\n\n---\n\n')

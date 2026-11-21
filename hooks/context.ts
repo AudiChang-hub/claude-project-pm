@@ -1,9 +1,10 @@
 // Context size and quota (T-48, M8): what each session's context holds, what waking it costs, when the PM compacts
 // itself and when a session hands over. Pure functions: the hooks (register.tsx) and the board (sessions.ts) use them.
 
-import type { Session, Track } from '../types'
+import type { LedgerItem, Session, Track } from '../types'
 
 import { getLang, t } from './messages'
+import { isSameId } from './qa'
 
 /** A session hands over at this context (tokens): about where the next turns start to cost more than a fresh start. */
 export const HANDOFF_AT = 200_000
@@ -30,6 +31,17 @@ export const COMPACT_DELAY_MS = 2_000
 export type Thresholds = { handoff: number; compact: number }
 export const DEFAULT_THRESHOLDS: Thresholds = { handoff: HANDOFF_AT, compact: COMPACT_AT }
 
+/** The thresholds this copy of the module runs with: the `context` option (or the core's config), else the defaults. */
+let thresholds: Thresholds = DEFAULT_THRESHOLDS
+
+export function setThresholds(value: unknown) {
+  thresholds = thresholdsOf(value)
+}
+
+export function getThresholds(): Thresholds {
+  return thresholds
+}
+
 /** A context size and when it was measured, ms. */
 export type ContextMark = { tokens: number; at: number }
 
@@ -53,11 +65,23 @@ export function tokensText(tokens: number): string {
   return `${Math.round(tokens / 1_000)}k`
 }
 
-/** What waking a session costs, in input-equivalent tokens: compacted, the compacted size stands for its context. */
-export function wakeCost(tokens: number, idleMs: number, compactedTo?: number): number {
-  const size = typeof compactedTo === 'number' && compactedTo > 0 ? Math.min(compactedTo, tokens) : tokens
+/**
+ * What waking a session costs, in input-equivalent tokens: past the hour the cache holds, its whole context is written
+ * again (× WAKE_COLD); within it, read from the cache (× WAKE_WARM). `tokens` is what it holds now (effectiveTokens).
+ */
+export function wakeCost(tokens: number, idleMs: number): number {
+  return Math.round(tokens * (idleMs > CACHE_MS ? WAKE_COLD : WAKE_WARM))
+}
 
-  return Math.round(size * (idleMs > CACHE_MS ? WAKE_COLD : WAKE_WARM))
+/**
+ * The context a session holds now: the size its last compaction left (the PM's, /compact, Claude Code's idle one) when
+ * that came after the figure was measured, else the figure. An older compaction says nothing of a context grown since.
+ */
+export function effectiveTokens(mark: ContextMark, track: Track | undefined): number {
+  const compacted = track?.compactedTo
+  if (typeof compacted === 'number' && compacted > 0 && (track?.compactedAt ?? 0) >= mark.at) return Math.min(compacted, mark.tokens)
+
+  return mark.tokens
 }
 
 /**
@@ -92,10 +116,11 @@ export function idleText(ms: number): string {
 export function contextLine(one: Pick<Session, 'isRunning' | 'lastActivityAt'>, track: Track | undefined, live: ContextMark | undefined, now: number): string | null {
   const mark = contextOf(track, live)
   if (!mark) return null
-  const size = t('context.size', { tokens: tokensText(mark.tokens) })
+  const tokens = effectiveTokens(mark, track)
+  const size = t('context.size', { tokens: tokensText(tokens) })
   if (one.isRunning) return `${size}${t('context.joiner')}${t('context.running')}`
   const idle = idleOf(one, track, now)
-  const wake = wakeCost(mark.tokens, idle, track?.compactedTo)
+  const wake = wakeCost(tokens, idle)
 
   return [size, t('context.idle', { time: idleText(idle) }), t('context.wake', { tokens: tokensText(wake) })].join(t('context.joiner'))
 }
@@ -122,9 +147,10 @@ export function tokensOf(word: string): number | null {
 export function parseThresholds(args: string): { show: true } | { reset: true } | { set: Thresholds } | { error: true } {
   const words = args.trim().split(/\s+/).filter(Boolean)
   if (words.length === 0) return { show: true }
-  if (words.length === 1 && /^(default|reset|預設|恢復)$/i.test(words[0])) return { reset: true }
+  if (words.length === 1 && /^(default|reset|預設|恢復)$/i.test(words[0]!)) return { reset: true }
   if (words.length !== 2) return { error: true }
-  const [handoff, compact] = words.map(tokensOf)
+  const handoff = tokensOf(words[0]!)
+  const compact = tokensOf(words[1]!)
   if (handoff === null || compact === null) return { error: true }
   if ([handoff, compact].some(n => n < CONTEXT_MIN || n > CONTEXT_MAX)) return { error: true }
 
@@ -168,11 +194,8 @@ export function shouldCompact(tokens: number, threshold: number, failedAt: numbe
  */
 export function needsHandoff(mark: ContextMark | null, track: Track | undefined, threshold: number, hasWork: boolean): boolean {
   if (!mark || !hasWork) return false
-  const compacted = track?.compactedTo
-  const isCompactedSince = typeof compacted === 'number' && (track?.compactedAt ?? 0) >= mark.at
-  const tokens = isCompactedSince ? compacted : mark.tokens
 
-  return tokens >= threshold
+  return effectiveTokens(mark, track) >= threshold
 }
 
 /** The key the PM's held SendMessage is remembered by: the same message to the same session. */
@@ -218,4 +241,50 @@ export function withoutAutoCompact(text: string, previous: number | string | nul
 
   // The button writes the key first, with a comma after it when other keys follow.
   return text.replace(/\r?\n[ \t]*"autoCompactWindow"\s*:\s*(?:"[^"]*"|-?\d+(?:\.\d+)?),?/, '')
+}
+
+// ── Hand-over and the person's own turns ──
+
+/** Opens the brief of a PM's own hand-over: the new session claims the PM on it, when the old PM started it. */
+export function handoverMarker(pmId: string): string {
+  return `[project-pm:handover-from ${pmId}]`
+}
+
+/** The old PM a brief names (`[project-pm:handover-from local_…]`), or null. */
+export function handoverFromOf(text: string): string | null {
+  const m = /\[project-pm:handover-from\s+([^\]\s]+)\]/.exec(text)
+
+  return m ? m[1]! : null
+}
+
+/** Whether a prompt is the person's own message: not a command, a meta row, a plugin's wake-up, a notification or another session's message. */
+export function isUserPrompt(e: { text: string; isMeta?: boolean; command?: unknown; origin?: { kind?: string } }): boolean {
+  return !e.isMeta && !e.command && e.origin?.kind !== 'plugin' && !e.text.trimStart().startsWith('<')
+}
+
+/** The session a start_session answer names (local_…), or null when it started none. */
+export function startedIdOf(text: string): string | null {
+  return /\blocal_[0-9a-z][\w-]*/i.exec(text)?.[0] ?? null
+}
+
+/** Whether a brief hands work over: it says so, in either language. */
+export function isHandoverBrief(prompt: string): boolean {
+  return /hand-?over|交接/i.test(prompt)
+}
+
+/** Where the PM writes its own hand-over notes: the reports folder, by project and time. */
+export function pmHandoverPath(dataDir: string, project: string, now: number): string {
+  const folder = project.replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '-').trim() || 'project'
+
+  return `${dataDir}/reports/${folder}/pm-handover-${new Date(now).toISOString().replace(/[:.]/g, '-')}.md`
+}
+
+/**
+ * Whether a session still has work to hand over: steps left on its task list, or an open work item it owns that it has
+ * not reported done (one that delivered waits on QA, not on more of its context).
+ */
+export function hasWorkLeft(id: string, track: Track | undefined, ledger: readonly LedgerItem[]): boolean {
+  if ((track?.plan ?? []).some(step => step.status !== 'completed')) return true
+
+  return ledger.some(item => item.status === 'open' && isSameId(item.owner, id)) && track?.report?.status !== 'done'
 }
