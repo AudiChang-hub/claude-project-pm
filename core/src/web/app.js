@@ -33,9 +33,9 @@
         return h < 48 ? `${h} h ago` : `${Math.round(h / 24)} days ago`
       },
       states: {
-        noToken: ['Open the board from your terminal', 'This page needs the address Project PM prints, with its key. Run:', 'git pm open'],
-        expired: ['This board link has expired', 'The board server restarted and its key changed. Run this in a terminal to open a fresh link:', 'git pm open'],
-        down: ['The board server does not answer', 'It stops after 30 minutes without use, or it was closed. Run this in a terminal to start it again:', 'git pm open'],
+        noToken: ['Open the board from Project PM', 'This page needs the link Project PM gives you, with its key: the address alone does not open it. In the desktop app, press “Open in browser” on the board pane, or ask the PM for “the board link”. In a terminal, run this in your project’s folder:', 'git pm open'],
+        expired: ['This board link has expired', 'The board server restarted and its key changed. In the desktop app, press “Open in browser” on the board pane again. In a terminal, run this in your project’s folder for a fresh link:', 'git pm open'],
+        down: ['The board server does not answer', 'It stops after 30 minutes without use, or it was closed. In the desktop app, press “Open in browser” on the board pane to start it again. In a terminal, run this in your project’s folder:', 'git pm open'],
         noProject: ['No project yet', 'Open your project in Claude Code and tell Claude: "Be the PM for this project." Once there is work to track, it shows up here.', ''],
       },
       retry: 'Try again',
@@ -69,9 +69,9 @@
         return h < 48 ? `${h} 小時前` : `${Math.round(h / 24)} 天前`
       },
       states: {
-        noToken: ['請從終端機打開看板', '這個頁面需要 Project PM 給的網址（含金鑰）。請在終端機執行：', 'git pm open'],
-        expired: ['這個看板連結已過期', '看板伺服器重新啟動過，金鑰換了。請在終端機執行下面的指令，打開新的連結：', 'git pm open'],
-        down: ['看板伺服器沒有回應', '它閒置 30 分鐘會自動停止，或已經被關掉。請在終端機執行下面的指令重新啟動：', 'git pm open'],
+        noToken: ['請從 Project PM 打開看板', '這個頁面需要 Project PM 給的連結（含金鑰），只輸入網址打不開。桌面版：按看板面板上的「在瀏覽器開啟」，或問 PM「看板網址」。終端機：在專案資料夾執行：', 'git pm open'],
+        expired: ['這個看板連結已過期', '看板伺服器重新啟動過，金鑰換了。桌面版：再按一次看板面板上的「在瀏覽器開啟」。終端機：在專案資料夾執行下面的指令，打開新的連結：', 'git pm open'],
+        down: ['看板伺服器沒有回應', '它閒置 30 分鐘會自動停止，或已經被關掉。桌面版：按看板面板上的「在瀏覽器開啟」重新啟動。終端機：在專案資料夾執行：', 'git pm open'],
         noProject: ['還沒有專案', '在 Claude Code 打開你的專案，跟 Claude 說：「請當這個專案的 PM」。有了要追蹤的工作，就會出現在這裡。', ''],
       },
       retry: '再試一次',

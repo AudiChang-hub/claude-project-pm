@@ -96,7 +96,11 @@ Every status, how delivery is judged, development guidelines and what the mod ke
 | `/pm lang en` · `zh-TW` · `auto` | Board and PM language; `auto` follows your system. |
 | `/pm guidelines <file>` · `off` | Gives the PM and its sessions your development rules. |
 
-**Two boards.** Claude Code desktop: the board is the pane on the right (the image at the top). Claude Code CLI: ask Claude to be the PM, then `project-pm open` opens this web board in your browser:
+**Two boards.** Claude Code desktop: the board is the pane on the right (the image at the top). The web board shows the same work in your browser, for the CLI or a second screen:
+
+- **Install the core first:** the Claude Code CLI step above (download, run it with `init` in your project's folder).
+- **Open it:** in the desktop app, press **Open in browser** at the bottom of the pane. In a terminal, run `git pm open` in your project's folder. Or ask the PM for "the board link".
+- **Typing `127.0.0.1:47130` alone shows an error page.** The board opens only from the link Project PM gives you, which carries a private key, so other programs on your computer cannot read it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/web-board-dark.png">

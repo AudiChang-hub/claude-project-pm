@@ -2,7 +2,7 @@
 // short label; numbers are tabular; actions stay out of sight until hovered.
 
 import { atom, read, update } from 'claude-code'
-import type { ElementConstructor, EngineInterface, RenderInputOf, RenderSurface, SvgProps } from 'claude-code'
+import type { ElementConstructor, EngineInterface, LinkProps, RenderInputOf, RenderSurface, SvgProps } from 'claude-code'
 
 import type { AgentRecord, AgentState, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Step, Track } from '../types'
 import { agentName } from './agents'
@@ -12,6 +12,7 @@ import type { OpenKind, QaShown } from './qa'
 import type { Project, Status } from './sessions'
 import { archive, claim, dismissBand, refresh, startPmSession } from './actions'
 import { t } from './messages'
+import { RELEASES_URL, openWebBoard } from './webboard'
 
 // The engine reads each module's state refs from its own source: these name the same values as the other modules'.
 const me = atom({ plugin: 'project-pm', key: 'me' } as const, null as Me | null)
@@ -29,6 +30,8 @@ const isBandHidden = atom({ plugin: 'project-pm', key: 'isBandHidden' } as const
 const isEndedShown = atom({ plugin: 'project-pm', key: 'isEndedShown' } as const, false)
 const detailShown = atom({ plugin: 'project-pm', key: 'detailShown' } as const, null as { id: string; text: string } | null)
 const agents = atom({ plugin: 'project-pm', key: 'agents' } as const, [] as AgentRecord[])
+const webOpening = atom({ plugin: 'project-pm', key: 'webOpening' } as const, false)
+const webHelp = atom({ plugin: 'project-pm', key: 'webHelp' } as const, false)
 
 /** An agent state's look, in the hues of the session statuses that mean the same (hooks/sessions.ts AGENT_STATUS). */
 const AGENT_LOOK = Object.fromEntries(
@@ -138,6 +141,7 @@ export async function renderBand<R>($: EngineInterface, e: RenderInputOf<'AboveP
 export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', RenderSurface>) {
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
+  const Link = 'Link' in els ? (els as { Link: ElementConstructor<LinkProps> }).Link : null
   const Svg = 'Svg' in els ? (els as unknown as { Svg: ElementConstructor<SvgProps> }).Svg : null
   const self = await read($, me)
   const state = await read($, sessions)
@@ -153,6 +157,8 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const isEndedOpen = await read($, isEndedShown)
   const myAgents = self?.isPm ? await read($, agents) : []
   const detail = await read($, detailShown)
+  const isWebOpening = await read($, webOpening)
+  const isWebHelp = await read($, webHelp)
   const now = await $.clock.now()
 
   if (state.fetchedAt === 0 && !state.error) {
@@ -651,6 +657,31 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
           />
         </Box>
       )}
+      {isWebHelp && (
+        <Box key="web-help" flexDirection="column" rowGap="xs" borderStyle="round" borderDimColor paddingX="sm" paddingY="xs" marginTop="sm">
+          <Text size="footnote" bold>
+            {t('pane.webHelpTitle')}
+          </Text>
+          <Text size="footnote" wrap="wrap">
+            {t('pane.webHelp')}
+          </Text>
+          <Box flexDirection="row" flexWrap="wrap" columnGap="sm" alignItems="center">
+            {Link ? <Link key="web-releases" href={RELEASES_URL} label={t('pane.webReleases')} /> : <Text size="footnote">{RELEASES_URL}</Text>}
+            <Button key="web-help:close" plain label={t('pane.webHelpClose')} onPress={() => update($, webHelp, () => false)} />
+          </Box>
+        </Box>
+      )}
+      <Box key="web" flexDirection="row" flexWrap="wrap" columnGap="sm" alignItems="center" marginTop="sm">
+        <Button
+          key="web:open"
+          variant="secondary"
+          label={isWebOpening ? t('pane.webOpening') : t('pane.web')}
+          onPress={() => (isWebOpening ? undefined : openWebBoard($, self?.projectPath ?? shown[0]?.path ?? '', isAll ? null : (self?.projectKey ?? null)))}
+        />
+        <Text size="caption" wrap="wrap">
+          {t('pane.webHint')}
+        </Text>
+      </Box>
       <Box key="footer" flexDirection="row" justifyContent="space-between" alignItems="center" marginTop="sm">
         <Text size="caption" dimColor tabular>
           {t('pane.synced', { ago: ago(state.fetchedAt, now) })}

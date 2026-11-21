@@ -10,6 +10,7 @@ import { commitOfLine, isSettledAgent, itemOf, noticesOf, settledAgentState, sta
 import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hooks/messages'
 import type { Lang, MessageKey } from '../hooks/messages'
 import { installOf, isReplaced } from '../hooks/update'
+import { boardAddressOf, coreProgramOf, isPlainProgram } from '../hooks/webboard'
 
 const NOW = Date.parse('2026-10-17T12:00:00.000Z')
 /** The tests that read the mod's words read them in Traditional Chinese, whatever the machine's language. */
@@ -42,7 +43,7 @@ const track = (id: string, extra: object) => ({
 type Files = Map<string, string>
 type Pane = { id: string; title: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }
 /** What the mod asked of the disk and the app: files read and written, the app's tools called; `isAppAway` while a resumed session has no app tools yet. */
-type Counts = { reads: number; calls: string[]; writes?: string[]; isAppAway?: boolean; core?: (tool: string, args: Record<string, unknown>) => { text: string; isError: boolean }; sessions?: typeof SESSIONS }
+type Counts = { reads: number; calls: string[]; writes?: string[]; isAppAway?: boolean; env?: Record<string, string>; core?: (tool: string, args: Record<string, unknown>) => { text: string; isError: boolean }; sessions?: typeof SESSIONS }
 
 /** The test host spells paths its own way: compare them by what follows the data folder. */
 // On Linux a Windows path is not absolute, so the host puts the working folder before it: the drive starts the path.
@@ -60,7 +61,7 @@ function world(on: On, self: string, files: Files, archived: string[] = [], host
 
     return { value: { ...out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  mock.env(on, { USERPROFILE: 'C:\\home' })
+  mock.env(on, { USERPROFILE: 'C:\\home', ...counts.env })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: PROJECT }))
   on('session.id', () => ({ value: `transcript-${self}` }))
@@ -3541,4 +3542,117 @@ test('an untitled session is named by its instruction on the pane and the board,
   expect(await ui.find({ type: 'Text', text: '列表頁加匯出 CSV，欄位照報表順序' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '（未命名）' })).toBeUndefined()
   await ui.unmount()
+})
+
+// ── T-45: the pane's "Open in browser" button ──
+
+const CORE_EXE = 'C:\\home\\.project-pm\\bin\\project-pm-1.1.0.exe'
+const TOKEN = 'acmeDemoKey_0123456789abcdefABCDEF'
+const PANE_PROPS = { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 60 } }
+
+/** The pane with the core in one of the button's three cases: what ran, what was fetched, and what was logged. */
+async function webButton($: Parameters<TestBody>[0], on: On, kind: 'running' | 'stopped' | 'none', server: 'answers' | 'gone' = 'answers') {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  if (kind !== 'none') {
+    files.set('C:/home/.claude.json', JSON.stringify({ mcpServers: { 'project-pm': { type: 'stdio', command: CORE_EXE, args: ['mcp'] } } }))
+    files.set(CORE_EXE.replace(/\\/g, '/'), 'MZ')
+  }
+  if (kind === 'running') files.set('C:/home/.project-pm/server.json', JSON.stringify({ port: 47130, token: TOKEN, pid: 4242 }))
+  const ran: { argv: readonly string[]; cwd: string | undefined }[] = []
+  const fetched: { url: string; auth: string | undefined }[] = []
+  const logs: string[] = []
+  on('http.fetch', ($, e) => {
+    fetched.push({ url: e.url, auth: e.init?.headers?.Authorization })
+    if (server === 'gone') throw new Error('ECONNREFUSED')
+
+    return { value: { status: 200, ok: true, headers: {}, text: '{"projects":[]}' } }
+  })
+  on('ui.log', ($, e) => {
+    logs.push(JSON.stringify(e))
+
+    return { value: undefined }
+  })
+  const clock = mock.clock(on, { now: NOW })
+  const host: Host = (argv, cwd) => {
+    ran.push({ argv, cwd })
+
+    return argv[0] === 'git' || argv[0] === 'gh' ? null : { exitCode: 0, stdout: `http://127.0.0.1:47130/#t=${TOKEN}` }
+  }
+  world(on, 'local_pm', files, [], host, [], [], { reads: 0, calls: [], env: { SystemRoot: 'C:\\Windows' } })
+  await $.session.start(START)
+  await clock.advance(400)
+  const ui = await $.ui.mount({ plugin: 'project-pm', surface: 'desktop', component: 'Pane', requestId: 'project-pm', props: PANE_PROPS } as never)
+  expect(await ui.find({ key: 'web:open' })).toBeDefined()
+  await ui.press({ key: 'web:open' })
+  const opened = ran.filter(r => r.argv[0] !== 'git' && r.argv[0] !== 'gh')
+
+  return { ui, opened, fetched, logs }
+}
+
+for (const lang of ['zh-TW', 'en'] as const) {
+  const words =
+    lang === 'en'
+      ? { opened: 'Opened the web board in your browser.', started: 'Started the web board and opened it in your browser.', help: 'The web board needs the core installed first' }
+      : { opened: '已在瀏覽器打開網頁看板。', started: '已啟動網頁看板，並在瀏覽器打開。', help: '網頁看板要先安裝核心' }
+  const options = { options: { language: lang } } as const
+
+  test(`T-45 (${lang}): installed and running, the button opens the board at the address server.json keeps`, options, async ($, on) => {
+    const { ui, opened, fetched, logs } = await webButton($, on, 'running')
+    // The server was asked with its key, in the header, before the address was used.
+    expect(fetched).toEqual([{ url: 'http://127.0.0.1:47130/api/projects', auth: `Bearer ${TOKEN}` }])
+    expect(opened).toEqual([
+      { argv: ['C:\\Windows\\System32\\rundll32.exe', 'url.dll,FileProtocolHandler', `http://127.0.0.1:47130/#t=${TOKEN}&p=${encodeURIComponent(projectKey(PROJECT))}`], cwd: PROJECT },
+    ])
+    expect(await ui.find({ type: 'Text', text: words.opened })).toBeDefined()
+    // The key goes to the browser alone: never into the pane or a log.
+    expect(await ui.find({ type: 'Text', text: new RegExp(TOKEN) })).toBeUndefined()
+    expect(logs.join('\n')).not.toContain(TOKEN)
+    await ui.unmount()
+  })
+
+  test(`T-45 (${lang}): installed but not running, the button starts the core's own open by its full path`, options, async ($, on) => {
+    const { ui, opened, fetched, logs } = await webButton($, on, 'stopped')
+    expect(fetched).toEqual([])
+    expect(opened).toEqual([{ argv: [CORE_EXE, 'open'], cwd: PROJECT }])
+    expect(await ui.find({ type: 'Text', text: words.started })).toBeDefined()
+    // What the core printed (the address with its key) is never read into the pane.
+    expect(await ui.find({ type: 'Text', text: new RegExp(TOKEN) })).toBeUndefined()
+    expect(logs.join('\n')).not.toContain(TOKEN)
+    await ui.unmount()
+  })
+
+  test(`T-45 (${lang}): a server.json left by a server that stopped is the not-running case`, options, async ($, on) => {
+    const { ui, opened, fetched } = await webButton($, on, 'running', 'gone')
+    expect(fetched.length).toBe(1)
+    expect(opened).toEqual([{ argv: [CORE_EXE, 'open'], cwd: PROJECT }])
+    expect(await ui.find({ type: 'Text', text: words.started })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test(`T-45 (${lang}): not installed, the button shows how to install the core and starts nothing`, options, async ($, on) => {
+    const { ui, opened } = await webButton($, on, 'none')
+    expect(opened).toEqual([])
+    expect(await ui.find({ type: 'Text', text: words.help })).toBeDefined()
+    expect(await ui.find({ type: 'Link', props: { href: 'https://github.com/AudiChang-hub/claude-project-pm/releases' } })).toBeDefined()
+    await ui.press({ key: 'web-help:close' })
+    expect(await ui.find({ type: 'Text', text: words.help })).toBeUndefined()
+    await ui.unmount()
+  })
+}
+
+test('T-45: the button starts only a program at a plain full path', () => {
+  expect(isPlainProgram('C:\\home\\.project-pm\\bin\\project-pm-1.1.0.exe')).toBe(true)
+  expect(isPlainProgram('/home/acme/.project-pm/bin/project-pm-1.1.0')).toBe(true)
+  for (const bad of ['project-pm', 'npx', '.\\project-pm.exe', '\\\\host\\share\\pm.exe', '//host/share/pm', 'C:pm.exe', 'C:\\a\\..\\pm.exe', '\\\\?\\C:\\pm.exe', 'C:\\a:b\\pm.exe', '']) {
+    expect(isPlainProgram(bad)).toBe(false)
+  }
+  const config = (command: string) => ({ mcpServers: { 'project-pm': { command, args: ['mcp'] } } })
+  expect(coreProgramOf(config('C:\\x\\project-pm.exe'), PROJECT)).toBe('C:\\x\\project-pm.exe')
+  expect(coreProgramOf(config('cmd'), PROJECT)).toBeNull()
+  expect(coreProgramOf({ projects: { [PROJECT.replace(/\\/g, '/')]: config('C:\\local\\pm.exe') } }, PROJECT)).toBe('C:\\local\\pm.exe')
+  expect(coreProgramOf(null, PROJECT)).toBeNull()
+  expect(boardAddressOf({ port: 47130, token: TOKEN }, null)?.url).toBe(`http://127.0.0.1:47130/#t=${TOKEN}`)
+  expect(boardAddressOf({ port: 'x', token: TOKEN }, null)).toBeNull()
+  expect(boardAddressOf({ port: 47130, token: 'a b' }, null)).toBeNull()
 })

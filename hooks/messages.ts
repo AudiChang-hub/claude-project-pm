@@ -388,6 +388,16 @@ const zhTW = {
   'pane.showEnded': '顯示已結束的 Session（{n}）',
   'pane.synced': '同步於 {ago}　·　每 30 秒自動更新',
   'pane.refresh': '重新同步',
+  'pane.web': '在瀏覽器開啟',
+  'pane.webOpening': '開啟中…',
+  'pane.webHint': '網頁看板：同一份看板，可以放在另一個螢幕',
+  'pane.webHelpTitle': '網頁看板要先安裝核心',
+  'pane.webHelp': '到 Releases 下載你電腦用的檔案，在專案資料夾用 init 執行它（加 --yes 才會真的安裝）。裝好後再按一次「在瀏覽器開啟」。',
+  'pane.webReleases': '前往 Releases 下載',
+  'pane.webHelpClose': '關閉',
+  'notice.webOpened': '已在瀏覽器打開網頁看板。',
+  'notice.webStarted': '已啟動網頁看板，並在瀏覽器打開。',
+  'notice.webFailed': '打不開網頁看板。請在終端機到專案資料夾執行 git pm open，或問 PM「看板網址」。',
 } as const
 
 export type MessageKey = keyof typeof zhTW
@@ -762,6 +772,16 @@ A check you could not make (no tool to see the screen, say) goes in your reply, 
   'pane.showEnded': 'Show ended sessions ({n})',
   'pane.synced': 'Synced {ago}　·　updates every 30 s',
   'pane.refresh': 'Sync now',
+  'pane.web': 'Open in browser',
+  'pane.webOpening': 'Opening…',
+  'pane.webHint': 'The web board: the same board, for another screen',
+  'pane.webHelpTitle': 'The web board needs the core installed first',
+  'pane.webHelp': 'Download the file for your computer from Releases and run it with init in your project’s folder (add --yes to install). Then press "Open in browser" again.',
+  'pane.webReleases': 'Download from Releases',
+  'pane.webHelpClose': 'Close',
+  'notice.webOpened': 'Opened the web board in your browser.',
+  'notice.webStarted': 'Started the web board and opened it in your browser.',
+  'notice.webFailed': 'Could not open the web board. In a terminal, run git pm open in your project’s folder, or ask the PM for "the board link".',
 }
 
 export const MESSAGES: Record<Lang, Record<MessageKey, string>> = { en, 'zh-TW': zhTW }

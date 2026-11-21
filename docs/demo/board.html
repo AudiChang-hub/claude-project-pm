@@ -167,6 +167,8 @@ const MESSAGES = {
     'pane.showEnded': 'Show ended sessions ({n})',
     'pane.synced': 'Synced {ago}　·　updates every 30 s',
     'pane.refresh': 'Sync now',
+    'pane.web': 'Open in browser',
+    'pane.webHint': 'The web board: the same board, for another screen',
   },
   'zh-TW': {
     'status.asking.label': '待回覆',
@@ -217,6 +219,8 @@ const MESSAGES = {
     'pane.showEnded': '顯示已結束的 Session（{n}）',
     'pane.synced': '同步於 {ago}　·　每 30 秒自動更新',
     'pane.refresh': '重新同步',
+    'pane.web': '在瀏覽器開啟',
+    'pane.webHint': '網頁看板：同一份看板，可以放在另一個螢幕',
   },
 }
 
@@ -434,6 +438,7 @@ if (q.get('view') === 'states') {
     <div class="section"><span class="caption semibold dim">${t('pane.sessions')}</span><span class="caption dim tab">${t('pane.sessionsMeta', { live: sessions.length, ended })}</span></div>
     ${sessions.map(card).join('')}
     <div class="row" style="margin-top:2px"><span class="btn plain">${t('pane.showEnded', { n: ended })}</span></div>
+    <div class="row" style="flex-wrap:wrap;column-gap:8px;margin-top:6px"><span class="btn">${t('pane.web')}</span><span class="caption">${t('pane.webHint')}</span></div>
     <div class="row" style="justify-content:space-between;margin-top:4px">
       <span class="caption dim tab">${t('pane.synced', { ago: t('time.now') })}</span><span class="btn plain">${t('pane.refresh')}</span>
     </div>

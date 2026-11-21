@@ -226,6 +226,10 @@ declare module 'claude-code' {
       detailShown: { id: string; text: string } | null
       /** The PM's agents, as its track holds them: drawn on its board. */
       agents: AgentRecord[]
+      /** The pane's "Open in browser" button is at work (T-45). */
+      webOpening: boolean
+      /** The core is not installed: the pane shows how to install it (T-45). */
+      webHelp: boolean
     }
   }
 }

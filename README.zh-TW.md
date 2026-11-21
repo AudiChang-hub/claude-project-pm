@@ -96,7 +96,11 @@ v0.9.x（QA 關卡、額度優先派工）：[CHANGELOG](CHANGELOG.md)
 | `/pm lang en`・`zh-TW`・`auto` | 看板和 PM 的語言；`auto` 跟隨系統 |
 | `/pm guidelines <檔案>`・`off` | 讓 PM 和各 Session 遵守你的開發準則 |
 
-**兩種看板。** Claude Code 桌面版：看板在右側面板（最上面那張）。Claude Code CLI：請 Claude 擔任 PM，再執行 `project-pm open`，在瀏覽器開這個網頁看板：
+**兩種看板。** Claude Code 桌面版：看板在右側面板（最上面那張）。網頁看板在瀏覽器裡顯示同一份工作，給 CLI 或第二個螢幕用：
+
+- **先安裝核心：** 就是上面 Claude Code CLI 那一步（下載後在專案資料夾用 `init` 執行）。
+- **打開：** 桌面版按面板最下面的 **在瀏覽器開啟**；終端機在專案資料夾執行 `git pm open`；或直接問 PM「看板網址」。
+- **只輸入 `127.0.0.1:47130` 會看到錯誤頁。** 看板只能用 Project PM 給的連結打開，連結裡有一把私密金鑰，電腦上其他程式才讀不到。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/web-board-dark-zh-TW.png">
