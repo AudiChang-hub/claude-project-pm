@@ -4,7 +4,7 @@
 
 給 Claude Code 用的 PM：一份交辦清單、結案和 push 之前的驗收檢查，以及一張看得到每個 Session 進度的看板。它是一個 MCP server（MCP 是 Claude Code 接上額外工具的方式）。
 
-Project PM **只支援 Claude Code**；1.0 版幫你設定 Claude Code 的命令列版。不需要 Node.js：下載一個程式，執行一次就好。
+Project PM **只支援 Claude Code**；它會幫你設定 Claude Code 的命令列版。不需要 Node.js：下載一個程式，執行一次就好。
 
 ## 安裝
 

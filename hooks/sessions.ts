@@ -131,7 +131,7 @@ export function statusText(status: Status, limit: UsageLimit | null, kind: 'labe
 
 /**
  * A session's id as people read it when it has no name (T-43): without the tool's prefix, its first 8 characters
- * (claude-code:6f1d3b2a-… → 6f1d3b2a, local_47a75388-… → 47a75388, agent:a1b2c3 → a1b2c3).
+ * (claude-code:6f1d3b2a-… → 6f1d3b2a, local_00000000-… → 00000000, agent:a1b2c3 → a1b2c3).
  */
 export function shortId(id: string): string {
   return id

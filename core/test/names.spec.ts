@@ -24,7 +24,7 @@ const QUIET = 'claude-code:8a2f6c13-d9e4-4b71-8f05-6e3a1c7b2d90'
 describe('a session as people read it', () => {
   test('a short id: the tool and everything past 8 characters left out', () => {
     assert.equal(shortId(PM), '6f1d3b2a')
-    assert.equal(shortId('local_47a75388-8494-4995-8ac9-c91ea5183b1b'), '47a75388')
+    assert.equal(shortId('local_00000000-0000-4000-8000-000000000001'), '00000000')
     assert.equal(shortId('  agent:a1b2c3  '), 'a1b2c3')
     assert.equal(shortId('pm1'), 'pm1')
   })

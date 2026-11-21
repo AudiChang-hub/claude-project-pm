@@ -18,7 +18,7 @@ import { VERSION } from '../src/version'
 import type { World } from './helpers'
 import { LANGS, hostWith, serverCommand, world } from './helpers'
 
-const SESSION = '1f0ba5e3-d73c-4a06-ab9f-283b7537d1be'
+const SESSION = '00000000-0000-4000-8000-000000000002'
 
 type Called = { content: { type: string; text: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean }
 

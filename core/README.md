@@ -4,7 +4,7 @@
 
 A PM for Claude Code sessions: a list of the work you asked for, a QA check before work closes and before it is pushed, and a board of where every session stands. It runs as an MCP server (MCP is how Claude Code plugs in extra tools like this one).
 
-Project PM is for **Claude Code only**; version 1.0 sets it up for Claude Code's command line. It needs no Node.js: you download one program and run it once.
+Project PM is for **Claude Code only**; it sets itself up for Claude Code's command line. It needs no Node.js: you download one program and run it once.
 
 ## Install
 

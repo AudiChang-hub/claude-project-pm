@@ -20,7 +20,7 @@ import { boardTool, pmTool, reportTool } from '../src/tools'
 import type { World } from './helpers'
 import { LANGS, NOW, PROBE_HOST, git, hostWith, shortPath, watchFs, world } from './helpers'
 
-const SESSION = '1f0ba5e3-d73c-4a06-ab9f-283b7537d1be'
+const SESSION = '00000000-0000-4000-8000-000000000002'
 const ID = `claude-code:${SESSION}`
 /** `t`, under a name a test's own `t` does not hide. */
 const tr = t
