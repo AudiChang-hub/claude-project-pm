@@ -290,6 +290,18 @@
     num.append(el('small', '', words.done))
     progress.replaceChildren(rail, num)
 
+    // The open items by kind, in the board's own words (T-42): the line the pane and the text board say.
+    const breakdown = $('breakdown')
+    const b = data.breakdown
+    breakdown.hidden = !b || !b.total
+    if (b && b.total) {
+      breakdown.replaceChildren(el('span', 'breakdown__lead', b.prefix))
+      b.parts.forEach((part, i) => {
+        if (i) breakdown.append(el('span', 'breakdown__sep', b.joiner))
+        breakdown.append(el('span', `breakdown__part is-${part.kind}`, part.text))
+      })
+    }
+
     // Attention.
     const attention = $('attention')
     $('attention-n').textContent = data.attention.length ? String(data.attention.length) : ''

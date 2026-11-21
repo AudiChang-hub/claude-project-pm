@@ -5,7 +5,7 @@ import type { On } from 'claude-code'
 import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isDeliveredAgent, isDeliveredStatus, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, limitOf, statusOf, undeliveredOf, usageLimitOf } from '../hooks/sessions'
 import type { Status } from '../hooks/sessions'
 import { closesBoard } from '../hooks/actions'
-import { isQaDescription, qaAttention, qaBlocker, qaBrief, qaShown, qaUpdate } from '../hooks/qa'
+import { isQaDescription, openBreakdown, qaAttention, qaBlocker, qaBrief, qaShown, qaUpdate } from '../hooks/qa'
 import { commitOfLine, isSettledAgent, itemOf, noticesOf, settledAgentState, stateOf } from '../hooks/agents'
 import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hooks/messages'
 import type { Lang, MessageKey } from '../hooks/messages'
@@ -3435,3 +3435,64 @@ test('the ledger as both copies hold it, merged as the core merges them; a repor
   expect(text).not.toMatch(/舊的說法/)
   expect(text).toMatch(/\[待回覆\] 「移除舊版優惠欄位」\(local_ask\)[^\n]*要一起發 2\.3\.1 嗎？/)
 })
+
+// ── T-42: the open items at a glance add up, each under the one kind it most needs ──
+
+const T42_ITEM = (id: number, owner: string | null, qa?: 'pass' | 'fail' | 'skipped') => ({
+  id,
+  text: `項目 ${id}`,
+  owner,
+  status: 'open' as const,
+  note: '',
+  createdAt: NOW - 7_200_000,
+  updatedAt: NOW - 7_200_000,
+  ...(qa ? { qa: { result: qa, by: 'agent:q1', at: NOW - 3_600_000, note: 'x', commit: '3fa1c2e' } } : {}),
+})
+
+test('the open items by kind: one kind each, so the counts add up to the open ones', () => {
+  setLang('zh-TW')
+  const of = (item: ReturnType<typeof T42_ITEM>, isDelivered: boolean) => ({ item, qa: qaShown(item, isDelivered) })
+  // Two things at once (no owner, and a failed verdict): counted once, under the failed QA.
+  const mixed = openBreakdown([of(T42_ITEM(1, 'local_a', 'fail'), true), of(T42_ITEM(2, 'local_b'), true), of(T42_ITEM(3, null), false), of(T42_ITEM(4, null, 'fail'), false), of(T42_ITEM(5, 'local_c'), false)])
+  expect(mixed.text).toBe('5 項進行中：2 項 QA 不通過・1 項待 QA・1 項未指派・1 項正常')
+  expect(mixed.parts.reduce((n, p) => n + p.n, 0)).toBe(mixed.total)
+  // All on track.
+  expect(openBreakdown([of(T42_ITEM(1, 'local_a'), false), of(T42_ITEM(2, 'local_b', 'pass'), true)]).text).toBe('2 項進行中：2 項正常')
+  // None on track.
+  const bad = openBreakdown([of(T42_ITEM(1, 'local_a', 'fail'), true), of(T42_ITEM(2, 'local_b'), true), of(T42_ITEM(3, null), false)])
+  expect(bad.text).toBe('3 項進行中：1 項 QA 不通過・1 項待 QA・1 項未指派')
+  expect(bad.parts.map(p => p.kind)).toEqual(['qaFailed', 'qaAwaiting', 'unassigned'])
+  // Closed and dropped items are not open.
+  expect(openBreakdown([of({ ...T42_ITEM(1, null), status: 'done' } as never, false)]).total).toBe(0)
+  setLang('en')
+  expect(mixed.parts.length).toBe(4)
+  expect(openBreakdown([of(T42_ITEM(1, 'local_a', 'fail'), true), of(T42_ITEM(2, 'local_b'), true), of(T42_ITEM(3, null), false), of(T42_ITEM(5, 'local_c'), false)]).text).toBe('4 open: 1 failed QA · 1 awaiting QA · 1 unassigned · 1 on track')
+})
+
+for (const lang of ['zh-TW', 'en'] as const) {
+  test(`the pane and the board say the same of the open items, and it adds up (${lang})`, { options: { language: lang } }, async ($, on) => {
+    const files: Files = new Map()
+    // Owned by a session no longer listed (it has delivered), or by one running now, or by nobody.
+    const ledger = [T42_ITEM(1, 'local_gone', 'fail'), T42_ITEM(2, 'local_gone'), T42_ITEM(3, null), T42_ITEM(4, null, 'fail'), T42_ITEM(5, 'local_run')]
+    files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger, nextId: 6 }))
+    const clock = mock.clock(on, { now: NOW })
+    world(on, 'local_pm', files)
+    await $.session.start(START)
+    await clock.advance(1000)
+    const expected = lang === 'zh-TW' ? '5 項進行中：2 項 QA 不通過・1 項待 QA・1 項未指派・1 項正常' : '5 open: 2 failed QA · 1 awaiting QA · 1 unassigned · 1 on track'
+    const text = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+    expect(text).toContain(`\n${expected}\n`)
+    const ui = await $.ui.mount({
+      plugin: 'project-pm',
+      surface: 'desktop',
+      component: 'Pane',
+      requestId: 'project-pm',
+      props: { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 80 } },
+    } as never)
+    const parts = lang === 'zh-TW' ? ['2 項 QA 不通過', '1 項待 QA', '1 項未指派', '1 項正常'] : ['2 failed QA', '1 awaiting QA', '1 unassigned', '1 on track']
+    for (const part of parts) expect(await ui.find({ type: 'Text', text: part })).toBeDefined()
+    // The old pane counted an unassigned item with a failed verdict twice, and left the on-track ones out.
+    expect(await ui.find({ type: 'Text', text: lang === 'zh-TW' ? '　·　2 項未指派' : '　·　2 unassigned' })).toBeUndefined()
+    await ui.unmount()
+  })
+}

@@ -7,8 +7,8 @@ import type { ElementConstructor, EngineInterface, RenderInputOf, RenderSurface,
 import type { AgentRecord, AgentState, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Step, Track } from '../types'
 import { agentName } from './agents'
 import { STATUS, agentTime, ago, caveatOf, clip, groupProjects, isActive, isDeliveredAgent, isDeliveredStatus, isHandedOff, itemCode, limitOf, liveTracks, openSteps, projectKey, settledAt, shownAgents, statusOf, statusText } from './sessions'
-import { isAgentId, isSameId, qaShown, qaText } from './qa'
-import type { QaShown } from './qa'
+import { isAgentId, isSameId, openBreakdown, qaShown, qaText } from './qa'
+import type { OpenKind, QaShown } from './qa'
 import type { Project, Status } from './sessions'
 import { archive, claim, dismissBand, refresh, startPmSession } from './actions'
 import { t } from './messages'
@@ -74,6 +74,9 @@ const ACCENT_HEX = '#d97757'
 
 /** A work item's QA by its theme color: passed green, failed red, awaiting amber; skipped dimmed (none). */
 const QA_COLOR: Record<QaShown, string | undefined> = { pass: 'success', fail: 'error', awaiting: 'warning', skipped: undefined }
+
+/** An open item's kind by its theme color (T-42): the QA colors, unassigned amber, on track dimmed (none). */
+const OPEN_COLOR: Record<OpenKind, string | undefined> = { qaFailed: 'error', qaAwaiting: 'warning', unassigned: 'warning', normal: undefined }
 
 // ── SVG marks: no text inside, mid-tone hues that read on light and dark ──
 
@@ -199,7 +202,6 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   // checklists: a session ticks its list off when its turn ends, done or not.
   const items = shown.flatMap(project => (files[project.key]?.ledger ?? []).filter(i => i.status !== 'dropped'))
   const itemsDone = items.filter(i => i.status === 'done').length
-  const unassigned = ledgers.filter(({ item }) => !item.owner).length
   // An owner is found however its id was spaced or cased (items written before ids were trimmed).
   const agentOwner = (id: string | null) => (isAgentId(id) ? myAgents.find(a => isSameId(`agent:${a.id}`, id)) : undefined)
   const sessionOwner = (id: string | null) => (id && !isAgentId(id) ? state.list.find(s => isSameId(s.id, id)) : undefined)
@@ -219,8 +221,8 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
 
     return qaShown(item, !owner || isDeliveredStatus(statusOfOne(owner)))
   }
-  const qaAwaiting = ledgers.filter(({ item, project }) => qaOfItem(item, project) === 'awaiting').length
-  const qaFailed = ledgers.filter(({ item, project }) => qaOfItem(item, project) === 'fail').length
+  // Each open item under the one kind it most needs, so the counts add up (T-42): the board and the web board say the same.
+  const breakdown = openBreakdown(ledgers.map(({ item, project }) => ({ item, qa: qaOfItem(item, project) })))
   const steps = everyone.flatMap(one => all[one.id]?.plan ?? [])
   const stepsDone = steps.filter(s => s.status === 'completed').length
   const isByItems = items.length > 0
@@ -269,25 +271,16 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
                 ? t('pane.stepsDone', { done: stepsDone, total: steps.length })
                 : t('pane.noItems')}
           </Text>
-          {isByItems && (ledgers.length > 0 || unassigned > 0) && (
-            <Text size="caption" wrap="truncate-end">
-              <Text dimColor>{t('pane.itemsOpen', { n: ledgers.length })}</Text>
-              {unassigned > 0 && <Text color="warning">{t('pane.itemsUnassigned', { n: unassigned })}</Text>}
+          {isByItems && breakdown.total > 0 && (
+            <Text key="kpi:open" size="caption" wrap="wrap">
+              <Text dimColor>{breakdown.prefix}</Text>
+              {breakdown.parts.map((part, i) => [
+                i > 0 ? <Text key={`kpi:sep:${part.kind}`} dimColor>{t('items.joiner')}</Text> : null,
+                <Text key={`kpi:${part.kind}`} color={OPEN_COLOR[part.kind]} dimColor={!OPEN_COLOR[part.kind]}>
+                  {part.text}
+                </Text>,
+              ])}
             </Text>
-          )}
-          {(qaAwaiting > 0 || qaFailed > 0) && (
-            <Box flexDirection="row" flexWrap="wrap" columnGap="sm">
-              {qaFailed > 0 && (
-                <Text key="kpi:qaFailed" size="caption" color="error" wrap="truncate-end">
-                  {t('pane.itemsQaFailed', { n: qaFailed })}
-                </Text>
-              )}
-              {qaAwaiting > 0 && (
-                <Text key="kpi:qaAwaiting" size="caption" color="warning" wrap="truncate-end">
-                  {t('pane.itemsQaAwaiting', { n: qaAwaiting })}
-                </Text>
-              )}
-            </Box>
           )}
         </Box>
       </Box>

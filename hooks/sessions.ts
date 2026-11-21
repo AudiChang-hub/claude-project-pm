@@ -4,7 +4,7 @@
 import type { AgentRecord, AgentState, BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, PushCheck, Report, ReportStatus, Session, Step, Track } from '../types'
 import { agentName, isSettledAgent } from './agents'
 import { t } from './messages'
-import { isAgentId, isSameId, qaAttention, qaShown, qaText } from './qa'
+import { isAgentId, isSameId, openBreakdown, qaAttention, qaShown, qaText } from './qa'
 
 export type Status = 'running' | 'asking' | 'failed' | 'limit' | 'open' | 'unreleased' | 'ci' | 'waiting' | 'done' | 'stale'
 
@@ -1221,6 +1221,31 @@ export function shownAgents(list: AgentRecord[], now: number, isIncludingDone: b
 }
 
 /** The board as the PM model reads it: what needs attention first, then every session. */
+/**
+ * Whether an owner has handed its work over, as the board reads it: a session ended, waiting to release or on CI, or no
+ * longer listed (archived or gone: it has nothing left to do); an agent done or to verify, or no longer recorded (pruned
+ * past AGENTS_KEPT) on a board that holds the PM's agents. A board without them cannot tell. The web board's JSON reads
+ * it too, so both show each item's QA alike.
+ */
+export function deliveredOf(input: BoardInput): (id: string | null) => boolean {
+  const everyone = input.everyone ?? input.sessions
+  const tracks = liveTracks(everyone, input.tracks, input.words)
+  const agents = input.agents ?? []
+  const status = (one: Session) => statusOf(one, tracks[one.id], input.words[one.id], input.now, input.ci?.[one.id], input.push?.[one.id], settledAt(one.id, input.ledger), isHandedOff(one.id, input.ledger))
+
+  return (id: string | null) => {
+    if (!id) return false
+    if (isAgentId(id)) {
+      const agent = agents.find(a => isSameId(`agent:${a.id}`, id))
+
+      return agent ? isDeliveredAgent(agent.state) : input.agents !== undefined
+    }
+    const one = everyone.find(s => isSameId(s.id, id))
+
+    return !one || isDeliveredStatus(status(one))
+  }
+}
+
 export function boardText(input: BoardInput): string {
   const { project, sessions, words, ledger, now } = input
   const everyone = input.everyone ?? sessions
@@ -1254,6 +1279,8 @@ export function boardText(input: BoardInput): string {
 
   const counted = ledger.filter(item => item.status !== 'dropped')
   if (counted.length) lines.push(t('board.progress', { done: counted.filter(i => i.status === 'done').length, total: counted.length }))
+  // The open items by kind (T-42) go here, once the owners are known below.
+  const breakdownAt = lines.length
 
   const attention: string[] = []
   for (const r of rows) {
@@ -1318,23 +1345,9 @@ export function boardText(input: BoardInput): string {
 
     return t('board.owner.status', { title: one.title, tag, elsewhere: inProject.has(one.id) ? '' : t('board.owner.elsewhere') })
   }
-  /**
-   * Whether an owner has handed its work over: a session ended, waiting to release or on CI, or no longer listed
-   * (archived or gone: it has nothing left to do); an agent done or to verify, or no longer recorded (pruned past
-   * AGENTS_KEPT) on a board that holds the PM's agents. A board without them cannot tell.
-   */
-  const isDelivered = (id: string | null) => {
-    if (!id) return false
-    if (isAgentId(id)) {
-      const agent = agentOf(id)
-
-      return agent ? isDeliveredAgent(agent.state) : input.agents !== undefined
-    }
-    const one = sessionOf(id)
-
-    return !one || isDeliveredStatus(statusOfOwner(one))
-  }
+  const isDelivered = deliveredOf(input)
   const qaOf = (item: LedgerItem) => qaShown(item, isDelivered(item.owner))
+  if (openLedger.length) lines.splice(breakdownAt, 0, openBreakdown(openLedger.map(item => ({ item, qa: qaOf(item) }))).text)
   attention.push(...qaAttention(openLedger, isDelivered, ownerText))
   lines.push('', t('board.section.attention'), attention.length ? attention.join('\n') : t('board.none'))
 

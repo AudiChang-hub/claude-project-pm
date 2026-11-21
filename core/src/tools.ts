@@ -8,15 +8,16 @@ import { join } from 'node:path'
 
 import { t } from '../../hooks/messages'
 import type { MessageKey } from '../../hooks/messages'
-import { isAgentId, isSameId, qaKeptText, qaShown, qaUpdate } from '../../hooks/qa'
+import { isAgentId, isSameId, openBreakdown, qaKeptText, qaShown, qaUpdate } from '../../hooks/qa'
+import type { OpenBreakdown } from '../../hooks/qa'
 import {
   STATUS,
   boardText,
   ciWords,
   clip,
   hasReport,
+  deliveredOf,
   isCiPending,
-  isDeliveredStatus,
   itemCode,
   latestWords,
   ledgerRow,
@@ -25,7 +26,7 @@ import {
   reportOf,
   statusOf,
 } from '../../hooks/sessions'
-import type { Status } from '../../hooks/sessions'
+import type { BoardInput, Status } from '../../hooks/sessions'
 import type { CiCheck, LastWord, PushCheck, Session, Track } from '../../types'
 import { activeAt, projectSessions, trackOf } from './actors'
 import type { Ctx, ToolResult } from './context'
@@ -387,6 +388,8 @@ export type BoardJson = {
   actors: { id: string; tool: string; status: Status; label: string; title: string; said: string; at: number; plan: { done: number; total: number } }[]
   agents: unknown[]
   progress: { done: number; total: number }
+  /** The open items by kind, in the board's words (T-42): `text` is the line the pane and the text board say. */
+  breakdown: OpenBreakdown
   boardUrl: string | null
   revision: number
   sessionsError: string | null
@@ -471,7 +474,7 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     }
   }
   const agents = found.agents
-  let text = boardText({
+  const input: BoardInput = {
     project: { name: ref.name, path: ref.path },
     sessions: found.sessions,
     everyone: found.everyone,
@@ -483,7 +486,8 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     agents: agents.length ? agents : undefined,
     now,
     isIncludingDone,
-  })
+  }
+  let text = boardText(input)
   // Layer 1: commits that reached the remote past the pre-push check (6.2 point 5).
   const hook = await prePushInstalled(ref, ctx.env)
   const pushed = hook === null ? null : await pushedUnchecked(project, ref.path, ctx.run, hook.baseline)
@@ -508,13 +512,10 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
   const actorById = new Map(found.actors.map(a => [a.id, a]))
   const statusById = new Map<string, Status>()
   for (const s of found.everyone) statusById.set(s.id, statusOf(s, hasReport(found.tracks[s.id]) ? found.tracks[s.id] : undefined, words[s.id], now, ci[s.id], push[s.id]))
-  const isDelivered = (owner: string | null) => {
-    if (!owner) return false
-    if (isAgentId(owner)) return true
-    const status = statusById.get(owner.trim())
-
-    return status === undefined || isDeliveredStatus(status)
-  }
+  // Each item's QA as the text board reads it (deliveredOf), so the web board's counts and the board's words agree (T-42).
+  const isDelivered = deliveredOf(input)
+  const openItems = project.ledger.filter(i => i.status === 'open')
+  const breakdown = openBreakdown(openItems.map(item => ({ item, qa: qaShown(item, isDelivered(item.owner)) })))
   const counted = project.ledger.filter(i => i.status !== 'dropped')
   const json: BoardJson = {
     project: { name: ref.name, path: ref.path, key: ref.key, pmId: project.pmId },
@@ -545,6 +546,7 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
       .sort((a, b) => STATUS[a.status].rank - STATUS[b.status].rank || b.at - a.at),
     agents,
     progress: { done: counted.filter(i => i.status === 'done').length, total: counted.length },
+    breakdown,
     boardUrl: url,
     revision: project.revision ?? 0,
     sessionsError,

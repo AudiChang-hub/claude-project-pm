@@ -249,6 +249,25 @@ for (const lang of LANGS) {
       assert.ok(json.attention.some(a => a.item === 2), JSON.stringify(json.attention))
     })
 
+    test('the open items by kind add up, and the web board gets the very line the board says (T-42)', async () => {
+      await pmTool(w.ctx(), { action: 'claim' })
+      await ledgerTool(w.ctx(), { action: 'add', text: 'Coupon field', owner: 'claude-code:dev1' })
+      await ledgerTool(w.ctx(), { action: 'add', text: 'Shipping rates' })
+      // No owner and a failed verdict: counted once, under the failed QA.
+      await ledgerTool(w.ctx(), { action: 'add', text: 'Tax rounding' })
+      await ledgerTool(w.ctx(), { action: 'update', id: 3, qa: 'fail', qa_by: 'agent:q1', qa_note: 'rounds half down' })
+      await ledgerTool(w.ctx(), { action: 'add', text: 'Order emails', owner: 'claude-code:dev2' })
+      await reportTool(w.ctx('claude-code:dev1'), { status: 'done', summary: 'Coupon field added', delivery: 'not_needed' })
+      await reportTool(w.ctx('claude-code:dev2'), { status: 'in_progress', summary: 'Templates half done' })
+      const out = await boardTool(w.ctx(), {})
+      const json = out.structured as { breakdown: { total: number; text: string; parts: { kind: string; n: number }[] } }
+      assert.deepEqual(json.breakdown.parts.map(p => [p.kind, p.n]), [['qaFailed', 1], ['qaAwaiting', 1], ['unassigned', 1], ['normal', 1]])
+      assert.equal(json.breakdown.parts.reduce((n, p) => n + p.n, 0), json.breakdown.total)
+      assert.equal(json.breakdown.total, 4)
+      assert.ok(out.text.includes(`\n${json.breakdown.text}\n`), out.text)
+      assert.equal(json.breakdown.text, lang === 'zh-TW' ? '4 項進行中：1 項 QA 不通過・1 項待 QA・1 項未指派・1 項正常' : '4 open: 1 failed QA · 1 awaiting QA · 1 unassigned · 1 on track')
+    })
+
     test('board answers with the ledger when the session records cannot be read', async () => {
       await ledgerTool(w.ctx(), { action: 'add', text: 'Coupon field' })
       mkdirSync(paths(w.env).actors, { recursive: true })

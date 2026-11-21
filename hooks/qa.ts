@@ -149,3 +149,42 @@ export function isQaDescription(description: string): boolean {
 export function qaBrief(code: string): { reply: string; checklist: string } {
   return { reply: t('agent.briefQaReply'), checklist: t('agent.briefQa', { item: code }) }
 }
+
+// ── The open work items at a glance: each under one kind, so the counts add up (T-42) ──
+
+/** What an open work item most needs, first first: a failed QA, then QA due, then an owner; else it is on track. */
+export type OpenKind = 'qaFailed' | 'qaAwaiting' | 'unassigned' | 'normal'
+
+export const OPEN_KINDS: readonly OpenKind[] = ['qaFailed', 'qaAwaiting', 'unassigned', 'normal']
+
+/** The one kind an open item counts under: the first of OPEN_KINDS it is, so an item is never counted twice. */
+export function openKindOf(item: LedgerItem, qa: QaShown | null): OpenKind {
+  if (qa === 'fail') return 'qaFailed'
+  if (qa === 'awaiting') return 'qaAwaiting'
+  if (!item.owner?.trim()) return 'unassigned'
+
+  return 'normal'
+}
+
+/** `prefix` is the lead with what comes before the parts ("4 open: "), for a view that colors each part itself. */
+export type OpenBreakdown = { total: number; parts: { kind: OpenKind; n: number; text: string }[]; lead: string; prefix: string; joiner: string; text: string }
+
+/**
+ * The open items counted by kind, in words the pane, the text board and the web board all say alike: "4 open: 1 failed
+ * QA · 1 awaiting QA · 1 unassigned · 1 on track". Kinds with none are left out; the parts always add up to the total.
+ */
+export function openBreakdown(items: { item: LedgerItem; qa: QaShown | null }[]): OpenBreakdown {
+  const open = items.filter(({ item }) => item.status === 'open')
+  const counts = new Map<OpenKind, number>(OPEN_KINDS.map(kind => [kind, 0]))
+  for (const { item, qa } of open) {
+    const kind = openKindOf(item, qa)
+    counts.set(kind, (counts.get(kind) ?? 0) + 1)
+  }
+  const parts = OPEN_KINDS.filter(kind => (counts.get(kind) ?? 0) > 0).map(kind => ({ kind, n: counts.get(kind)!, text: t(`items.${kind}`, { n: counts.get(kind)! }) }))
+  const lead = t('items.open', { n: open.length })
+
+  const prefix = t('items.summary', { lead, parts: '' })
+  const joiner = t('items.joiner')
+
+  return { total: open.length, parts, lead, prefix, joiner, text: parts.length ? `${prefix}${parts.map(p => p.text).join(joiner)}` : lead }
+}

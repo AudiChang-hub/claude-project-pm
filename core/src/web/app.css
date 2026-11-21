@@ -666,3 +666,18 @@ a {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* The open items by kind (T-42): each part once, colored as the pane colors it. */
+.hero__breakdown {
+  margin: 10px 0 0;
+  color: var(--muted);
+}
+.breakdown__part.is-qaFailed {
+  color: var(--err-ink);
+  font-weight: 600;
+}
+.breakdown__part.is-qaAwaiting,
+.breakdown__part.is-unassigned {
+  color: var(--warn-ink);
+  font-weight: 600;
+}
