@@ -10,7 +10,7 @@ import { AGENT_STATUS, STATUS, agentTime, ago, cardSummary, caveatOf, clip, kpiO
 import { isAgentId, isSameId, openBreakdown, qaShown, qaText } from './qa'
 import type { OpenKind, QaShown } from './qa'
 import type { Project, Status } from './sessions'
-import { archive, claim, dismissBand, refresh, startPmSession } from './actions'
+import { archive, claim, dismissBand, getMine, refresh, startPmSession } from './actions'
 import { t } from './messages'
 import { RELEASES_URL, openWebBoard } from './webboard'
 import { compactedLine, contextLine } from './context'
@@ -141,6 +141,13 @@ export async function renderBand<R>($: EngineInterface, e: RenderInputOf<'AboveP
 
 // ── The pane ──
 
+/** The last-resort button (T-48) and its undo: what happened, said in the pane's notice. */
+async function pressAutoCompact($: EngineInterface, isUndo: boolean) {
+  const text = isUndo ? await undoAutoCompact($) : await setAutoCompact($)
+  const isBad = text.startsWith(t('context.buttonFailed', { reason: '' }).trim())
+  await update($, notice, () => ({ tone: isBad ? 'bad' : 'good', text }))
+}
+
 export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', RenderSurface>) {
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
@@ -162,7 +169,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const detail = await read($, detailShown)
   const isWebOpening = await read($, webOpening)
   const isWebHelp = await read($, webHelp)
-  const live = await read($, liveContext)
+  const liveFigures = await read($, liveContext)
   const now = await $.clock.now()
 
   if (state.fetchedAt === 0 && !state.error) {
@@ -382,27 +389,22 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
           <Text size="caption" dimColor>
             {t('context.buttonDone')}
           </Text>
-          <Button key="autocompact:undo" plain dimColor label={t('context.buttonUndo')} onPress={() => pressed(undoAutoCompact)} />
+          <Button key="autocompact:undo" plain dimColor label={t('context.buttonUndo')} onPress={() => pressAutoCompact($, true)} />
         </Box>
       )
     }
     if (!needsButton(track)) return null
 
     return (
-      <Box key="autocompact" flexDirection="column" rowGap="xs">
+      <Box key="autocompact" flexDirection="column" rowGap="xs" marginTop="sm">
         <Box flexDirection="row">
-          <Button key="autocompact:set" variant="primary" label={t('context.button')} onPress={() => pressed(setAutoCompact)} />
+          <Button key="autocompact:set" variant="primary" label={t('context.button')} onPress={() => pressAutoCompact($, false)} />
         </Box>
         <Text size="caption" dimColor wrap="wrap">
           {t('context.buttonScope', { project: self?.projectName ?? '' })}
         </Text>
       </Box>
     )
-  }
-  const pressed = async (act: (engine: EngineInterface) => Promise<string>) => {
-    const text = await act($)
-    const isBad = text.startsWith(t('context.buttonFailed', { reason: '' }).trim())
-    await update($, notice, () => ({ tone: isBad ? 'bad' : 'good', text }))
   }
 
   const card = (one: Session) => {
@@ -425,7 +427,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
       .join(t('list.joiner'))
     const current = left.find(s => s.status === 'in_progress') ?? left[0]
     // Its context, idle time and what waking it costs (T-48); the PM's, its last compaction too.
-    const context = contextLine(one, track, live[one.id], now)
+    const context = contextLine(one, track, liveFigures[one.id], now)
     const compacted = isPm ? compactedLine(track) : null
 
     return (
@@ -500,7 +502,6 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
             {detail.text}
           </Text>
         )}
-        {isPm && self?.id === one.id && compactButton(track)}
         {archiveControls(one, status, warn)}
       </Box>
     )
@@ -677,6 +678,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
           </Text>
         </Box>
       )}
+      {self?.isPm && compactButton(getMine() ?? (self.id ? all[self.id] : undefined))}
       {canClaim && (
         <Box key="claim" flexDirection="row" flexWrap="wrap" columnGap="sm" alignItems="center" marginTop="sm">
           <Text size="footnote" dimColor>

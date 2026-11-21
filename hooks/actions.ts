@@ -1332,7 +1332,8 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
   await refresh($, true, input.scope === 'all')
   const state = await read($, sessions)
   if (state.error && state.list.length === 0) return t('board.cannotRead', { error: state.error })
-  const all = await read($, tracks)
+  // The PM's own track as this copy holds it: its hand-overs waiting to start, its last compaction (T-48).
+  const all = { ...(await read($, tracks)), ...(self?.isPm && mine ? { [mine.id]: mine } : {}) }
   const words = await read($, lastWords)
   const ci = await read($, ciChecks)
   const push = await read($, pushChecks)

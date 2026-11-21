@@ -244,6 +244,8 @@ async function start($: EngineInterface) {
     .catch(() => undefined))
   refreshSoon($, 300)
   $.clock.after(1_000, () => void reloadIfUpdated($).catch(() => undefined))
+  // The quota's first round (quota.ts) once the first round has the sessions; the poll's after that.
+  $.clock.after(1_000, () => void quotaRound($).catch(() => undefined))
 }
 
 // ── Hooks ──

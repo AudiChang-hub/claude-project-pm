@@ -11,6 +11,7 @@ import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hoo
 import type { Lang, MessageKey } from '../hooks/messages'
 import { installOf, isReplaced } from '../hooks/update'
 import { boardAddressOf, coreProgramOf, isPlainProgram } from '../hooks/webboard'
+import { contextLine, contextOf, effectiveTokens, handoverMarker, idleText, parseThresholds, shouldCompact, thresholdsOf, tokensText, wakeCost, withAutoCompact, withoutAutoCompact } from '../hooks/context'
 
 const NOW = Date.parse('2026-10-17T12:00:00.000Z')
 /** The tests that read the mod's words read them in Traditional Chinese, whatever the machine's language. */
@@ -3665,4 +3666,353 @@ test('T-45: the button starts only a program at a plain full path', () => {
   expect(boardAddressOf({ port: 47130, token: TOKEN }, null)?.url).toBe(`http://127.0.0.1:47130/#t=${TOKEN}`)
   expect(boardAddressOf({ port: 'x', token: TOKEN }, null)).toBeNull()
   expect(boardAddressOf({ port: 47130, token: 'a b' }, null)).toBeNull()
+})
+
+// ── T-48 (M8): context and quota, managed without the person ──
+
+/** The listed sessions with the PM's own among them, as the desktop app lists it. */
+const WITH_PM = [...SESSIONS, { sessionId: 'local_pm', title: 'Acme 商店後台 · PM', cwd: PROJECT, isArchived: false, isRunning: true, lastActivityAt: '2026-10-17T11:59:30.000Z' }]
+const SUMMARY = [{ role: 'user' as const, text: '摘要：進行中的工作項目與負責的 Session。', toolUses: [] }]
+const M8_COMPOSE = { model: 'claude-opus-5-5', promptModel: 'claude-opus-5-5', surfaces: ['desktop'] as const, tools: [], outputStyle: null, traits: [] }
+const HOUR = 3_600_000
+
+test('T-48: token counts, idle times and the wake cost read in both languages', () => {
+  setLang('zh-TW')
+  expect(tokensText(213_456)).toBe('21.3 萬')
+  expect([idleText(5 * 60_000), idleText(2 * HOUR), idleText(3 * 24 * HOUR)]).toEqual(['5 分鐘', '2 小時', '3 天'])
+  setLang('en')
+  expect(tokensText(213_456)).toBe('213k')
+  expect([idleText(5 * 60_000), idleText(2 * HOUR), idleText(3 * 24 * HOUR)]).toEqual(['5m', '2h', '3d'])
+  // Past the hour the cache holds, the whole context is written again (× 1.3); within it, read from the cache (× 0.1).
+  expect(wakeCost(100_000, 61 * 60_000)).toBe(130_000)
+  expect(wakeCost(100_000, 59 * 60_000)).toBe(10_000)
+  // A compaction after the figure stands for it; one before says nothing of a context grown since.
+  const mark = { tokens: 250_000, at: NOW }
+  expect(effectiveTokens(mark, { compactedTo: 30_000, compactedAt: NOW + 1 } as never)).toBe(30_000)
+  expect(effectiveTokens(mark, { compactedTo: 30_000, compactedAt: NOW - 1 } as never)).toBe(250_000)
+  // The app's live figure when newer than the track's own, else the track's, else nothing.
+  const own = { context: { tokens: 120_000, at: NOW } } as never
+  expect(contextOf(own, { tokens: 140_000, at: NOW + 1 })).toEqual({ tokens: 140_000, at: NOW + 1 })
+  expect(contextOf(own, { tokens: 140_000, at: NOW - 1 })).toEqual({ tokens: 120_000, at: NOW })
+  expect(contextOf(undefined, undefined)).toBeNull()
+  const idle = { isRunning: false, lastActivityAt: new Date(NOW - 2 * HOUR).toISOString() }
+  expect(contextLine(idle, { context: { tokens: 213_000, at: NOW - 2 * HOUR }, turnAt: 0 } as never, undefined, NOW)).toBe('context 213k · idle 2h · wake ≈277k')
+  expect(contextLine({ ...idle, isRunning: true }, undefined, { tokens: 213_000, at: NOW }, NOW)).toBe('context 213k · running')
+  expect(contextLine(idle, undefined, undefined, NOW)).toBeNull()
+  setLang('zh-TW')
+  expect(contextLine(idle, { context: { tokens: 213_000, at: NOW - 2 * HOUR }, turnAt: 0 } as never, undefined, NOW)).toBe('上下文 21.3 萬・閒置 2 小時・喚醒約 27.7 萬')
+  expect(contextLine({ ...idle, isRunning: true }, undefined, { tokens: 213_000, at: NOW }, NOW)).toBe('上下文 21.3 萬・執行中')
+})
+
+test('T-48: thresholds, the send hold and the settings edit decide on plain data', () => {
+  expect(parseThresholds('')).toEqual({ show: true })
+  expect(parseThresholds('default')).toEqual({ reset: true })
+  expect(parseThresholds('200k 300k')).toEqual({ set: { handoff: 200_000, compact: 300_000 } })
+  expect(parseThresholds('20萬 0.3m')).toEqual({ set: { handoff: 200_000, compact: 300_000 } })
+  expect(parseThresholds('50k 300k')).toEqual({ error: true })
+  expect(thresholdsOf('garbage')).toEqual({ handoff: 200_000, compact: 300_000 })
+  expect(shouldCompact(299_999, 300_000, undefined)).toBe(false)
+  expect(shouldCompact(300_000, 300_000, undefined)).toBe(true)
+  // A failed try is not repeated until the context has grown by 100k.
+  expect(shouldCompact(350_000, 300_000, 300_000)).toBe(false)
+  expect(shouldCompact(400_000, 300_000, 300_000)).toBe(true)
+  // The settings file: only autoCompactWindow changes, and the undo gives every byte back.
+  const before = '{\n  "permissions": {\n    "allow": ["Bash(npm test)"]\n  },\n  "model": "opus"\n}\n'
+  const set = withAutoCompact(before, 300_000)!
+  expect(JSON.parse(set)).toEqual({ ...JSON.parse(before), autoCompactWindow: 300_000 })
+  expect(withoutAutoCompact(set, null)).toBe(before)
+  const had = '{\n  "autoCompactWindow": "auto"\n}\n'
+  expect(withoutAutoCompact(withAutoCompact(had, 300_000)!, 'auto')).toBe(had)
+  expect(withAutoCompact('{ not json', 300_000)).toBeNull()
+  expect(withAutoCompact(null, 300_000)).toBe('{\n  "autoCompactWindow": 300000\n}\n')
+})
+
+/** A PM (local_pm) of the Acme project, with the app's live context figure set by `usage`. */
+function quotaWorld($: Parameters<TestBody>[0], on: On, self: string, files: Files, opts: { usage?: () => number; sessions?: typeof SESSIONS; counts?: Counts } = {}) {
+  if (!files.has(PROJECT_FILE)) files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  const clock = mock.clock(on, { now: NOW })
+  const counts: Counts = opts.counts ?? { reads: 0, calls: [], sessions: opts.sessions }
+  world(on, self, files, [], () => null, [], [], counts)
+  on('session.usage', () => ({ value: { startedAt: NOW, context: { tokens: opts.usage?.(), window: 1_000_000 }, rateLimits: [] } }) as never)
+  on('turn.complete', () => ({ text: '' }))
+  on('prompt.compose', () => ({ sections: [] }))
+  const submitted: string[] = []
+  on('prompt.submit', ($, e) => {
+    submitted.push(e.text)
+
+    return { text: e.text }
+  })
+  const turn = (agentId?: string) => $.turn.complete({ answer: '好。', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', ...(agentId ? { agentId } : {}) })
+  const mine = () => JSON.parse(files.get(`${DIR}/sessions/${self}.json`) ?? '{}')
+  const sections = async () => (await $.prompt.compose(M8_COMPOSE)).sections
+
+  return { clock, turn, mine, sections, submitted }
+}
+
+test('T-48: the PM compacts itself at the threshold, once, between turns; a subagent turn records nothing', ZH, async ($, on) => {
+  const files: Files = new Map()
+  let usage = 299_999
+  const { clock, turn, mine } = quotaWorld($, on, 'local_pm', files, { usage: () => usage, sessions: WITH_PM })
+  const compacts: (string | undefined)[] = []
+  on('session.compact', ($, e) => {
+    compacts.push(e.instructions)
+
+    return { messages: SUMMARY, tokensBefore: usage, tokensAfter: 21_000 }
+  })
+  await $.session.start(START)
+  await turn()
+  await clock.advance(3_000)
+  expect(compacts).toEqual([])
+  expect(mine().context).toEqual({ tokens: 299_999, at: NOW })
+  // A subagent's turn is not the session's context.
+  usage = 900_000
+  await turn('a1')
+  expect(mine().context.tokens).toBe(299_999)
+
+  usage = 300_000
+  await turn()
+  // Not inside the turn: a moment after it, between turns.
+  expect(compacts).toEqual([])
+  await clock.advance(2_000)
+  expect(compacts).toEqual([t('context.compactInstructions')])
+  expect(mine()).toMatchObject({ compactedTo: 21_000, compacted: { before: 300_000, after: 21_000, isMeasured: false } })
+  // The next turn's figure is the "after" people see; the context is under the threshold, so no second compaction.
+  usage = 45_000
+  await turn()
+  await clock.advance(5_000)
+  expect(compacts.length).toBe(1)
+  expect(mine().compacted).toMatchObject({ before: 300_000, after: 45_000, isMeasured: true })
+  const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board', include_done: true } as never)) as { result?: unknown }).result)
+  expect(board).toMatch(/已自動整理對話：30\.0 萬 → 4\.5 萬/)
+})
+
+test('T-48: a session that is not the PM never compacts itself', ZH, async ($, on) => {
+  const files: Files = new Map()
+  const { clock, turn } = quotaWorld($, on, 'local_open', files, { usage: () => 900_000 })
+  let compacts = 0
+  on('session.compact', () => {
+    compacts += 1
+
+    return { messages: SUMMARY, tokensAfter: 1 }
+  })
+  on('command.run', { command: 'compact' }, () => {
+    compacts += 1
+
+    return { text: '' }
+  })
+  await $.session.start(START)
+  await turn()
+  await clock.advance(10_000)
+  expect(compacts).toBe(0)
+})
+
+test('T-48: the SDK refuses $.session.compact, so the PM compacts through /compact; one that never comes counts as failed', ZH, async ($, on) => {
+  const files: Files = new Map()
+  const { clock, turn, mine } = quotaWorld($, on, 'local_pm', files, { usage: () => 310_000 })
+  const commands: string[] = []
+  on('session.compact', () => {
+    throw new Error('not available in a headless (-p / SDK) session yet')
+  })
+  // The engine runs /compact once the session is idle; here it is queued and never runs.
+  on('command.run', { command: 'compact' }, ($, e) => {
+    commands.push(e.args)
+
+    return { text: '' }
+  })
+  await $.session.start(START)
+  await turn()
+  await clock.advance(2_000)
+  expect(commands).toEqual([t('context.compactInstructions')])
+  expect(mine().selfHandoff).toBeUndefined()
+  await clock.advance(61_000)
+  expect(mine()).toMatchObject({ compactFailedAt: 310_000, selfHandoff: { tokens: 310_000 } })
+})
+
+test('T-48: both compactions failing, the PM hands itself over on the person\'s next turn, and only then the button', ZH, async ($, on) => {
+  const files: Files = new Map()
+  const { clock, turn, mine, sections } = quotaWorld($, on, 'local_pm', files, { usage: () => 320_000, sessions: WITH_PM })
+  let tries = 0
+  on('session.compact', () => {
+    tries += 1
+    throw new Error('not available in a headless (-p / SDK) session yet')
+  })
+  on('command.run', { command: 'compact' }, () => {
+    tries += 1
+    throw new Error('unknown command')
+  })
+  on('tool.call', { tool: 'mcp__ccd_session__start_session' }, () => ({ result: 'Not started: a turn another session\'s message started can only propose a session.', isError: true }))
+  await $.session.start(START)
+  await turn()
+  await clock.advance(2_000)
+  expect(tries).toBe(2)
+  expect(mine()).toMatchObject({ compactFailedAt: 320_000, selfHandoff: { tokens: 320_000 } })
+  // Not tried again at the same size.
+  await turn()
+  await clock.advance(5_000)
+  expect(tries).toBe(2)
+
+  // A turn the mod started is not the person's: no hand-over yet (start_session would be refused there).
+  expect((await sections()).some(s => s.id === 'project-pm:self-handoff')).toBe(false)
+  await $.prompt.submit({ text: '看板怎麼樣了？' } as never)
+  const told = (await sections()).find(s => s.id === 'project-pm:self-handoff')?.text ?? ''
+  expect(told).toMatch(/你的上下文已 32\.0 萬，超過壓縮門檻/)
+  expect(told).toContain('[project-pm:handover-from local_pm]')
+  expect(told).toMatch(/reports\/Acme 商店後台\/pm-handover-/)
+  // Its start_session is refused: the hand-over failed too, and only now the pane offers the button.
+  await $.tool.call({ tool: 'mcp__ccd_session__start_session', title: 'Acme 商店後台 · PM', prompt: `${handoverMarker('local_pm')} 你是「Acme 商店後台」的 PM，先讀交接筆記。` } as never)
+  await turn()
+  expect(mine().selfHandoff.failedAt).toBe(NOW + 7_000)
+  await clock.advance(400)
+  const ui = await $.ui.mount({
+    plugin: 'project-pm',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: 'project-pm',
+    props: { title: 'PM', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 120 } },
+  } as never)
+  expect(await ui.find({ type: 'Text', text: t('context.buttonScope', { project: 'Acme 商店後台' }) })).toBeDefined()
+  // Pressed: only autoCompactWindow is written, every other byte kept; the undo gives the file back.
+  const settings = `${PROJECT.replace(/\\/g, '/')}/.claude/settings.local.json`.replace(/^.+\/(?=[a-z]:\/)/i, '')
+  const before = '{\n  "permissions": {\n    "allow": ["Bash(npm test)"]\n  }\n}\n'
+  files.set(settings, before)
+  await ui.press({ key: 'autocompact:set' })
+  expect(JSON.parse(files.get(settings)!)).toEqual({ permissions: { allow: ['Bash(npm test)'] }, autoCompactWindow: 300_000 })
+  expect(mine().autoCompactSet).toMatchObject({ before })
+  await clock.advance(400)
+  await ui.press({ key: 'autocompact:undo' })
+  expect(files.get(settings)).toBe(before)
+  expect(mine().autoCompactSet).toBeUndefined()
+  await ui.unmount()
+})
+
+test('T-48: a session past the hand-over threshold with work left is asked to hand over; 199,999 is not', ZH, async ($, on) => {
+  const files: Files = new Map()
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { plan: [{ content: '畫表格', status: 'completed' }, { content: '加篩選', status: 'pending' }] })))
+  let usage = 199_999
+  const { turn, sections } = quotaWorld($, on, 'local_open', files, { usage: () => usage })
+  await $.session.start(START)
+  await turn()
+  expect((await sections()).some(s => s.id === 'project-pm:handoff')).toBe(false)
+  usage = 200_000
+  await turn()
+  const ask = (await sections()).find(s => s.id === 'project-pm:handoff')?.text ?? ''
+  expect(ask).toMatch(/^你的上下文已 20\.0 萬，超過交接門檻（20\.0 萬）：在下一個里程碑段落停下來/)
+  expect(ask).toContain('[交接, sha]')
+})
+
+test('T-48: an idle session past the threshold wakes the PM once, and the board says it is handing over', ZH, async ($, on) => {
+  const files: Files = new Map()
+  files.set(
+    `${DIR}/sessions/local_open.json`,
+    JSON.stringify(track('local_open', { plan: [{ content: '加篩選', status: 'pending' }], context: { tokens: 250_000, at: NOW - 2 * HOUR }, turnAt: NOW - 2 * HOUR })),
+  )
+  const { clock, submitted } = quotaWorld($, on, 'local_pm', files)
+  await $.session.start(START)
+  for (let i = 0; i < 4; i++) await clock.advance(31_000)
+  const wakes = submitted.filter(text => text.includes('local_open'))
+  expect(wakes.length).toBe(1)
+  expect(wakes[0]).toMatch(/^「商品列表頁」\(local_open\) 的上下文已 25\.0 萬，超過交接門檻/)
+  const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(board).toMatch(/- \[交接中\] 「商品列表頁」\(local_open\) 上下文 25\.0 萬：等它寫好筆記/)
+  expect(board).toMatch(/上下文 25\.0 萬・閒置 12 分鐘・喚醒約 2\.5 萬/)
+})
+
+test('T-48: a hand-over the app would not start is started at the person\'s next message', ZH, async ($, on) => {
+  const files: Files = new Map()
+  const { sections } = quotaWorld($, on, 'local_pm', files)
+  let isRefused = true
+  on('tool.call', { tool: 'mcp__ccd_session__start_session' }, () =>
+    isRefused ? { result: 'Not started: this turn was started by another session\'s message; only a proposal is possible.', isError: true } : { result: 'Started local_new42 (T-12 接手).' },
+  )
+  await $.session.start(START)
+  const brief = { title: 'T-12 接手', prompt: '交接：先讀 C:/notes/t12-handover.md，再做剩下的匯出。' }
+  await $.tool.call({ tool: 'mcp__ccd_session__start_session', ...brief } as never)
+  const board = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(board).toMatch(/- \[待開交接\] 「T-12 接手」的筆記好了，下一輪開新 Session/)
+  await $.prompt.submit({ text: '進度如何？' } as never)
+  const pending = (await sections()).find(s => s.id === 'project-pm:pending-handoffs')?.text ?? ''
+  expect(pending).toMatch(/^下面這些交接上次沒能開新 Session/)
+  expect(pending).toContain('- 「T-12 接手」：交接：先讀 C:/notes/t12-handover.md')
+  isRefused = false
+  await $.tool.call({ tool: 'mcp__ccd_session__start_session', ...brief } as never)
+  expect((await sections()).some(s => s.id === 'project-pm:pending-handoffs')).toBe(false)
+})
+
+test('T-48: the PM\'s SendMessage to a costly idle session waits once', ZH, async ($, on) => {
+  const files: Files = new Map()
+  const old = new Date(NOW - 2 * HOUR).toISOString()
+  const recent = new Date(NOW - 30 * 60_000).toISOString()
+  const sessions = [
+    { sessionId: 'local_open', title: '商品列表頁', cwd: PROJECT, isArchived: false, isRunning: false, lastActivityAt: old },
+    { sessionId: 'local_ask', title: '移除舊版優惠欄位', cwd: PROJECT, isArchived: false, isRunning: false, lastActivityAt: recent },
+    { sessionId: 'local_small', title: '小改動', cwd: PROJECT, isArchived: false, isRunning: false, lastActivityAt: old },
+  ]
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { lastAnswer: '好了。', context: { tokens: 100_000, at: NOW - 2 * HOUR }, turnAt: NOW - 2 * HOUR })))
+  files.set(`${DIR}/sessions/local_ask.json`, JSON.stringify(track('local_ask', { lastAnswer: '好了。', context: { tokens: 300_000, at: NOW - 30 * 60_000 }, turnAt: NOW - 30 * 60_000 })))
+  files.set(`${DIR}/sessions/local_small.json`, JSON.stringify(track('local_small', { lastAnswer: '好了。', context: { tokens: 70_000, at: NOW - 2 * HOUR }, turnAt: NOW - 2 * HOUR })))
+  const { clock } = quotaWorld($, on, 'local_pm', files, { sessions })
+  on('tool.call', { tool: 'SendMessage' }, () => ({ result: 'sent' }))
+  await $.session.start(START)
+  await clock.advance(1_000)
+  const send = async (to: string, message: string, agentId?: string) => {
+    const out = (await $.tool.call({ tool: 'SendMessage', to, message, ...(agentId ? { agentId } : {}) } as never)) as { result?: unknown; deny?: string }
+
+    return out.deny ?? String(out.result)
+  }
+  const held = await send('local_open', '請補上匯出的測試')
+  expect(held).toMatch(/^喚醒「商品列表頁」約要 13\.0 萬（上下文 10\.0 萬、閒置 2 小時）/)
+  // The same message again within ten minutes goes through; another message is weighed again.
+  await clock.advance(60_000)
+  expect(await send('local_open', '請補上匯出的測試')).toBe('sent')
+  expect(await send('local_open', '另一件事')).toMatch(/^喚醒「商品列表頁」/)
+  // Within the hour, a small one, and an agent's own send go through.
+  expect(await send('local_ask', '繼續')).toBe('sent')
+  expect(await send('local_small', '繼續')).toBe('sent')
+  expect(await send('local_open', '第三件事', 'a1')).toBe('sent')
+})
+
+test('T-48: in English, the hold and the hand-over ask', { options: { language: 'en' } }, async ($, on) => {
+  const files: Files = new Map()
+  const old = new Date(NOW - 2 * HOUR).toISOString()
+  files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { lastAnswer: 'Done.', context: { tokens: 100_000, at: NOW - 2 * HOUR }, turnAt: NOW - 2 * HOUR })))
+  const { clock } = quotaWorld($, on, 'local_pm', files, { sessions: [{ sessionId: 'local_open', title: 'Product list', cwd: PROJECT, isArchived: false, isRunning: false, lastActivityAt: old }] })
+  on('tool.call', { tool: 'SendMessage' }, () => ({ result: 'sent' }))
+  await $.session.start(START)
+  await clock.advance(1_000)
+  const out = (await $.tool.call({ tool: 'SendMessage', to: 'local_open', message: 'Add the export test' } as never)) as { deny?: string }
+  expect(out.deny).toMatch(/^Waking "Product list" costs about 130k \(context 100k, idle 2h\)/)
+  setLang('en')
+  expect(t('context.handoffAsk', { tokens: '213k', threshold: '200k', template: 'x' })).toMatch(/^Your context is 213k, past the hand-over threshold \(200k\)/)
+})
+
+test('T-48: a new PM claims on the hand-over marker only when the old PM started it', ZH, async ($, on) => {
+  const files: Files = new Map()
+  files.set(`${DIR}/sessions/local_pm.json`, JSON.stringify(track('local_pm', { lastAnswer: '交接中。', selfHandoff: { at: NOW, tokens: 320_000, to: 'local_other' } })))
+  const { clock } = quotaWorld($, on, 'local_new', files)
+  await $.session.start(START)
+  const pmOf = () => JSON.parse(files.get(PROJECT_FILE)!).pmId
+  await $.prompt.submit({ text: `${handoverMarker('local_pm')} 你是「Acme 商店後台」的 PM，先讀交接筆記。` } as never)
+  expect(pmOf()).toBe('local_pm')
+  // The old PM's answer names this session a moment later: the claim is tried again and goes through.
+  files.set(`${DIR}/sessions/local_pm.json`, JSON.stringify(track('local_pm', { lastAnswer: '交接中。', selfHandoff: { at: NOW, tokens: 320_000, to: 'local_new' } })))
+  await clock.advance(2_100)
+  expect(pmOf()).toBe('local_new')
+})
+
+test('T-48: /pm context shows, sets and resets the thresholds', ZH, async ($, on) => {
+  const files: Files = new Map()
+  quotaWorld($, on, 'local_pm', files)
+  const saved: unknown[] = []
+  on('config.set', ($, e) => {
+    saved.push(e.value)
+
+    return { value: e.value }
+  })
+  await $.session.start(START)
+  const pm = async (args: string) => String(((await $.command.run({ command: 'pm', args } as never)) as { text?: unknown }).text)
+  expect(await pm('context')).toMatch(/^交接和壓縮的門檻：200k 300k/)
+  expect(await pm('context 150k 250k')).toBe('已設定門檻：交接 150k、壓縮 250k。')
+  expect(await pm('context')).toMatch(/^交接和壓縮的門檻：150k 250k/)
+  expect(await pm('context default')).toBe('已恢復預設門檻：交接 200k、壓縮 300k。')
+  expect(saved).toEqual(['150k 250k', ''])
 })
