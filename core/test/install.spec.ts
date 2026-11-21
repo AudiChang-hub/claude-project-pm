@@ -11,7 +11,8 @@ import { join, relative } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
 import type { InstallEnv } from '../src/install'
-import { AGENTS_LIMIT, END, binPath, deleteAfterExit, mcpLauncher, SECTION_LIMIT, START, agentsSection, init, readLog, shCommand, skillText, uninstall, withBlock, withoutBlock } from '../src/install'
+import type { Done } from '../src/install'
+import { END, apply, binPath, claudeSection, deleteAfterExit, mcpLauncher, SECTION_LIMIT, START, init, readLog, shCommand, skillText, uninstall, withBlock, withoutBlock, writeLog } from '../src/install'
 import { NotPlainPathError } from '../src/localpath'
 import { ct } from '../src/messages'
 import type { ProjectRef } from '../src/project'
@@ -83,7 +84,8 @@ for (const lang of LANGS) {
       const text = said.join('\n')
       assert.ok(text.includes(ct('init.heading', { project: 'acme-shop', path: ref.path })))
       assert.ok(text.includes(ct('init.dryRun')))
-      assert.ok(text.includes(join(w.repo, 'AGENTS.md')))
+      assert.ok(text.includes(join(w.repo, 'CLAUDE.md')))
+      assert.ok(!text.includes('AGENTS.md'))
       assert.ok(text.includes('claude mcp add --scope user project-pm -- "C:/Program Files/Acme Tools/project-pm.exe" mcp'))
       assert.ok(text.includes('project-pm-qa.yml'))
     })
@@ -91,10 +93,9 @@ for (const lang of LANGS) {
     test('no CLAUDE.md, no AGENTS.md: init writes every piece, uninstall leaves the very same files', async () => {
       const before = snapshot(w.home, w.repo)
       await init(ref, ie(), { yes: true, ci: false }, say)
-      const agents = readFileSync(join(w.repo, 'AGENTS.md'), 'utf8')
-      assert.equal(agents, `${agentsSection(false)}\n`)
-      assert.ok(Buffer.byteLength(agentsSection(false)) <= SECTION_LIMIT)
-      assert.ok(!existsSync(join(w.repo, 'CLAUDE.md')))
+      assert.equal(readFileSync(join(w.repo, 'CLAUDE.md'), 'utf8'), `${claudeSection()}\n`)
+      assert.ok(Buffer.byteLength(claudeSection()) <= SECTION_LIMIT)
+      assert.ok(!existsSync(join(w.repo, 'AGENTS.md')))
       assert.equal(readFileSync(join(claude(), 'skills', 'project-pm', 'SKILL.md'), 'utf8'), skillText())
       const settings = JSON.parse(readFileSync(join(claude(), 'settings.json'), 'utf8'))
       assert.equal(settings.model, 'opus')
@@ -111,15 +112,21 @@ for (const lang of LANGS) {
     test('a CLAUDE.md that already reads @AGENTS.md, and an AGENTS.md without a last newline, come back byte for byte', async () => {
       write(join(w.repo, 'CLAUDE.md'), '# Acme\n\n@AGENTS.md\n')
       write(join(w.repo, 'AGENTS.md'), '# Acme agents\nUse pnpm.')
-      await roundTrip()
+      const before = snapshot(w.home, w.repo)
+      await init(ref, ie(), { yes: true, ci: false }, say)
+      assert.equal(readFileSync(join(w.repo, 'AGENTS.md'), 'utf8'), '# Acme agents\nUse pnpm.')
+      assert.equal(readFileSync(join(w.repo, 'CLAUDE.md'), 'utf8'), `# Acme\n\n@AGENTS.md\n\n${claudeSection()}\n`)
+      await uninstall(ref, ie(), { yes: true, hooksOnly: false }, say)
+      assert.deepEqual(snapshot(w.home, w.repo), before)
       assert.equal(readFileSync(join(w.repo, 'CLAUDE.md'), 'utf8'), '# Acme\n\n@AGENTS.md\n')
     })
 
-    test('a CLAUDE.md without @AGENTS.md (CRLF) gets the line at its top, and loses it again', async () => {
+    test('a CLAUDE.md (CRLF) gets the section after its own text, and loses it again', async () => {
       write(join(w.repo, 'CLAUDE.md'), '# Acme\r\nShip on Fridays.\r\n')
       const before = snapshot(w.home, w.repo)
       await init(ref, ie(), { yes: true, ci: false }, say)
-      assert.ok(readFileSync(join(w.repo, 'CLAUDE.md'), 'utf8').startsWith(`${START}\n@AGENTS.md\n${END}\n# Acme\r\n`))
+      assert.equal(readFileSync(join(w.repo, 'CLAUDE.md'), 'utf8'), `# Acme\r\nShip on Fridays.\r\n\n${claudeSection()}\n`)
+      assert.ok(!readFileSync(join(w.repo, 'CLAUDE.md'), 'utf8').startsWith(`${START}\n@AGENTS.md\n${END}`))
       await uninstall(ref, ie(), { yes: true, hooksOnly: false }, say)
       assert.deepEqual(snapshot(w.home, w.repo), before)
     })
@@ -143,7 +150,7 @@ for (const lang of LANGS) {
     })
 
     test('init run twice adds nothing twice, and uninstall still gives back the first state', async () => {
-      write(join(w.repo, 'AGENTS.md'), '# Acme agents\n')
+      write(join(w.repo, 'CLAUDE.md'), '# Acme\n')
       const before = snapshot(w.home, w.repo)
       await init(ref, ie(), { yes: true, ci: false }, say)
       const once = snapshot(w.home, w.repo)
@@ -154,9 +161,9 @@ for (const lang of LANGS) {
     })
 
     test('a file changed after init loses only what init put in', async () => {
-      write(join(w.repo, 'AGENTS.md'), '# Acme agents\n')
+      write(join(w.repo, 'CLAUDE.md'), '# Acme agents\n')
       await init(ref, ie(), { yes: true, ci: false }, say)
-      const agents = join(w.repo, 'AGENTS.md')
+      const agents = join(w.repo, 'CLAUDE.md')
       writeFileSync(agents, `${readFileSync(agents, 'utf8')}\nRun the Acme tests first.\n`)
       const settings = join(claude(), 'settings.json')
       writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), theme: 'dark' }))
@@ -174,7 +181,7 @@ for (const lang of LANGS) {
       assert.ok(!out.applied.some(d => d.kind === 'mcp' || d.kind === 'hooks'))
     })
 
-    test('without Claude Code, init says so and still sets up git and AGENTS.md', async () => {
+    test('without Claude Code, init says so and still sets up git and CLAUDE.md', async () => {
       const out = await roundTrip({ run: fakeClaude(w.home, hostWith(), { installed: false }) })
       assert.ok(out.notes.includes(ct('init.noClaude')))
       assert.ok(!out.applied.some(d => d.kind === 'mcp'))
@@ -195,11 +202,73 @@ for (const lang of LANGS) {
       assert.deepEqual(snapshot(w.home, w.repo), before)
     })
 
-    test('a long AGENTS.md chain gets the one-line section', async () => {
-      write(join(w.repo, 'AGENTS.md'), `# Acme\n${'Acme rule.\n'.repeat(Math.ceil(AGENTS_LIMIT / 11))}`)
+    test('the AGENTS.md files a project has of its own are left as they are (T-40)', async () => {
+      write(join(w.repo, 'AGENTS.md'), '# Acme agents\nUse pnpm.\n')
+      write(join(w.repo, 'AGENTS.override.md'), `# Acme override\n${'Acme rule.\n'.repeat(3000)}`)
       const out = await roundTrip()
-      assert.ok(out.notes.includes(ct('init.agentsLong')))
-      assert.ok(said.join('\n').includes(agentsSection(true).split('\n')[1]!))
+      assert.ok(!out.applied.some(d => 'file' in d && d.file.includes('AGENTS')))
+      assert.equal(readFileSync(join(w.repo, 'AGENTS.md'), 'utf8'), '# Acme agents\nUse pnpm.\n')
+    })
+
+    /** What v1.0's init wrote for this project's instructions: its AGENTS.md section, and @AGENTS.md atop a CLAUDE.md there was. */
+    const v1Install = async () => {
+      const v1Section = `${START}\n## Project PM\n\nProject PM keeps this project's work list and its QA. Every AI tool working in this project: …\n${END}`
+      const done: Done[] = []
+      const keep = async (change: Parameters<typeof apply>[0]) => {
+        const { prior: _, ...one } = await apply(change, ie(), ref)
+        done.push(one)
+      }
+      const hadClaudeMd = existsSync(join(w.repo, 'CLAUDE.md'))
+      await keep({ kind: 'text', file: join(w.repo, 'AGENTS.md'), block: v1Section })
+      if (hadClaudeMd) await keep({ kind: 'text', file: join(w.repo, 'CLAUDE.md'), block: `${START}\n@AGENTS.md\n${END}`, atTop: true })
+      await writeLog(w.env, { version: '1.0.0', entries: done })
+    }
+
+    for (const [name, files] of [
+      ['no CLAUDE.md, no AGENTS.md', {}],
+      ['its own CLAUDE.md (CRLF) and AGENTS.md', { 'CLAUDE.md': '# Acme\r\nShip on Fridays.\r\n', 'AGENTS.md': '# Acme agents\nUse pnpm.' }],
+    ] as const) {
+      test(`a v1.0 install (${name}): uninstall puts AGENTS.md and CLAUDE.md back as they were`, async () => {
+        for (const [file, text] of Object.entries(files)) write(join(w.repo, file), text)
+        const before = snapshot(w.home, w.repo)
+        await v1Install()
+        assert.ok(readFileSync(join(w.repo, 'AGENTS.md'), 'utf8').includes(START))
+        await uninstall(ref, ie(), { yes: true, hooksOnly: false }, say)
+        assert.deepEqual(snapshot(w.home, w.repo), before)
+      })
+
+      test(`a v1.0 install (${name}): init moves the section into CLAUDE.md, and uninstall still puts everything back`, async () => {
+        for (const [file, text] of Object.entries(files)) write(join(w.repo, file), text)
+        const before = snapshot(w.home, w.repo)
+        await v1Install()
+        const out = await init(ref, ie({ now: Date.now() + 1000 }), { yes: true, ci: false }, say)
+        assert.deepEqual(out.failed, [])
+        assert.ok(said.join('\n').includes(ct('init.retire', { file: join(w.repo, 'AGENTS.md') })))
+        // AGENTS.md as it was before v1.0 (none, or the project's own); CLAUDE.md with the section, not @AGENTS.md.
+        const own = (files as Record<string, string>)['AGENTS.md']
+        if (own !== undefined) assert.equal(readFileSync(join(w.repo, 'AGENTS.md'), 'utf8'), own)
+        else assert.ok(!existsSync(join(w.repo, 'AGENTS.md')))
+        const claudeMd = readFileSync(join(w.repo, 'CLAUDE.md'), 'utf8')
+        assert.ok(claudeMd.includes(claudeSection()))
+        assert.ok(!claudeMd.includes('@AGENTS.md'))
+        assert.ok(!(await readLog(w.env)).entries.some(e => 'file' in e && e.file.endsWith('AGENTS.md')))
+        await uninstall(ref, ie(), { yes: true, hooksOnly: false }, say)
+        assert.deepEqual(snapshot(w.home, w.repo), before)
+      })
+    }
+
+    test('a v1.0 AGENTS.md that now leads to a network share stops init before anything is changed (T-39, T-40)', async t => {
+      if (process.platform !== 'win32') return t.skip('only Windows reads \\\\host\\share as another machine')
+      await v1Install()
+      const before = snapshot(w.home, w.repo)
+      const fs = watchFs({ [join(w.repo, 'AGENTS.md')]: `\\\\${PROBE_HOST}\\share\\AGENTS.md` })
+      try {
+        await assert.rejects(init(ref, ie(), { yes: true, ci: false }, say), NotPlainPathError)
+        assert.deepEqual(fs.remote, [])
+      } finally {
+        fs.restore()
+      }
+      assert.deepEqual(snapshot(w.home, w.repo), before)
     })
 
     test('uninstall in one project keeps what another project still uses', async () => {
@@ -222,7 +291,7 @@ for (const lang of LANGS) {
       await init(ref, ie(), { yes: true, ci: false }, say)
       await uninstall(ref, ie(), { yes: true, hooksOnly: true }, say)
       assert.ok(!existsSync(join(w.repo, '.git', 'hooks', 'pre-push')))
-      assert.ok(existsSync(join(w.repo, 'AGENTS.md')))
+      assert.ok(existsSync(join(w.repo, 'CLAUDE.md')))
       assert.deepEqual((await readLog(w.env)).entries.map(e => e.kind).sort(), ['hooks', 'mcp', 'text', 'whole'])
     })
 
@@ -276,9 +345,21 @@ for (const lang of LANGS) {
       assert.equal(readFileSync(join(w.repo, '.gitignore'), 'utf8'), 'node_modules/\n.project-pm/\n')
     })
 
-    test('a committed AGENTS.md, CLAUDE.md or .project-pm that leads to a network share stops init before anything is read or written there (T-39)', async t => {
+    test('a committed CLAUDE.md or .project-pm that leads to a network share stops init before anything is read or written there (T-39)', async t => {
       if (process.platform !== 'win32') return t.skip('only Windows reads \\\\host\\share as another machine')
-      for (const name of ['AGENTS.md', 'AGENTS.override.md', 'CLAUDE.md']) {
+      // AGENTS.md files are never read since v1.1 (T-40): one that leads to a share is never connected to either.
+      for (const name of ['AGENTS.md', 'AGENTS.override.md']) {
+        const before = snapshot(w.home, w.repo)
+        const fs = watchFs({ [join(w.repo, name)]: `\\\\${PROBE_HOST}\\share\\${name}` })
+        try {
+          await init(ref, ie(), { yes: false, ci: false }, say)
+          assert.deepEqual(fs.remote, [], name)
+        } finally {
+          fs.restore()
+        }
+        assert.deepEqual(snapshot(w.home, w.repo), before, name)
+      }
+      for (const name of ['CLAUDE.md']) {
         const before = snapshot(w.home, w.repo)
         const fs = watchFs({ [join(w.repo, name)]: `\\\\${PROBE_HOST}\\share\\${name}` })
         try {

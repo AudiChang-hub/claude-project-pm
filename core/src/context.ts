@@ -11,7 +11,7 @@ import { resolveProject } from './project'
 export type Ctx = {
   /** The calling session's actor id (1.5). */
   actor: string
-  /** Its tool: claude-code, codex, … */
+  /** Its tool: claude-code, or mcp for a client that does not name itself. */
   tool: string
   /** The folder the connection works in: a tool's `project` overrides it. */
   cwd: string

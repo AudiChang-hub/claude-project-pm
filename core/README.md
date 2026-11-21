@@ -49,7 +49,7 @@ In a terminal, go to your project's folder (a git repository) and run:
 ## What it changes
 
 - Claude Code's MCP setting (`claude mcp add --scope user project-pm`), and its hooks in `~/.claude/settings.json` (a hook is a command Claude Code runs on its own at set moments, such as when you send a message; these ones tell the board where each session stands).
-- A section in your project's `AGENTS.md`, and `@AGENTS.md` at the top of `CLAUDE.md` if you have one.
+- A section in your project's `CLAUDE.md` (made if there is none). An install by v1.0, which wrote it into `AGENTS.md`, moves it there the next time you run `init`; `uninstall` puts both files back either way.
 - The skill `~/.claude/skills/project-pm/SKILL.md`.
 - A git `pre-push` hook (a check git runs before every `git push`): a push waits until its commits are checked. `git pm skip "<reason>"` lets a push through on purpose; the reason shows on the board.
 - Optional (`--ci`): `.github/workflows/project-pm-qa.yml`.

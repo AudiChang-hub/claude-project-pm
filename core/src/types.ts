@@ -35,7 +35,7 @@ export type CoreProject = Omit<ProjectFile, 'ledger'> & {
 /** A session (or agent) as the core keeps it: where it works, and what it last reported (the mod's Track). */
 export type Actor = {
   id: string
-  /** The tool it runs in: claude-code, codex, … (MCP clientInfo, or the hook). */
+  /** The tool it runs in: claude-code (MCP clientInfo, or the hook). */
   tool: string
   title: string
   cwd: string

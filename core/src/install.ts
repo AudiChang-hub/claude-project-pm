@@ -28,8 +28,6 @@ export const END = '<!-- project-pm:end -->'
 export const SH_START = '# project-pm:start v1'
 /** Claude Code's events the core's hooks answer, and the tools each one is about ('' is every tool). */
 export const HOOK_EVENTS = { UserPromptSubmit: '', PreToolUse: 'Edit|MultiEdit|Write|NotebookEdit', PostToolUse: 'TodoWrite|TaskCreate|TaskUpdate|Bash|PowerShell|Edit|MultiEdit|Write|NotebookEdit', Stop: '' } as const
-/** Codex reads 32 KiB of the AGENTS.md chain at most (X2): past this, the section shrinks to one line. */
-export const AGENTS_LIMIT = 28 * 1024
 /** The section's own budget (5.3). */
 export const SECTION_LIMIT = 2 * 1024
 
@@ -41,6 +39,8 @@ export type Change =
   | { kind: 'hooks'; file: string; command: string }
   | { kind: 'prepush'; file: string; command: string }
   | { kind: 'alias'; repo: string; value: string }
+  /** v1.0 wrote the section into AGENTS.md: taken out again as uninstall would (from v1.1 on it is in CLAUDE.md). */
+  | { kind: 'retire'; file: string }
 
 /** What one applied change left behind for uninstall. */
 export type Done = Change & {
@@ -93,11 +93,9 @@ export function shCommand(argv: string[]): string {
     .join(' ')
 }
 
-/** The AGENTS.md section: what every AI tool in this project is asked to do. */
-export function agentsSection(isShort: boolean): string {
-  const body = isShort ? ct('agents.short') : ct('agents.section', { tool: REPORT_TOOL })
-
-  return `${START}\n${body.trim()}\n${END}`
+/** The CLAUDE.md section: what every Claude session in this project is asked to do. */
+export function claudeSection(): string {
+  return `${START}\n${ct('claude.section', { tool: REPORT_TOOL }).trim()}\n${END}`
 }
 
 export function skillText(): string {
@@ -123,7 +121,7 @@ export function prePushScript(command: string): string {
 }
 
 /**
- * A file's text, or null when there is none. A repository's AGENTS.md or CLAUDE.md may be a committed link that leads
+ * A file's text, or null when there is none. A repository's CLAUDE.md (or v1.0's AGENTS.md) may be a committed link that leads
  * off this machine's disks: that is an error (NotPlainPathError) before anything is read, never "no file" (init would
  * then write one through it).
  */
@@ -214,18 +212,19 @@ export async function planInstall(ref: ProjectRef, ie: InstallEnv, options: { ci
     }
     changes.push({ kind: 'hooks', file: join(claude, 'settings.json'), command })
   }
-  const agentsFile = join(ref.path, 'AGENTS.md')
-  const agents = withoutOurs(await textOf(agentsFile))
-  const override = (await textOf(join(ref.path, 'AGENTS.override.md'))) ?? ''
-  const isShort = Buffer.byteLength(agents + override) + SECTION_LIMIT > AGENTS_LIMIT
-  if (isShort) notes.push(ct('init.agentsLong'))
   // 2.1: the PM keeps nothing in the project, but a .project-pm/ folder someone made there must not reach git.
   const kept = await localRealpath(join(ref.path, '.project-pm'))
   if (kept && existsSync(kept) && (await ie.run(['git', 'check-ignore', '-q', '.project-pm/'], ref.path)) === null) notes.push(ct('init.gitignoreHint'))
-  changes.push({ kind: 'text', file: agentsFile, block: agentsSection(isShort) })
+  // v1.0's section in AGENTS.md goes; CLAUDE.md gets the section itself, in place of v1.0's @AGENTS.md line when it has one.
+  for (const old of retiredOf(log, ref)) {
+    // Read now, as CLAUDE.md below: one that leads off this machine's disks stops init before anything is changed.
+    await textOf(old.file)
+    changes.push({ kind: 'retire', file: old.file })
+  }
   const claudeFile = join(ref.path, 'CLAUDE.md')
-  const claudeMd = await textOf(claudeFile)
-  if (claudeMd !== null && (claudeMd.includes(START) || !/^@AGENTS\.md\s*$/m.test(claudeMd))) changes.push({ kind: 'text', file: claudeFile, block: `${START}\n@AGENTS.md\n${END}`, atTop: true })
+  // Read now: a committed CLAUDE.md that leads off this machine's disks stops init before anything is changed (T-39).
+  await textOf(claudeFile)
+  changes.push({ kind: 'text', file: claudeFile, block: claudeSection() })
   const skill = join(claude, 'skills', 'project-pm', 'SKILL.md')
   const skillNow = await textOf(skill)
   if (skillNow !== null && !skillNow.includes(START)) notes.push(ct('init.skillTaken', { file: skill }))
@@ -247,8 +246,9 @@ export async function planInstall(ref: ProjectRef, ie: InstallEnv, options: { ci
   return { changes, notes }
 }
 
-function withoutOurs(text: string | null): string {
-  return text === null ? '' : withoutBlock(text)
+/** The AGENTS.md sections v1.0's init wrote for this project, as its log keeps them. */
+export function retiredOf(log: InstallLog, ref: ProjectRef): (Done & { kind: 'text' })[] {
+  return log.entries.filter((e): e is Done & { kind: 'text' } => e.kind === 'text' && e.project === ref.key && basename(e.file) === 'AGENTS.md')
 }
 
 /** How a change reads in init's list: the file and what goes in. */
@@ -268,6 +268,8 @@ export function describe(change: Change): string {
       return ct('init.prepush', { file: change.file })
     case 'alias':
       return ct('init.alias', { value: change.value })
+    case 'retire':
+      return ct('init.retire', { file: change.file })
   }
 }
 
@@ -367,6 +369,9 @@ export async function apply(change: Change, ie: InstallEnv, ref: ProjectRef): Pr
 
       return { ...change, at, existed: before !== null, ...(before !== null ? { before } : {}), project: ref.key }
     }
+    case 'retire':
+      // init undoes the old entry itself (it needs the log): nothing is applied here.
+      throw new Error('retire is undone by init')
   }
 }
 
@@ -398,8 +403,12 @@ export async function undo(done: Done, ie: InstallEnv): Promise<string | void> {
       const now = await textOf(done.file)
       if (now === null) return
       if (now === done.after) {
-        if (done.existed && done.backup && existsSync(done.backup)) await copyFile(done.backup, done.file)
-        else if (!done.existed) await removeMade(done.file, done.root)
+        if (done.existed && done.backup && existsSync(done.backup)) {
+          await copyFile(done.backup, done.file)
+          // A copy made when init ran again over a file changed since may still hold an older section of ours.
+          const back = await textOf(done.file)
+          if (back !== null && done.kind === 'text' && back.includes(START)) await writeAtomic(done.file, withoutBlock(back))
+        } else if (!done.existed) await removeMade(done.file, done.root)
 
         return
       }
@@ -444,6 +453,8 @@ export async function undo(done: Done, ie: InstallEnv): Promise<string | void> {
 
       return
     }
+    case 'retire':
+      return
   }
 }
 
@@ -492,8 +503,17 @@ export async function init(ref: ProjectRef, ie: InstallEnv, options: { yes: bool
   const log = await readLog(ie.env)
   const applied: Done[] = []
   const failed: string[] = []
+  let retired = 0
   for (const change of changes) {
     try {
+      if (change.kind === 'retire') {
+        // v1.0's AGENTS.md section: undone as uninstall would, and no longer in the log.
+        const old = retiredOf(log, ref).find(e => e.file === change.file)
+        if (old) await undo(old, ie)
+        log.entries = log.entries.filter(e => e !== old)
+        retired += 1
+        continue
+      }
       const { prior, ...done } = await apply(change, ie, ref)
       applied.push(done)
       const older = log.entries.findIndex(e => sameTarget(e, done))
@@ -520,7 +540,7 @@ export async function init(ref: ProjectRef, ie: InstallEnv, options: { yes: bool
       failed.push(ct('init.mcpNotListed'))
     }
   }
-  say(failed.length ? ct('init.partly', { n: applied.length, failed: failed.join('\n') }) : ct('init.done', { n: applied.length }))
+  say(failed.length ? ct('init.partly', { n: applied.length + retired, failed: failed.join('\n') }) : ct('init.done', { n: applied.length + retired }))
 
   return { applied, notes, failed }
 }

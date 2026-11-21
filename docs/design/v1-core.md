@@ -434,16 +434,18 @@ add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`
 | 項目 | Claude Code（① 版） | 其他工具（③ ④ 版，開工時查證確切路徑） |
 | --- | --- | --- |
 | MCP 設定 | `claude mcp add --scope user project-pm -- <執行檔的絕對路徑> mcp`（用官方指令，不直接改 JSON）[C1]。執行檔路徑是 `~/.project-pm/bin/project-pm-<版本>`，等於釘選版本；用 npm 安裝的開發者寫 `npx -y project-pm@<版本> mcp` | （其他工具的設定：Codex 的 `~/.codex/config.toml` [X1]，Copilot CLI、Antigravity、Cursor、Devin 各自的設定檔 [H1][A1][U1][W1]，隨其他平台已取消（2026-11-20，使用者決定：只支援 Claude、專注單人作業，見 9.2 節）） |
-| 指示 | 專案的 `AGENTS.md` 段落；若專案有 `CLAUDE.md` 且沒有 `@AGENTS.md`，在 `CLAUDE.md` 開頭加一行 `@AGENTS.md`（Claude Code 有 CLAUDE.md 時不讀 AGENTS.md [C2]） | 同一份 `AGENTS.md` 段落；Antigravity 的 `.agents/rules` 要 frontmatter，Cursor 的 rules 要 `.mdc` [A2][U2]，只有在該工具不讀 AGENTS.md 時才另寫 |
+| 指示 | v1.1 起：專案 `CLAUDE.md` 的段落（5.3 節）。v1.0：專案的 `AGENTS.md` 段落；若專案有 `CLAUDE.md` 且沒有 `@AGENTS.md`，在 `CLAUDE.md` 開頭加一行 `@AGENTS.md`（Claude Code 有 CLAUDE.md 時不讀 AGENTS.md [C2]） | 同一份 `AGENTS.md` 段落；Antigravity 的 `.agents/rules` 要 frontmatter，Cursor 的 rules 要 `.mdc` [A2][U2]，只有在該工具不讀 AGENTS.md 時才另寫 |
 | Skills | `~/.claude/skills/project-pm/SKILL.md`：怎麼回報、怎麼派驗收、怎麼略過 | 各工具的 skills 目錄（格式都是 SKILL.md）[X10][A4][V4][U9][W1] |
 | hooks（第 3 層） | 使用者層級 `~/.claude/settings.json`：Stop、UserPromptSubmit 等事件呼叫 `project-pm hook claude-code <事件>` | 各工具的 hook 設定 [X3][A3][H3][U3][W2] |
 | git hook | 專案的 `.git/hooks/pre-push`（第 6 節），裡面寫執行檔的絕對路徑；專案 `.git/config` 的 alias `pm`，讓 `git pm skip` 不靠 PATH 也能用（6.2 節） | 同左，和 AI 工具無關 |
 | CI | 選填：`.github/workflows/project-pm-qa.yml`（第 6 節） | 同左 |
 
-### 5.3 AGENTS.md 段落
+### 5.3 CLAUDE.md 段落（v1.0 是 AGENTS.md 段落）
+
+**v1.1 起（T-40）**：只支援 Claude 之後，段落直接寫進專案的 `CLAUDE.md`（沒有就建立），不再寫 `AGENTS.md`、不再加 `@AGENTS.md`；為 Codex 準備的 28 KiB 檢查和精簡版段落拿掉。v1.0 裝過的專案，重跑 `init` 時依 `install-log.json` 把 `AGENTS.md` 的段落拿掉（和 `uninstall` 同一套還原），`CLAUDE.md` 的 `@AGENTS.md` 那一行原地換成段落；直接 `uninstall` 也照紀錄把兩個檔完整還原。以下是 v1.0 的原文，留作紀錄。
 
 - 內容：這個專案有 PM；完成、暫停、卡住時呼叫 `report`；沒有工具可用時，摘要最後寫一行交付狀態；程式改完要先驗收才能 push；怎麼略過。
-- 上限：段落本身控制在 2 KiB 以內。Codex 把 AGENTS.md 和 AGENTS.override.md 等合計只讀 32 KiB [X2]，`init` 會算整條 AGENTS.md 鏈的大小，超過 28 KiB 就警告並改用「段落只放一行，指向 Skill」的精簡版。
+- 上限：段落本身控制在 2 KiB 以內。（v1.0：Codex 把 AGENTS.md 和 AGENTS.override.md 等合計只讀 32 KiB [X2]，`init` 會算整條 AGENTS.md 鏈的大小，超過 28 KiB 就警告並改用「段落只放一行，指向 Skill」的精簡版。v1.1 拿掉。）
 - 為什麼 hooks 放使用者層級：Copilot 也會讀專案的 `.claude/settings.json` 裡的 hooks [V3]，放在專案裡會被兩個工具各執行一次；放使用者層級可以避免，也不會把個人設定 commit 進 repo。
 
 ### 5.4 前提

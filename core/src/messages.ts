@@ -99,20 +99,19 @@ const zhTW = {
   'guidelines.fix.settingCopyLater': '原本的準則檔 {file} 是這一輪中途才開始被監看的，那時的內容有一份唯讀備份在 {copy}，但不一定是你同意過的內容。',
   'skip.recorded': '已記錄：{code} 在 {sha} 略過驗收，理由「{reason}」。現在可以 push 了，看板上會顯示這筆略過。',
   'skip.recordedNew': '已記錄：新增 {code}（未登記的 push），在 {sha} 略過驗收，理由「{reason}」。現在可以 push 了，看板上會顯示這筆略過。',
-  'agents.section': `## Project PM
+  'claude.section': `## Project PM
 
-這個專案由 Project PM 管理交辦和驗收。在這個專案工作的每個 AI 工具都請照做：
+這個專案由 Project PM 管理交辦和驗收。在這個專案工作的每個 Claude Session 都請照做：
 
-- 完成、暫停、卡住或需要使用者決定時，用 project-pm 的 \`report\` 工具回報（Claude Code 裡叫 \`{tool}\`），附一句摘要。沒有這個工具時，在最後的摘要寫一行「交付狀態：完成／進行中／卡住」。
+- 完成、暫停、卡住或需要使用者決定時，用 project-pm 的 \`report\` 工具（\`{tool}\`）回報，附一句摘要。沒有這個工具時，在最後的摘要寫一行「交付狀態：完成／進行中／卡住」。
 - 程式改完要先驗收才能 push。push 前會檢查每個 commit 有沒有驗收紀錄，沒有就擋下：請 PM 派驗收，通過後再 push。
 - 確定不需要驗收時（例如只改說明文字），請使用者執行 \`git pm skip "<理由>"\`，理由會記在看板上。不要用 \`git push --no-verify\` 繞過檢查。
 - 細節見 Skill \`project-pm\`。`,
-  'agents.short': 'Project PM：完成或卡住時用 project-pm 的 `report` 工具回報；push 前要先驗收，略過用 `git pm skip "<理由>"`；細節見 Skill `project-pm`。',
   'skill.description': '在有 Project PM 的專案裡怎麼工作：回報狀態、push 前先驗收、必要時明確略過驗收。',
   'skill.body': `# Project PM
 
 ## 回報
-- 完成、暫停、卡住、等使用者決定、等 CI、等發版時，呼叫 project-pm 的 \`report\` 工具（Claude Code 裡叫 \`{tool}\`）：status 填狀態，summary 寫一句白話摘要。
+- 完成、暫停、卡住、等使用者決定、等 CI、等發版時，呼叫 project-pm 的 \`report\` 工具（\`{tool}\`）：status 填狀態，summary 寫一句白話摘要。
 - 有 commit 時帶上 commit；知道對應的工作項目時帶上 item，push 前的檢查才找得到它。
 - 沒有這個工具時，在最後的摘要寫一行「交付狀態：完成／進行中／卡住」。
 
@@ -129,13 +128,13 @@ const zhTW = {
   'init.mcp': '• Claude Code 加入 MCP server：{command}',
   'init.text': '• {file} 加入這一段：\n{lines}',
   'init.whole': '• 建立 {file}',
+  'init.retire': '• {file}：拿掉 v1.0 寫的 project-pm 段落（v1.1 起段落直接寫在 CLAUDE.md）',
   'init.hooks': '• {file}：在 {events} 事件呼叫 {command}',
   'init.prepush': '• git 的 pre-push hook：{file}（已有的 hook 改名為 pre-push.local，兩個都會跑）',
   'init.alias': '• 這個專案的 git alias pm：{value}（讓 git pm skip 在任何終端機都能用）',
   'init.noClaude': '找不到 claude 指令，沒有加入 Claude Code 的 MCP 設定。裝好 Claude Code 後再執行一次 init。',
   'init.modInstalled': '這台電腦裝了 Project PM 的桌面版 mod，它已經提供同名的工具和 hook；為了不重複，init 不加 MCP 設定和 Claude Code 的 hook。',
   'init.mcpTaken': 'Claude Code 已經有一個不是 init 加的 project-pm MCP 設定，init 不改它。要換成這一版，先執行 claude mcp remove --scope user project-pm 再跑一次 init。',
-  'init.agentsLong': 'AGENTS.md 這一串檔案已經接近 28 KiB（有些工具只讀 32 KiB），段落改用一行的精簡版，細節放在 Skill。',
   'init.skillTaken': '{file} 已經有別的內容，init 不覆蓋。',
   'init.gitignoreHint': '這個專案裡有 .project-pm/ 資料夾，但 .gitignore 沒有排除它，下次 commit 可能把它一起上傳。Project PM 的資料不放在這裡；如果裡面有交辦內容或真實資料，請在 .gitignore 加一行 .project-pm/（init 不會幫你改）。',
   'init.aliasTaken': '這個專案已經有別的 git alias pm（{value}），init 不覆蓋。要略過驗收時請改打：{command}',
@@ -284,20 +283,19 @@ What you can do:
   'guidelines.fix.settingCopyLater': ' The old guidelines file {file} was only watched from partway through this turn; a read-only copy of what it held then is at {copy}, but that is not necessarily something you agreed to.',
   'skip.recorded': 'Recorded: {code} skips QA at {sha}, because "{reason}". You can push now; the board shows the skip.',
   'skip.recordedNew': 'Recorded: added {code} (an unregistered push), skipping QA at {sha}, because "{reason}". You can push now; the board shows the skip.',
-  'agents.section': `## Project PM
+  'claude.section': `## Project PM
 
-Project PM keeps this project's work list and its QA. Every AI tool working in this project:
+Project PM keeps this project's work list and its QA. Every Claude session working in this project:
 
-- Reports when it finishes, pauses, gets stuck or needs the person to decide, with project-pm's \`report\` tool (\`{tool}\` in Claude Code) and a one-line summary. Without the tool, ends its summary with a line "Delivery: done / in progress / stuck".
+- Reports when it finishes, pauses, gets stuck or needs the person to decide, with project-pm's \`report\` tool (\`{tool}\`) and a one-line summary. Without the tool, ends its summary with a line "Delivery: done / in progress / stuck".
 - Gets changes checked before they are pushed. Before a push, every commit needs a QA record or the push is stopped: ask the PM for QA, then push again once it passes.
 - When a change needs no check (say, only the docs changed), asks the person to run \`git pm skip "<reason>"\`; the reason shows on the board. Never goes around the check with \`git push --no-verify\`.
 - More in the \`project-pm\` skill.`,
-  'agents.short': 'Project PM: report with project-pm\'s `report` tool when done or stuck; get changes checked before a push, or skip with `git pm skip "<reason>"`; more in the `project-pm` skill.',
   'skill.description': 'How to work in a project with Project PM: report where the work stands, get changes checked before a push, and skip the check on purpose when it is not needed.',
   'skill.body': `# Project PM
 
 ## Reporting
-- When you finish, pause, get stuck, wait for the person, for CI or for a release, call project-pm's \`report\` tool (\`{tool}\` in Claude Code): status says which, summary says it in one plain sentence.
+- When you finish, pause, get stuck, wait for the person, for CI or for a release, call project-pm's \`report\` tool (\`{tool}\`): status says which, summary says it in one plain sentence.
 - Give the commit when there is one, and the item when you know the work item, so the pre-push check finds it.
 - Without the tool, end your summary with a line "Delivery: done / in progress / stuck".
 
@@ -314,13 +312,13 @@ Project PM keeps this project's work list and its QA. Every AI tool working in t
   'init.mcp': '• Add the MCP server to Claude Code: {command}',
   'init.text': '• Add this section to {file}:\n{lines}',
   'init.whole': '• Create {file}',
+  'init.retire': '• {file}: take out the project-pm section v1.0 wrote (from v1.1 on, the section is in CLAUDE.md)',
   'init.hooks': '• {file}: on {events}, run {command}',
   'init.prepush': '• git\'s pre-push hook: {file} (a hook already there becomes pre-push.local, and both run)',
   'init.alias': '• This project\'s git alias pm: {value} (so git pm skip works in any terminal)',
   'init.noClaude': 'The claude command was not found, so Claude Code\'s MCP settings were left alone. Install Claude Code, then run init again.',
   'init.modInstalled': 'Project PM\'s desktop mod is installed here and already serves the same tools and hooks; to avoid running both, init adds neither the MCP server nor Claude Code\'s hooks.',
   'init.mcpTaken': 'Claude Code already has a project-pm MCP server that init did not add, and init leaves it alone. To switch to this version, run claude mcp remove --scope user project-pm, then init again.',
-  'init.agentsLong': 'The AGENTS.md files are close to 28 KiB together (some tools read 32 KiB at most), so the section is the one-line version and the details live in the skill.',
   'init.skillTaken': '{file} holds something else; init leaves it alone.',
   'init.gitignoreHint': 'This project has a .project-pm/ folder that .gitignore does not leave out, so a commit may upload it. Project PM keeps nothing there; if it holds work notes or real data, add a line .project-pm/ to .gitignore (init does not change it for you).',
   'init.aliasTaken': 'This project already has another git alias pm ({value}); init leaves it alone. To skip QA, type this instead: {command}',

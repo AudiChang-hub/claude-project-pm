@@ -49,7 +49,7 @@ Project PM **只支援 Claude Code**；1.0 版幫你設定 Claude Code 的命令
 ## 會改哪些東西
 
 - Claude Code 的 MCP 設定（`claude mcp add --scope user project-pm`），以及 `~/.claude/settings.json` 裡的 hook（hook 是 Claude Code 在固定時機自動執行的指令，例如你送出訊息時；這幾個是讓看板知道每個 Session 做到哪裡）。
-- 專案 `AGENTS.md` 的一個段落；有 `CLAUDE.md` 時，在它開頭加一行 `@AGENTS.md`。
+- 專案 `CLAUDE.md` 的一個段落（沒有就建立）。v1.0 裝的會寫在 `AGENTS.md`，下次執行 `init` 時搬進 `CLAUDE.md`；不論哪一版裝的，`uninstall` 都會把兩個檔還原。
 - Skill：`~/.claude/skills/project-pm/SKILL.md`。
 - git 的 `pre-push` hook（每次 `git push` 之前 git 會先執行的檢查）：commit 驗收過才能 push。`git pm skip "<理由>"` 可以明確略過這一次，理由會記在看板上。
 - 選填（`--ci`）：`.github/workflows/project-pm-qa.yml`。
