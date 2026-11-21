@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { t } from '../../hooks/messages'
 import type { MessageKey } from '../../hooks/messages'
 import { isAgentId, isSameId, openBreakdown, qaKeptText, qaShown, qaUpdate } from '../../hooks/qa'
-import type { OpenBreakdown } from '../../hooks/qa'
+import type { OpenBreakdown, QaShown } from '../../hooks/qa'
 import {
   STATUS,
   boardText,
@@ -18,6 +18,9 @@ import {
   hasReport,
   deliveredOf,
   isCiPending,
+  ownerTextOf,
+  sessionName,
+  whoOf,
   itemCode,
   latestWords,
   ledgerRow,
@@ -382,9 +385,12 @@ export async function boardUrl(ctx: Ctx, ref?: ProjectRef): Promise<string | nul
 const FACTS_WAIT_MS = 6_000
 
 export type BoardJson = {
-  project: { name: string; path: string; key: string; pmId: string | null }
+  /** pmName: the PM as people read it (T-43); pmId stays for programs. */
+  project: { name: string; path: string; key: string; pmId: string | null; pmName: string | null }
+  /** In words for people: sessions by name (T-43). */
   attention: { text: string; item?: number }[]
-  items: ReturnType<typeof itemJson>[]
+  /** ownerName: the owner as people read it, with its status (T-43); owner stays the id, for programs. */
+  items: (ReturnType<typeof itemJson> & { qaShown: QaShown | null; ownerName: string })[]
   actors: { id: string; tool: string; status: Status; label: string; title: string; said: string; at: number; plan: { done: number; total: number } }[]
   agents: unknown[]
   progress: { done: number; total: number }
@@ -487,25 +493,24 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     now,
     isIncludingDone,
   }
+  // The model's board names sessions with their ids; the web board's words, for people, by name alone (T-43).
   let text = boardText(input)
+  const peopleInput = { ...input, isForPeople: true }
+  let forPeople = boardText(peopleInput)
+  const who = whoOf(peopleInput)
+  const attend = (line: string, peopleLine = line) => {
+    text = withAttention(text, line, t('board.section.attention'), t('board.none'))
+    forPeople = withAttention(forPeople, peopleLine, t('board.section.attention'), t('board.none'))
+  }
   // Layer 1: commits that reached the remote past the pre-push check (6.2 point 5).
   const hook = await prePushInstalled(ref, ctx.env)
   const pushed = hook === null ? null : await pushedUnchecked(project, ref.path, ctx.run, hook.baseline)
-  if (pushed?.commits.length) {
-    const line = ct('board.noPush', { branch: pushed.branch, n: pushed.commits.length, sha: pushed.commits[0]!.slice(0, 7) })
-    text = withAttention(text, line, t('board.section.attention'), t('board.none'))
-  }
+  if (pushed?.commits.length) attend(ct('board.noPush', { branch: pushed.branch, n: pushed.commits.length, sha: pushed.commits[0]!.slice(0, 7) }))
   // Pushes the check let through because it could not check them (6.2), for a week.
   const problems = await pushProblems(ref, ctx.env, now)
-  for (const problem of problems) {
-    const line = ct('board.pushNotChecked', { when: localMinute(problem.at), reason: problem.reason })
-    text = withAttention(text, line, t('board.section.attention'), t('board.none'))
-  }
+  for (const problem of problems) attend(ct('board.pushNotChecked', { when: localMinute(problem.at), reason: problem.reason }))
   // The guidelines file changed without the person agreeing (guard.ts: only noticed, never put back), for a week.
-  for (const alert of await guidelinesAlerts(ref, ctx.env, now)) {
-    const line = alertText(alert, localMinute(alert.at))
-    text = withAttention(text, line, t('board.section.attention'), t('board.none'))
-  }
+  for (const alert of await guidelinesAlerts(ref, ctx.env, now)) attend(alertText(alert, localMinute(alert.at)), alertText(alert, localMinute(alert.at), who))
   if (sessionsError) text += `\n\n${ct('board.noSessionsRead', { error: sessionsError })}`
   if (isCheckingCi) text += `\n\n${ct('board.ciChecking')}`
   const url = await boardUrl(ctx, ref)
@@ -517,14 +522,17 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
   const openItems = project.ledger.filter(i => i.status === 'open')
   const breakdown = openBreakdown(openItems.map(item => ({ item, qa: qaShown(item, isDelivered(item.owner)) })))
   const counted = project.ledger.filter(i => i.status !== 'dropped')
+  const ownerName = ownerTextOf(peopleInput)
+  const pmTrack = project.pmId ? found.tracks[project.pmId] : undefined
+  const pmSession = project.pmId ? found.everyone.find(s => s.id === project.pmId) : undefined
   const json: BoardJson = {
-    project: { name: ref.name, path: ref.path, key: ref.key, pmId: project.pmId },
-    attention: attentionOf(text).map(line => {
+    project: { name: ref.name, path: ref.path, key: ref.key, pmId: project.pmId, pmName: project.pmId ? sessionName(pmSession ?? { id: project.pmId, title: pmTrack?.title }, pmTrack) : null },
+    attention: attentionOf(forPeople).map(line => {
       const code = /\bT-(\d+)\b/.exec(line)
 
       return code ? { text: line, item: Number(code[1]) } : { text: line }
     }),
-    items: (isIncludingDone ? project.ledger : project.ledger.filter(i => i.status === 'open')).map(item => ({ ...itemJson(item), qaShown: qaShown(item, isDelivered(item.owner)) })),
+    items: (isIncludingDone ? project.ledger : project.ledger.filter(i => i.status === 'open')).map(item => ({ ...itemJson(item), qaShown: qaShown(item, isDelivered(item.owner)), ownerName: ownerName(item.owner) })),
     actors: found.sessions
       .map(s => {
         const status = statusById.get(s.id) ?? 'done'
@@ -537,7 +545,7 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
           tool: actor?.tool ?? 'claude-code',
           status,
           label: STATUS[status].label,
-          title: s.title,
+          title: sessionName(s, track),
           said: track ? clip(track.report?.summary || quoteOf(track, words[s.id]) || latestWords(track), 300) : clip(words[s.id]?.said ?? '', 300),
           at: Math.max(actor ? activeAt(actor) : 0, Date.parse(s.lastActivityAt) || 0),
           plan: { done: plan.filter(p => p.status === 'completed').length, total: plan.length },

@@ -278,7 +278,7 @@
     document.title = `${data.project.name} · Project PM`
     $('name').textContent = data.project.name
     $('path').textContent = data.project.path
-    $('pm').textContent = data.project.pmId ? words.pm(data.project.pmId) : words.noPm
+    $('pm').textContent = data.project.pmId ? words.pm(data.project.pmName) : words.noPm
 
     // Progress: one segment per counted work item.
     const { done, total } = data.progress
@@ -355,7 +355,7 @@
     const facts = el('p', 'item__facts')
     const status = el('span', 'fact', words.status[item.status] || item.status)
     facts.append(status)
-    facts.append(el('span', 'fact', words.owner(item.owner || words.unassigned)))
+    facts.append(el('span', 'fact', words.owner(item.ownerName || words.unassigned)))
     if (item.qaShown) {
       const qa = el('span', 'fact')
       const mark = el('span', 'mark')

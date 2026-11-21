@@ -3,7 +3,7 @@
 
 import type { AgentRecord, AgentState, BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, PushCheck, Report, ReportStatus, Session, Step, Track } from '../types'
 import { agentName, isSettledAgent } from './agents'
-import { t } from './messages'
+import { MESSAGES, t } from './messages'
 import { isAgentId, isSameId, openBreakdown, qaAttention, qaShown, qaText } from './qa'
 
 export type Status = 'running' | 'asking' | 'failed' | 'limit' | 'open' | 'unreleased' | 'ci' | 'waiting' | 'done' | 'stale'
@@ -125,6 +125,38 @@ export function statusText(status: Status, limit: UsageLimit | null, kind: 'labe
   if (status === 'limit' && limit?.resets) return t('status.limit.resumes', { time: limit.resets })
 
   return STATUS[status][kind]
+}
+
+/**
+ * A session's id as people read it when it has no name (T-43): without the tool's prefix, its first 8 characters
+ * (claude-code:6f1d3b2a-… → 6f1d3b2a, local_47a75388-… → 47a75388, agent:a1b2c3 → a1b2c3).
+ */
+export function shortId(id: string): string {
+  return id
+    .trim()
+    .replace(/^[a-z][\w-]*:/i, '')
+    .replace(/^local_/, '')
+    .slice(0, 8)
+}
+
+/** How long a name taken from an instruction may be. */
+const NAME_CHARS = 40
+
+/**
+ * A session's name as people read it (T-43): its title (the desktop app's, or one it reported, which the core keeps as
+ * its title), else its track's, else its instruction cut short, and only then its short id. A title that is only its
+ * id, or the desktop app's "untitled", is no name; nor is a notification that woke it (<task-notification>).
+ */
+export function sessionName(one: { id: string; title?: string | null }, track?: { title?: string | null; lastPrompt?: string | null } | null): string {
+  const untitled = Object.values(MESSAGES).map(words => words['session.untitled'])
+  const named = (text: string | null | undefined) => {
+    const value = text?.trim() ?? ''
+
+    return value && value !== one.id.trim() && !untitled.includes(value) ? value : ''
+  }
+  const prompt = track?.lastPrompt?.trim() ?? ''
+
+  return named(one.title) || named(track?.title) || (prompt && !prompt.startsWith('<') ? clip(prompt, NAME_CHARS) : '') || shortId(one.id)
 }
 
 /** A ledger id as people read it: T-01. */
@@ -1196,6 +1228,8 @@ export type BoardInput = {
   agents?: AgentRecord[]
   now: number
   isIncludingDone: boolean
+  /** Words for people (the web board): sessions by name alone, never by id (T-43). The model's board keeps the ids. */
+  isForPeople?: boolean
 }
 
 /** How long a done agent stays on the board before it folds away (include_done shows it). */
@@ -1227,6 +1261,53 @@ export function shownAgents(list: AgentRecord[], now: number, isIncludingDone: b
  * past AGENTS_KEPT) on a board that holds the PM's agents. A board without them cannot tell. The web board's JSON reads
  * it too, so both show each item's QA alike.
  */
+/**
+ * How the board names a work item's owner (T-43): a session by its name, its status, and whether it works from another
+ * project's folder; an agent by its task; one nobody knows of any more by its id (for people, its short id).
+ */
+export function ownerTextOf(input: BoardInput): (id: string | null) => string {
+  const everyone = input.everyone ?? input.sessions
+  const tracks = liveTracks(everyone, input.tracks, input.words)
+  const agents = input.agents ?? []
+  const inProject = new Set(input.sessions.map(s => s.id))
+  const status = (one: Session) => statusOf(one, tracks[one.id], input.words[one.id], input.now, input.ci?.[one.id], input.push?.[one.id], settledAt(one.id, input.ledger), isHandedOff(one.id, input.ledger))
+  const idOf = (id: string) => (input.isForPeople ? shortId(id) : id.trim())
+
+  return (id: string | null) => {
+    if (!id) return t('board.owner.unassigned')
+    if (isAgentId(id)) {
+      const agent = agents.find(a => isSameId(`agent:${a.id}`, id))
+
+      return agent ? t('board.owner.agent', { name: agentName(agent), status: t(`agent.state.${agent.state}`) }) : t('board.owner.agentGone', { id: idOf(id) })
+    }
+    const one = everyone.find(s => isSameId(s.id, id))
+    if (!one) return t('board.owner.gone', { id: idOf(id) })
+    const now = status(one)
+    const tag = statusText(now, now === 'limit' ? limitOf(one, tracks[one.id], input.words[one.id]) : null, 'tag')
+
+    return t('board.owner.status', { title: sessionName(one, tracks[one.id]), tag, elsewhere: inProject.has(one.id) ? '' : t('board.owner.elsewhere') })
+  }
+}
+
+/** Who someone is, as the board says it to people: a session's name, an agent's task, else a short id (T-43). */
+export function whoOf(input: BoardInput): (id: string) => string {
+  const everyone = input.everyone ?? input.sessions
+  const tracks = liveTracks(everyone, input.tracks, input.words)
+  const agents = input.agents ?? []
+
+  return (id: string) => {
+    if (!input.isForPeople) return id
+    if (isAgentId(id)) {
+      const agent = agents.find(a => isSameId(`agent:${a.id}`, id))
+
+      return agent ? agentName(agent) : `agent ${shortId(id)}`
+    }
+    const one = everyone.find(s => isSameId(s.id, id))
+
+    return one ? sessionName(one, tracks[one.id]) : shortId(id)
+  }
+}
+
 export function deliveredOf(input: BoardInput): (id: string | null) => boolean {
   const everyone = input.everyone ?? input.sessions
   const tracks = liveTracks(everyone, input.tracks, input.words)
@@ -1284,7 +1365,8 @@ export function boardText(input: BoardInput): string {
 
   const attention: string[] = []
   for (const r of rows) {
-    const name = t('board.name', { title: r.one.title, id: r.one.id })
+    const title = sessionName(r.one, r.track)
+    const name = input.isForPeople ? t('board.namePeople', { title }) : t('board.name', { title, id: r.one.id })
     // One line each: the quote is a pointer to the session's own report, which the Sessions section and its detail file hold.
     if (r.status === 'asking') {
       const reported = r.track?.report?.status === 'waiting_user' ? r.track.report.summary || undefined : undefined
@@ -1320,35 +1402,18 @@ export function boardText(input: BoardInput): string {
     if (one.state === 'verify') attention.push(t('board.attention.agentVerify', { name, commit: one.commit ?? '', branch: one.worktree?.branch ?? '' }))
   }
   // An owner is found however its id was spaced or cased (items written before ids were trimmed).
-  const agentOf = (id: string) => agents.find(a => isSameId(`agent:${a.id}`, id))
   const sessionOf = (id: string) => everyone.find(s => isSameId(s.id, id))
-  const statusOfOwner = (one: Session) => statusOf(one, tracks[one.id], words[one.id], now, ci[one.id], push[one.id], settled(one.id), handedOff(one.id))
   for (const item of openLedger) {
     if (!item.owner) attention.push(t('board.attention.unassigned', { code: itemCode(item.id), text: item.text }))
     // An agent owner is accounted for by its own record (above, and in the owner's words below).
-    else if (!isAgentId(item.owner) && !sessionOf(item.owner)) attention.push(t('board.attention.lost', { code: itemCode(item.id), text: item.text, owner: item.owner.trim() }))
+    else if (!isAgentId(item.owner) && !sessionOf(item.owner)) attention.push(t('board.attention.lost', { code: itemCode(item.id), text: item.text, owner: input.isForPeople ? shortId(item.owner) : item.owner.trim() }))
   }
-  const inProject = new Set(sessions.map(s => s.id))
-  /** An owner as the ledger shows it: its title and status, and whether it works from another project's folder. */
-  const ownerText = (id: string | null) => {
-    if (!id) return t('board.owner.unassigned')
-    if (isAgentId(id)) {
-      const agent = agentOf(id)
-
-      return agent ? t('board.owner.agent', { name: agentName(agent), status: t(`agent.state.${agent.state}`) }) : t('board.owner.agentGone', { id: id.trim() })
-    }
-    const one = sessionOf(id)
-    if (!one) return t('board.owner.gone', { id: id.trim() })
-
-    const status = statusOfOwner(one)
-    const tag = statusText(status, status === 'limit' ? limitOf(one, tracks[one.id], words[one.id]) : null, 'tag')
-
-    return t('board.owner.status', { title: one.title, tag, elsewhere: inProject.has(one.id) ? '' : t('board.owner.elsewhere') })
-  }
+  /** An owner as the ledger shows it: its name and status, and whether it works from another project's folder. */
+  const ownerText = ownerTextOf(input)
   const isDelivered = deliveredOf(input)
   const qaOf = (item: LedgerItem) => qaShown(item, isDelivered(item.owner))
   if (openLedger.length) lines.splice(breakdownAt, 0, openBreakdown(openLedger.map(item => ({ item, qa: qaOf(item) }))).text)
-  attention.push(...qaAttention(openLedger, isDelivered, ownerText))
+  attention.push(...qaAttention(openLedger, isDelivered, ownerText, whoOf(input)))
   lines.push('', t('board.section.attention'), attention.length ? attention.join('\n') : t('board.none'))
 
   lines.push('', t('board.section.items'))
@@ -1380,7 +1445,7 @@ export function boardText(input: BoardInput): string {
     if (!input.isIncludingDone && !isActive(r.status) && !isCaveat && !r.one.hasOpenPr && !isOwner) continue
     listed += 1
     const flags = [r.one.hasOpenPr ? t('board.flag.pr') : '', r.one.isPinned ? t('board.flag.pinned') : ''].filter(Boolean).join(t('list.joiner'))
-    lines.push(`### [${statusText(r.status, r.limit, 'tag')}] ${r.one.title} (${r.one.id})`)
+    lines.push(`### [${statusText(r.status, r.limit, 'tag')}] ${sessionName(r.one, r.track)} (${r.one.id})`)
     lines.push(t('board.lastActive', { ago: ago(r.one.lastActivityAt, now), flags: flags ? t('board.flags', { flags }) : '' }))
     if (r.track) {
       if (r.track.plan.length) {

@@ -177,8 +177,9 @@ export async function projectSessions(ref: ProjectRef, owners: string[], env: No
     tracks[id] = track
     everyone.push({ id, title: track.title || id, cwd: track.cwd, isRunning: false, lastActivityAt: new Date(Math.max(track.turnAt, track.planAt, track.reportAt ?? 0)).toISOString(), isPinned: false, hasOpenPr: false })
   }
-  // The PM's agents: a desktop PM's mod keeps them in its track, the core in its actor record.
-  const pmTrack = pmId && round ? await loadLegacyTrack(pmId, env) : null
+  // The PM's agents: a desktop PM's mod keeps them in its track, the core in its actor record. Its track names it too.
+  const pmTrack = pmId && round ? withReport(await loadLegacyTrack(pmId, env), actorById.get(pmId)) : null
+  if (pmId && pmTrack) tracks[pmId] = pmTrack
   const agents = [...(pmTrack?.agents ?? []), ...(pmId ? (actorById.get(pmId)?.agents ?? []) : [])].filter((a, i, all) => all.findIndex(b => b.id === a.id) === i)
 
   return { sessions: mine, everyone, tracks, actors, errors, words: round?.words ?? {}, ci: round?.ci ?? {}, push: round?.push ?? {}, agents }

@@ -42,7 +42,7 @@ const track = (id: string, extra: object) => ({
 type Files = Map<string, string>
 type Pane = { id: string; title: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }
 /** What the mod asked of the disk and the app: files read and written, the app's tools called; `isAppAway` while a resumed session has no app tools yet. */
-type Counts = { reads: number; calls: string[]; writes?: string[]; isAppAway?: boolean; core?: (tool: string, args: Record<string, unknown>) => { text: string; isError: boolean } }
+type Counts = { reads: number; calls: string[]; writes?: string[]; isAppAway?: boolean; core?: (tool: string, args: Record<string, unknown>) => { text: string; isError: boolean }; sessions?: typeof SESSIONS }
 
 /** The test host spells paths its own way: compare them by what follows the data folder. */
 // On Linux a Windows path is not absolute, so the host puts the working folder before it: the drive starts the path.
@@ -53,7 +53,7 @@ type Host = (argv: readonly string[], cwd: string | undefined) => { exitCode: nu
 
 /** The desktop app, the disk and the host's commands, from memory: `self` is this session's id. */
 function world(on: On, self: string, files: Files, archived: string[] = [], host: Host = () => null, tools: string[] = [], panes: Pane[] = [], counts: Counts = { reads: 0, calls: [] }) {
-  let list = [...SESSIONS]
+  let list = [...(counts.sessions ?? SESSIONS)]
   on('process.run', ($, e) => {
     const out = host(e.argv, e.init?.cwd)
     if (!out) throw new Error(`${e.argv[0]}: command not found`)
@@ -3496,3 +3496,29 @@ for (const lang of ['zh-TW', 'en'] as const) {
     await ui.unmount()
   })
 }
+
+// ── T-43: a session people read by name; its id only on the model's board ──
+
+test('an untitled session is named by its instruction on the pane and the board, the board keeping its id for the model', ZH, async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  // A session the desktop app has not named yet (it names one after its first turn), stopped with a step left.
+  const sessions = [...SESSIONS, { sessionId: 'local_new', title: '', cwd: PROJECT, isArchived: false, isRunning: false, lastActivityAt: '2026-10-17T11:55:00.000Z' }]
+  files.set(`${DIR}/sessions/local_new.json`, JSON.stringify(track('local_new', { title: '', lastPrompt: '列表頁加匯出 CSV，欄位照報表順序', plan: [{ content: '加按鈕', status: 'pending' }] })))
+  mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files, [], () => null, [], [], { reads: 0, calls: [], sessions })
+  await $.session.start(START)
+  const text = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(text).toMatch(/「列表頁加匯出 CSV，欄位照報表順序」\(local_new\)/)
+  expect(text).not.toMatch(/（未命名）/)
+  const ui = await $.ui.mount({
+    plugin: 'project-pm',
+    surface: 'desktop',
+    component: 'Pane',
+    requestId: 'project-pm',
+    props: { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 80 } },
+  } as never)
+  expect(await ui.find({ type: 'Text', text: '列表頁加匯出 CSV，欄位照報表順序' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '（未命名）' })).toBeUndefined()
+  await ui.unmount()
+})

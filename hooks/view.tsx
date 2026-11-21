@@ -6,7 +6,7 @@ import type { ElementConstructor, EngineInterface, RenderInputOf, RenderSurface,
 
 import type { AgentRecord, AgentState, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Step, Track } from '../types'
 import { agentName } from './agents'
-import { STATUS, agentTime, ago, caveatOf, clip, groupProjects, isActive, isDeliveredAgent, isDeliveredStatus, isHandedOff, itemCode, limitOf, liveTracks, openSteps, projectKey, settledAt, shownAgents, statusOf, statusText } from './sessions'
+import { STATUS, agentTime, ago, caveatOf, clip, groupProjects, isActive, isDeliveredAgent, isDeliveredStatus, isHandedOff, itemCode, limitOf, liveTracks, openSteps, projectKey, sessionName, settledAt, shownAgents, statusOf, statusText } from './sessions'
 import { isAgentId, isSameId, openBreakdown, qaShown, qaText } from './qa'
 import type { OpenKind, QaShown } from './qa'
 import type { Project, Status } from './sessions'
@@ -405,7 +405,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
           {mark(`dot:${one.id}`, status)}
           <Box flexGrow={1} flexShrink={1}>
             <Text weight="semibold" wrap="truncate-end">
-              {one.title}
+              {sessionName(one, track)}
             </Text>
           </Box>
           <Text size="caption" dimColor tabular>
@@ -466,7 +466,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
           {mark(`dot:${one.id}`, status)}
           <Box flexGrow={1} flexShrink={1}>
             <Text size="footnote" wrap="truncate-end">
-              {one.title}
+              {sessionName(one, all[one.id])}
             </Text>
           </Box>
           <Text size="caption" dimColor tabular>
@@ -489,7 +489,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
       : agent
         ? t('pane.ownerAgent', { name: agentName(agent).replace(/^\s*T-\d+\s*/i, ''), status: t(`agent.state.${agent.state}`) })
         : owner
-          ? t('pane.owner', { title: owner.title, status: labelOf(owner, statusOfOne(owner)), elsewhere })
+          ? t('pane.owner', { title: sessionName(owner, all[owner.id]), status: labelOf(owner, statusOfOne(owner)), elsewhere })
           : t('pane.ownerGone')
     const isKnown = !!owner || !!agent
     const qa = qaOfItem(item, project)

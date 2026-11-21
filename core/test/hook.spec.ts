@@ -255,11 +255,18 @@ for (const lang of LANGS) {
       return ct('guidelines.alert', { file, what: ct(`guidelines.what.${change}` as Parameters<typeof ct>[0]), fix })
     }
     const copyOf = (text: string) => join(w.env.PROJECT_PM_HOME!, 'guidelines', 'copies', `${createHash('sha256').update(text).digest('hex')}.md`)
+    const isAlert = (text: string) => [ct('board.guidelinesAlert'), ct('board.guidelinesSettingAlert')].some(key => text.startsWith(key.slice(0, 8)))
+    /** The guidelines alerts on the model's board, which names each session with its id (T-43: the web board names it alone). */
     const attention = async (actor?: string, extra?: Parameters<World['ctx']>[1]) => {
       const board = await boardTool(w.ctx(actor, extra), {})
+      const lines = board.text.split('\n')
+      const from = lines.indexOf(t('board.section.attention'))
+      const section = from < 0 ? [] : lines.slice(from + 1, lines.indexOf('', from + 1) < 0 ? undefined : lines.indexOf('', from + 1))
 
-      return (board.structured as { attention: { text: string }[] }).attention.map(a => a.text).filter(text => [ct('board.guidelinesAlert'), ct('board.guidelinesSettingAlert')].some(key => text.startsWith(key.slice(0, 8))))
+      return section.filter(isAlert)
     }
+    /** The same alerts as the web board shows them, to people. */
+    const webAttention = async () => ((await boardTool(w.ctx(), {})).structured as { attention: { text: string }[] }).attention.map(a => a.text).filter(isAlert)
     /** The person's own guidelines file, shared by two projects, each with its own PM. */
     const sharedRules = async (mine = join(w.root, 'acme-rules.md')) => {
       const repo2 = join(w.root, 'acme-admin')
@@ -295,6 +302,10 @@ for (const lang of LANGS) {
       // The copy from when the person spoke, and the file's git history; not git checkout, which a change already
       // added or committed would defeat (T-39 QA3 2).
       assert.ok(lines[0]!.includes(ID) && lines[0]!.includes(copyOf(RULES)) && lines[0]!.includes('git log -p -- "GUIDELINES.md"') && !lines[0]!.includes('git checkout'), lines[0])
+      // The web board says the same, with the session by its name, never its id (T-43).
+      const web = await webAttention()
+      assert.equal(web.length, 1)
+      assert.ok(!web[0]!.includes(ID) && web[0]!.includes(copyOf(RULES)), web[0])
       // Deleted, put back by hand, emptied: each one warned, none undone.
       rmSync(guidelines())
       assert.equal(said(await step('PostToolUse', { tool_name: 'PowerShell', tool_input: { command: 'Remove-Item GUIDELINES.md' }, tool_response: {} }, NOW + 3000)), await warning('deleted', guidelines(), copyOf(RULES)))

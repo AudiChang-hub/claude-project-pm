@@ -123,14 +123,14 @@ export function qaKeptText(refusal: string): string {
  * and each that failed it. `isDelivered` and `ownerText` are the host's: whether an owner has handed its work over, and
  * how an owner reads.
  */
-export function qaAttention(items: LedgerItem[], isDelivered: (owner: string | null) => boolean, ownerText: (owner: string | null) => string): string[] {
+export function qaAttention(items: LedgerItem[], isDelivered: (owner: string | null) => boolean, ownerText: (owner: string | null) => string, who: (id: string) => string = id => id): string[] {
   return items
     .filter(item => item.status === 'open')
     .flatMap(item => {
       const shown = qaShown(item, isDelivered(item.owner))
       const fields = { code: codeOf(item.id), text: clip(item.text, TEXT) }
       if (shown === 'awaiting') return [t('board.attention.qaAwaiting', { ...fields, owner: ownerText(item.owner) })]
-      if (shown === 'fail') return [t('board.attention.qaFailed', { ...fields, note: clip(item.qa?.note || t('qa.noNote'), QUOTE), by: item.qa?.by ?? '' })]
+      if (shown === 'fail') return [t('board.attention.qaFailed', { ...fields, note: clip(item.qa?.note || t('qa.noNote'), QUOTE), by: item.qa?.by ? who(item.qa.by) : '' })]
 
       return []
     })

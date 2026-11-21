@@ -52,6 +52,8 @@ import {
   projectName,
   projectPath,
   reportOf,
+  sessionName,
+  shortId,
   statusOf,
   undeliveredOf,
 } from './sessions'
@@ -755,7 +757,8 @@ export async function announce($: EngineInterface) {
   if (!before) return
   for (const [id, status] of now_) {
     if (before.get(id) === status) continue
-    const title = state.list.find(s => s.id === id)?.title ?? id
+    const one = state.list.find(s => s.id === id)
+    const title = one ? sessionName(one, all[id]) : shortId(id)
     if (status === 'asking') $.ui.toast(t('toast.asking', { title }))
     if (status === 'failed') $.ui.toast(t('toast.failed', { title }))
     if (status === 'limit') $.ui.toast(t('toast.limit', { title }))
@@ -1294,16 +1297,17 @@ export async function archive($: EngineInterface, one: Session) {
   await update($, busy, () => one.id)
   await update($, confirm, () => null)
   try {
-    const result = await $.mcp.call(MGMT, 'archive_session', { session_id: one.id, reason: t('archive.reason', { title: one.title }) })
+    const title = sessionName(one, (await read($, tracks))[one.id])
+    const result = await $.mcp.call(MGMT, 'archive_session', { session_id: one.id, reason: t('archive.reason', { title }) })
     const text = textOf(result)
     if (result.isError || /not archived|refus|declin|denied|still working|cancel/i.test(text)) {
-      await update($, notice, () => ({ tone: 'bad', text: t('notice.notArchived', { title: one.title, why: text || t('archive.refused') }) }))
+      await update($, notice, () => ({ tone: 'bad', text: t('notice.notArchived', { title, why: text || t('archive.refused') }) }))
     } else {
       await update($, sessions, s => ({ ...s, list: s.list.filter(e => e.id !== one.id) }))
-      await update($, notice, () => ({ tone: 'good', text: t('notice.archived', { title: one.title }) }))
+      await update($, notice, () => ({ tone: 'good', text: t('notice.archived', { title }) }))
     }
   } catch (err) {
-    await update($, notice, () => ({ tone: 'bad', text: t('notice.notArchived', { title: one.title, why: reason(err) }) }))
+    await update($, notice, () => ({ tone: 'bad', text: t('notice.notArchived', { title: sessionName(one, undefined), why: reason(err) }) }))
   } finally {
     await update($, busy, () => null)
   }
@@ -1374,7 +1378,7 @@ async function ownerBlocker($: EngineInterface, written: string): Promise<string
   const words = await read($, lastWords)
   const kept = (await read($, tracks))[ownerId] ?? (await readJson<Track>($, `${await dataDir($)}/sessions/${ownerId}.json`))
   const track = hasReport(kept) ? (one ? liveTracks([one], { [ownerId]: kept }, words)[ownerId] : kept) : undefined
-  const title = one?.title ?? track?.title ?? ownerId
+  const title = sessionName({ id: ownerId, title: one?.title }, track)
   if (!one) {
     // Gone from the list (archived): its last words still count, and GitHub and git still answer for them.
     if (!track) return null

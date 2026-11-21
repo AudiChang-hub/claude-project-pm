@@ -339,14 +339,15 @@ function settingWords(setting: GuidelinesSetting): string {
  * A warning in plain words, for the model, or with `when` for the board: what happened, and how the person can see
  * or undo it themselves.
  */
-export function alertText(alert: GuidelinesAlert, when?: string): string {
+/** `who` names the session that noticed it: by its id for the model, by its name for people (T-43). */
+export function alertText(alert: GuidelinesAlert, when?: string, who: (id: string) => string = id => id): string {
   if (alert.change === 'setting') {
     const old = isFileSetting(alert.was) ? alert.was.file : ''
     const copy = alert.copy ? ct(alert.since === 'later' ? 'guidelines.fix.settingCopyLater' : 'guidelines.fix.settingCopy', { copy: alert.copy, file: old }) : ''
     const fix = ct('guidelines.fix.setting', { repo: alert.repo }) + copy
     const words = { was: settingWords(alert.was), now: settingWords(alert.now), fix }
 
-    return when === undefined ? ct('guidelines.settingAlert', words) : ct('board.guidelinesSettingAlert', { ...words, when, by: alert.by })
+    return when === undefined ? ct('guidelines.settingAlert', words) : ct('board.guidelinesSettingAlert', { ...words, when, by: who(alert.by) })
   }
   // The copy from when the person last let the file stand; for a project's file, also where to see its history in git.
   let fix = alert.copy ? ct(alert.since === 'later' ? 'guidelines.fix.copyLater' : 'guidelines.fix.copy', { copy: alert.copy, file: alert.file }) : ct('guidelines.fix.noCopy')
@@ -354,5 +355,5 @@ export function alertText(alert: GuidelinesAlert, when?: string): string {
   if (alert.from === 'project') fix += historyOf(alert.repo, alert.file)
   const words = { file: alert.file, what: ct(`guidelines.what.${alert.change}`), fix }
 
-  return when === undefined ? ct('guidelines.alert', words) : ct('board.guidelinesAlert', { ...words, when, by: alert.by })
+  return when === undefined ? ct('guidelines.alert', words) : ct('board.guidelinesAlert', { ...words, when, by: who(alert.by) })
 }
