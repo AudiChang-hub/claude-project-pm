@@ -181,6 +181,27 @@ for (const lang of LANGS) {
       assert.ok(!out.applied.some(d => d.kind === 'mcp' || d.kind === 'hooks'))
     })
 
+    test('a desktop mod of 1.1 or later uses the core: the MCP server and the hooks go in beside it (E2)', async () => {
+      write(join(claude(), 'local-mods', 'project-pm', '.claude-plugin', 'plugin.json'), '{"name":"project-pm","version":"1.1.0"}\n')
+      // A marketplace copy Claude Code no longer has enabled does not count.
+      write(join(claude(), 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'project-pm@local-mods': [{ scope: 'user', version: '0.7.0' }] } }))
+      const out = await roundTrip()
+      assert.ok(out.notes.includes(ct('init.modOnCore')))
+      assert.ok(!out.notes.includes(ct('init.modInstalled')))
+      assert.ok(out.applied.some(d => d.kind === 'mcp'))
+      assert.ok(out.applied.some(d => d.kind === 'hooks'))
+    })
+
+    test('an enabled marketplace copy older than 1.1 still keeps the MCP server and the hooks out (3.7)', async () => {
+      write(join(claude(), 'local-mods', 'project-pm', '.claude-plugin', 'plugin.json'), '{"name":"project-pm","version":"1.1.0"}\n')
+      write(join(claude(), 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'project-pm@acme-market': [{ scope: 'user', version: '1.0.0' }] } }))
+      const settings = join(claude(), 'settings.json')
+      writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), enabledPlugins: { 'project-pm@acme-market': true } }, null, 2))
+      const out = await roundTrip()
+      assert.ok(out.notes.includes(ct('init.modInstalled')))
+      assert.ok(!out.applied.some(d => d.kind === 'mcp' || d.kind === 'hooks'))
+    })
+
     test('without Claude Code, init says so and still sets up git and CLAUDE.md', async () => {
       const out = await roundTrip({ run: fakeClaude(w.home, hostWith(), { installed: false }) })
       assert.ok(out.notes.includes(ct('init.noClaude')))

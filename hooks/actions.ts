@@ -56,6 +56,8 @@ import {
   undeliveredOf,
 } from './sessions'
 import { isAgentId, isSameId, qaKeptText, qaUpdate } from './qa'
+import { callCore, coreHome, hasCore, mergedProject, trackWithReport } from './core'
+import type { CoreActor } from './core'
 import type { CiRun, Project, Status } from './sessions'
 import { t } from './messages'
 
@@ -124,10 +126,28 @@ export async function readJson<T>($: EngineInterface, path: string): Promise<T |
   }
 }
 
-export async function loadProject($: EngineInterface, key: string, name: string, path: string): Promise<ProjectFile> {
-  const file = await readJson<ProjectFile>($, `${await dataDir($)}/projects/${keyFile(key)}.json`)
+/** A file's mtime, 0 when it cannot be told. */
+async function mtimeOf($: EngineInterface, path: string): Promise<number> {
+  try {
+    return (await $.fs.stat(path)).mtimeMs
+  } catch {
+    return 0
+  }
+}
 
-  return file ? { ...emptyProject(key, name, path), ...file } : emptyProject(key, name, path)
+/**
+ * The project as both its copies hold it: the core's (~/.project-pm, where the ledger lives since v1.1) and the mod's
+ * own (~/.claude/project-pm, which the core writes back and v1.0 still reads), merged as the core merges them (E2).
+ * Without the core, the mod's copy alone, as before.
+ */
+export async function loadProject($: EngineInterface, key: string, name: string, path: string): Promise<ProjectFile> {
+  const legacyFile = `${await dataDir($)}/projects/${keyFile(key)}.json`
+  const coreFile = `${await coreHome($)}/projects/${keyFile(key)}.json`
+  const legacy = await readJson<ProjectFile>($, legacyFile)
+  const core = await readJson<ProjectFile>($, coreFile)
+  const isLegacyNewer = !!core && !!legacy && (await mtimeOf($, legacyFile)) > (await mtimeOf($, coreFile))
+
+  return mergedProject(emptyProject(key, name, path), core, legacy, isLegacyNewer)
 }
 
 export async function saveProject($: EngineInterface, project: ProjectFile) {
@@ -154,6 +174,17 @@ export async function saveMine($: EngineInterface) {
 
 /** When this session last asked the app who it is, so an unknown session asks again at most every 30 s. */
 let identifiedAt = 0
+
+/**
+ * This session's Claude Code session id as the core names it when it cannot see the desktop one (claude-code:<id>):
+ * the core's MCP server takes the desktop app's local_… id from its environment, and this covers one that did not.
+ */
+let coreAlias: string | null = null
+
+/** Whether an id (a project's PM, an owner) is this session: its desktop id, or the core's name for it. */
+export function isSelf(id: string | null | undefined, self: { id: string | null } | null): boolean {
+  return !!id && ((!!self?.id && id === self.id) || (!!coreAlias && id === coreAlias))
+}
 
 export async function changeMine($: EngineInterface, change: (track: Track) => Track) {
   if (!mine) {
@@ -328,6 +359,11 @@ export async function identify($: EngineInterface): Promise<Me | null> {
   if (id) await rememberTranscript($, id)
   // A session the app has just resumed gets its tools only once the person looks at it: its transcript says who it is.
   else id = await transcriptOwner($)
+  try {
+    coreAlias = `claude-code:${await $.session.id()}`
+  } catch {
+    coreAlias = null
+  }
   const key = projectKey(cwd)
   const project = await loadProject($, key, projectName(cwd), projectPath(cwd))
   if (!sameJson((await read($, projects))[key], project)) await update($, projects, all => ({ ...all, [key]: project }))
@@ -338,7 +374,7 @@ export async function identify($: EngineInterface): Promise<Me | null> {
     projectName: projectName(cwd),
     projectPath: projectPath(cwd),
     isScratch: isScratch(cwd),
-    isPm: !!id && project.pmId === id,
+    isPm: !!id && isSelf(project.pmId, { id }),
   }
   if (!sameJson(known, found)) await update($, me, () => found)
   if (id) await loadMine($, id, title, cwd)
@@ -402,24 +438,35 @@ export async function readLastWord($: EngineInterface, one: Session): Promise<La
   }
 }
 
+/** A folder's files by name, with their mtimes; none when it is not there. */
+async function mtimesIn($: EngineInterface, dir: string): Promise<Map<string, number>> {
+  try {
+    return (await $.fs.exists(dir)) ? new Map((await $.fs.list(dir)).map(entry => [entry.name, entry.mtimeMs])) : new Map()
+  } catch {
+    return new Map()
+  }
+}
+
 export async function readTracks($: EngineInterface, list: Session[]) {
   const dir = `${await dataDir($)}/sessions`
-  let entries: { name: string; mtimeMs: number }[] = []
-  try {
-    entries = (await $.fs.exists(dir)) ? await $.fs.list(dir) : []
-  } catch {
-    entries = []
-  }
+  const entries = await mtimesIn($, dir)
+  // What a session reported through the core's report tool (E2) is in the core's record of it.
+  const actorsDir = `${await coreHome($)}/actors`
+  const reported = await mtimesIn($, actorsDir)
   const wanted = new Set(list.map(s => s.id))
   const fresh: Record<string, Track> = {}
-  for (const entry of entries) {
-    const id = entry.name.replace(/\.json$/, '')
-    if (!wanted.has(id) || trackSeen.get(id) === entry.mtimeMs) continue
-    const track = await readJson<Track>($, `${dir}/${entry.name}`)
+  for (const id of wanted) {
+    const own = entries.get(`${id}.json`)
+    const core = reported.get(`${encodeURIComponent(id)}.json`)
+    if (own === undefined && core === undefined) continue
+    const seen = `${own ?? ''}:${core ?? ''}`
+    if (trackSeen.get(id) === seen) continue
+    const kept = own === undefined ? null : await readJson<Track>($, `${dir}/${id}.json`)
+    const track = core === undefined ? kept : trackWithReport(kept, await readJson<CoreActor>($, `${actorsDir}/${encodeURIComponent(id)}.json`))
     // An empty track would hide the transcript's last word: leave it out until it holds a report.
     if (hasReport(track)) {
       fresh[id] = track
-      trackSeen.set(id, entry.mtimeMs)
+      trackSeen.set(id, seen)
     }
   }
   const held = await read($, tracks)
@@ -662,22 +709,19 @@ export async function readProjects($: EngineInterface, list: Session[]) {
   for (const one of list) seen.set(projectKey(one.cwd), { name: projectName(one.cwd), path: projectPath(one.cwd) })
   const self = await read($, me)
   if (self) seen.set(self.projectKey, { name: self.projectName, path: self.projectPath })
-  const dir = `${await dataDir($)}/projects`
-  let mtimes = new Map<string, number>()
-  try {
-    if (await $.fs.exists(dir)) mtimes = new Map((await $.fs.list(dir)).map(entry => [entry.name, entry.mtimeMs]))
-  } catch {
-    // Read each one, as before.
-  }
+  // The mod's copies and the core's (E2): a project is read again when either changed.
+  const mine = await mtimesIn($, `${await dataDir($)}/projects`)
+  const cores = await mtimesIn($, `${await coreHome($)}/projects`)
   const held = await read($, projects)
   const loaded: Record<string, ProjectFile> = {}
   for (const [key, at] of seen) {
     const name = `${keyFile(key)}.json`
-    const mtime = mtimes.get(name)
+    const isListed = mine.has(name) || cores.has(name)
+    const mtime = isListed ? `${mine.get(name) ?? ''}:${cores.get(name) ?? ''}` : undefined
     const kept = held[key]
     if (kept && mtime !== undefined && projectSeen.get(name) === mtime) loaded[key] = kept
     // No file yet: a project nobody has claimed.
-    else if (mtimes.size > 0 && mtime === undefined) loaded[key] = emptyProject(key, at.name, at.path)
+    else if (mine.size + cores.size > 0 && mtime === undefined) loaded[key] = emptyProject(key, at.name, at.path)
     else {
       loaded[key] = await loadProject($, key, at.name, at.path)
       if (mtime !== undefined) projectSeen.set(name, mtime)
@@ -685,7 +729,7 @@ export async function readProjects($: EngineInterface, list: Session[]) {
   }
   if (!sameJson(held, loaded)) await update($, projects, () => loaded)
   if (self) {
-    const isPm = !!self.id && loaded[self.projectKey]?.pmId === self.id
+    const isPm = !!self.id && isSelf(loaded[self.projectKey]?.pmId, self)
     if (isPm !== self.isPm) await update($, me, m => (m ? { ...m, isPm } : m))
   }
 }
@@ -777,8 +821,14 @@ export async function refresh($: EngineInterface, isForced = false, isWide = fal
 /** What a round found, so a new process of this session draws the board at once, not "syncing" until a round ends. */
 type Round = { sessions: Sessions; lastWords: Record<string, LastWord>; ciChecks: Record<string, CiCheck>; pushChecks: Record<string, PushCheck> }
 
-/** The round last written, so an unchanged one is not written again. */
+/** The round last written, so an unchanged one is not written again, but for its time (ROUND_REWRITE_MS). */
 let roundWritten = ''
+let roundWrittenAt = 0
+/**
+ * How often an unchanged round is written all the same: the core reads a PM's round as the desktop app's session list
+ * (E2), and takes one older than 10 minutes for a desktop app no longer running (core/src/actors.ts ROUND_FRESH_MS).
+ */
+const ROUND_REWRITE_MS = 4 * 60_000
 
 async function roundFile($: EngineInterface): Promise<string | null> {
   const id = (await read($, me))?.id
@@ -791,8 +841,11 @@ async function saveRound($: EngineInterface) {
   if (!path) return
   const round: Round = { sessions: await read($, sessions), lastWords: await read($, lastWords), ciChecks: await read($, ciChecks), pushChecks: await read($, pushChecks) }
   const text = JSON.stringify({ ...round, sessions: { ...round.sessions, fetchedAt: 0 } })
-  if (text === roundWritten) return
+  const now = await $.clock.now()
+  // Unchanged: written again only for the core, which reads it (and never more often than ROUND_REWRITE_MS).
+  if (text === roundWritten && (now - roundWrittenAt < ROUND_REWRITE_MS || !(await usesCore($)))) return
   roundWritten = text
+  roundWrittenAt = now
   try {
     await $.fs.write(path, JSON.stringify(round))
   } catch {
@@ -846,6 +899,8 @@ export async function ensureTools($: EngineInterface) {
   const isPm = !!self?.isPm
   // The other sessions of a project with a PM get the report tool; the PM gets its board and ledger.
   if (!isPm && !(await isReporter($))) return
+  // The core serves all three under the same names (3.7): two of each would clash.
+  if (await usesCore($)) return
   try {
     const names = new Set((await $.tool.list()).map(tool => tool.name))
     if (!isPm) {
@@ -1139,28 +1194,61 @@ export async function registerTools($: EngineInterface) {
   })
 }
 
+/** Whether this session's project-pm tools are the core's (hooks/core.ts hasCore). */
+export async function usesCore($: EngineInterface): Promise<boolean> {
+  const self = await read($, me)
+
+  return hasCore($, self?.projectPath ?? (await $.session.cwd()))
+}
+
+/**
+ * Writes the project's PM through the core (`pm claim`, `pm release`), which locks the file and writes both copies;
+ * false when the core is not there or did not answer, and the mod writes its own copy instead, which the core reads
+ * (E1). Afterwards the project is read again.
+ */
+async function pmThroughCore($: EngineInterface, self: Me, action: 'claim' | 'release'): Promise<ProjectFile | null> {
+  if (!(await usesCore($))) return null
+  try {
+    await callCore($, 'pm', { action, project: self.projectPath })
+  } catch (err) {
+    $.ui.log(`project-pm: ${reason(err)}`)
+
+    return null
+  }
+  const project = await loadProject($, self.projectKey, self.projectName, self.projectPath)
+  await update($, projects, all => ({ ...all, [project.key]: project }))
+
+  return project
+}
+
 export async function claim($: EngineInterface): Promise<string> {
   const self = await identify($)
   if (!self?.id) return t('claim.noId')
   if (self.isScratch) return t('claim.scratch')
   const project = await loadProject($, self.projectKey, self.projectName, self.projectPath)
   const before = project.pmId
-  await saveProject($, { ...project, pmId: self.id, isDismissed: false })
+  const viaCore = await pmThroughCore($, self, 'claim')
+  // Without the core, or a core that named this session otherwise (it saw no desktop id): the mod's copy, written last,
+  // names the PM for both (mergeLegacy).
+  if (!viaCore || !isSelf(viaCore.pmId, self)) await saveProject($, { ...(viaCore ?? project), pmId: self.id, isDismissed: false })
   await update($, me, m => (m ? { ...m, isPm: true } : m))
-  await registerTools($)
+  if (!viaCore) await registerTools($)
   statusesBefore = null
   await rememberBoard($, true)
   await openBoard($, { ...self, isPm: true })
   refreshSoon($)
 
-  return before && before !== self.id ? t('claim.tookOver', { project: self.projectName, before }) : t('claim.done', { project: self.projectName })
+  return before && !isSelf(before, self) ? t('claim.tookOver', { project: self.projectName, before }) : t('claim.done', { project: self.projectName })
 }
 
 export async function release($: EngineInterface): Promise<string> {
   const self = await read($, me)
   if (!self?.isPm) return t('release.notPm')
   const project = await loadProject($, self.projectKey, self.projectName, self.projectPath)
-  if (project.pmId === self.id) await saveProject($, { ...project, pmId: null })
+  if (isSelf(project.pmId, self)) {
+    const viaCore = await pmThroughCore($, self, 'release')
+    if (!viaCore || viaCore.pmId) await saveProject($, { ...(viaCore ?? project), pmId: null })
+  }
   await update($, me, m => (m ? { ...m, isPm: false } : m))
 
   return t('release.done', { project: self.projectName })

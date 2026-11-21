@@ -14,7 +14,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import type { Run } from './host'
 import { childEnv, noProgramsFromCurrentFolder, systemCmd } from './host'
 import { localRealpath } from './localpath'
-import { claudeDir, isModInstalled } from './mod'
+import { claudeDir, isModInstalled, isModOnCore } from './mod'
 import { ct } from './messages'
 import { remoteTips } from './prepush'
 import type { ProjectRef } from './project'
@@ -186,10 +186,13 @@ export async function planInstall(ref: ProjectRef, ie: InstallEnv, options: { ci
   const command = shCommand(self)
   const claude = claudeDir(ie)
   const hasClaude = (await ie.run(['claude', '--version'], ref.path, 15_000)) !== null
-  const isMod = isModInstalled(ie)
+  // A desktop mod from v1.1 on uses the core's tools (E2): the MCP server and the hooks go in beside it (the hooks
+  // stand aside in its desktop sessions). An older mod serves its own tools under the same names (3.7).
+  const isOldMod = isModInstalled(ie) && !isModOnCore(ie)
   if (!hasClaude) notes.push(ct('init.noClaude'))
-  if (isMod) notes.push(ct('init.modInstalled'))
+  if (isOldMod) notes.push(ct('init.modInstalled'))
   else {
+    if (isModInstalled(ie)) notes.push(ct('init.modOnCore'))
     if (hasClaude) {
       const existing = await ie.run(['claude', 'mcp', 'get', 'project-pm'], ref.path, 20_000)
       if (existing !== null && !log.entries.some(e => e.kind === 'mcp')) notes.push(ct('init.mcpTaken'))

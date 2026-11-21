@@ -42,7 +42,7 @@ const track = (id: string, extra: object) => ({
 type Files = Map<string, string>
 type Pane = { id: string; title: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }
 /** What the mod asked of the disk and the app: files read and written, the app's tools called; `isAppAway` while a resumed session has no app tools yet. */
-type Counts = { reads: number; calls: string[]; writes?: string[]; isAppAway?: boolean }
+type Counts = { reads: number; calls: string[]; writes?: string[]; isAppAway?: boolean; core?: (tool: string, args: Record<string, unknown>) => { text: string; isError: boolean } }
 
 /** The test host spells paths its own way: compare them by what follows the data folder. */
 // On Linux a Windows path is not absolute, so the host puts the working folder before it: the drive starts the path.
@@ -111,6 +111,12 @@ function world(on: On, self: string, files: Files, archived: string[] = [], host
     }
   })
   on('mcp.call', ($, e) => {
+    // The core's own MCP server (E2): there only when a test stands one in.
+    if (e.server === 'project-pm') {
+      const answer = counts.core?.(e.tool, e.args ?? {}) ?? { text: 'not connected', isError: true }
+
+      return { value: { content: [{ type: 'text' as const, text: answer.text }], isError: answer.isError } }
+    }
     counts.calls.push(e.tool)
     if (counts.isAppAway) return { value: { content: [{ type: 'text' as const, text: 'not connected' }], isError: true } }
     const text = (t: string) => ({ value: { content: [{ type: 'text' as const, text: t }], isError: false } })
@@ -3326,4 +3332,106 @@ test('a work item keeps the owners it was handed over from, each once (T-38)', Z
   // A → B again: A moves to the end, still once.
   await ledger({ action: 'update', id: 1, owner: 'local_ask' })
   expect(former()).toEqual(['local_ask', 'local_open'])
+})
+
+// ── E2 (v1.1): with the core (core/), the mod draws the pane and keeps the session list; the core serves the tools ──
+
+const CORE_DIR = 'C:/home/.project-pm'
+const CORE_PROJECT_FILE = `${CORE_DIR}/projects/${keyFile(projectKey(PROJECT))}.json`
+
+/** The core's MCP server, as the engine reaches it ($.mcp.call 'project-pm'): `pm claim` and `release` write both copies. */
+function coreServer(files: Files, called: string[]): Counts {
+  return {
+    reads: 0,
+    calls: [],
+    core: (tool, args) => {
+      called.push(`${tool} ${String(args.action ?? '')}`)
+      const file = files.get(CORE_PROJECT_FILE) ?? files.get(PROJECT_FILE)
+      const project = file ? JSON.parse(file) : { key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: null, isDismissed: false, ledger: [], nextId: 1 }
+      if (tool === 'pm' && args.action === 'claim') project.pmId = 'local_pm'
+      if (tool === 'pm' && args.action === 'release') project.pmId = null
+      const text = JSON.stringify({ ...project, schema: 2, revision: (project.revision ?? 0) + 1 })
+      files.set(CORE_PROJECT_FILE, text)
+      files.set(PROJECT_FILE, text)
+
+      return { text: 'ok', isError: false }
+    },
+  }
+}
+
+test('with the core, the mod registers none of its tools, the core answers them, and /pm claims through it', ZH, async ($, on) => {
+  const files: Files = new Map()
+  // The core is connected: its `pm` tool is in the session's tool list.
+  const tools: string[] = ['pm']
+  const called: string[] = []
+  mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files, [], () => null, tools, [], coreServer(files, called))
+  on('tool.call', { tool: 'mcp__project-pm__board' }, () => ({ result: 'the core board' }))
+  on('tool.call', { tool: 'mcp__project-pm__ledger' }, () => ({ result: 'the core ledger' }))
+  on('tool.call', { tool: 'mcp__project-pm__report' }, () => ({ result: 'the core report' }))
+  await $.session.start(START)
+
+  const said = String(((await $.command.run({ command: 'pm', args: '' } as never)) as { text?: unknown }).text)
+  expect(said).toBe('此 Session 已擔任「Acme 商店後台」的 PM。')
+  expect(called).toEqual(['pm claim'])
+  expect(JSON.parse(files.get(CORE_PROJECT_FILE)!).pmId).toBe('local_pm')
+  // No board, ledger or report of the mod's own beside the core's (3.7).
+  expect(tools).toEqual(['pm'])
+
+  // The core answers; the board first gets a fresh round of the desktop app's sessions to read.
+  expect(String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)).toBe('the core board')
+  expect(files.has(`${DIR}/rounds/local_pm.json`)).toBe(true)
+  // A round brings no tools of the mod's back either (ensureTools).
+  expect(tools).toEqual(['pm'])
+  expect(String(((await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'list' } as never)) as { result?: unknown }).result)).toBe('the core ledger')
+  // The PM's agents still only read the ledger.
+  const denied = (await $.tool.call({ tool: 'mcp__project-pm__ledger', action: 'add', text: 'x', agentId: 'a1' } as never)) as { deny?: string }
+  expect(denied.deny).toMatch(/^Agent 只能讀 ledger/)
+
+  expect(String(((await $.command.run({ command: 'pm', args: 'off' } as never)) as { text?: unknown }).text)).toMatch(/卸任/)
+  expect(called).toEqual(['pm claim', 'pm release'])
+  expect(JSON.parse(files.get(CORE_PROJECT_FILE)!).pmId).toBe(null)
+})
+
+test("with the core set up in Claude Code's settings but not connected yet, the mod still registers nothing", ZH, async ($, on) => {
+  const files: Files = new Map()
+  const tools: string[] = []
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  files.set('C:/home/.claude.json', JSON.stringify({ numStartups: 3, mcpServers: { 'project-pm': { command: 'C:\\Users\\dev\\.project-pm\\bin\\project-pm-1.1.0.exe', args: ['mcp'] } } }))
+  mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files, [], () => null, tools)
+  await $.session.start(START)
+  await $.prompt.submit({ text: '進度如何？' } as never).catch(() => undefined)
+  expect(tools).toEqual([])
+})
+
+test('a core that cannot be reached: /pm writes the mod\'s own copy, which the core reads (E1)', ZH, async ($, on) => {
+  const files: Files = new Map()
+  const tools: string[] = ['pm']
+  mock.clock(on, { now: NOW })
+  // The core is listed, but its server answers nothing (the world's stand-in without `core`).
+  world(on, 'local_pm', files, [], () => null, tools)
+  await $.session.start(START)
+  const said = String(((await $.command.run({ command: 'pm', args: '' } as never)) as { text?: unknown }).text)
+  expect(said).toBe('此 Session 已擔任「Acme 商店後台」的 PM。')
+  expect(JSON.parse(files.get(PROJECT_FILE)!).pmId).toBe('local_pm')
+  expect(files.has(CORE_PROJECT_FILE)).toBe(false)
+})
+
+test('the ledger as both copies hold it, merged as the core merges them; a report made through the core shows', ZH, async ($, on) => {
+  const files: Files = new Map()
+  const item = (id: number, text: string, updatedAt: number, extra: object = {}) => ({ id, text, owner: null, status: 'open', note: '', createdAt: NOW - 7_200_000, updatedAt, ...extra })
+  // The mod's copy (v1.0 wrote it), and the core's: item 1 changed later by the core, item 2 added there alone.
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [item(1, '舊的說法', NOW - 3_600_000)], nextId: 2 }))
+  files.set(CORE_PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, schema: 2, revision: 4, nextId: 3, ledger: [item(1, '列表頁加匯出 CSV', NOW - 600_000, { uid: 'u-1', rev: 2 }), item(2, '修正稅金進位', NOW - 300_000, { uid: 'u-2', rev: 1 })] }))
+  files.set(`${DIR}/sessions/local_ask.json`, JSON.stringify(track('local_ask', { lastAnswer: '在想要不要一起發。', reportAt: NOW - 900_000 })))
+  files.set(`${CORE_DIR}/actors/local_ask.json`, JSON.stringify({ id: 'local_ask', tool: 'claude-code', title: '', cwd: PROJECT, lastSeenAt: NOW - 60_000, report: { status: 'waiting_user', summary: '要一起發 2.3.1 嗎？' }, reportAt: NOW - 60_000 }))
+  mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files)
+  await $.session.start(START)
+  const text = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+  expect(text).toMatch(/T-01 \(id 1\) \[open\] 列表頁加匯出 CSV/)
+  expect(text).toMatch(/T-02 \(id 2\) \[open\] 修正稅金進位/)
+  expect(text).not.toMatch(/舊的說法/)
+  expect(text).toMatch(/\[待回覆\] 「移除舊版優惠欄位」\(local_ask\)[^\n]*要一起發 2\.3\.1 嗎？/)
 })

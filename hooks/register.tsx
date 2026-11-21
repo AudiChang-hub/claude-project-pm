@@ -44,6 +44,7 @@ import {
   takeNotices,
   textOf,
   updateOf,
+  usesCore,
 } from './actions'
 import { MAX_CHARS, WRITING_TOOLS, asksForGuidelines, guidelinesPath, isSameFile, readGuidelines } from './guidelines'
 import { READ_ONLY_TYPES, briefOf, itemOf } from './agents'
@@ -160,7 +161,9 @@ async function changeLanguage($: EngineInterface, wanted: string): Promise<strin
   if (!value) return t('lang.usage', { lang: getLang() })
   setLang(resolveLang(value, systemLocale()))
   await registerCommands($)
-  if ((await read($, me))?.isPm) await registerTools($)
+  if (await usesCore($)) {
+    // The core's tools: the core speaks its own language setting.
+  } else if ((await read($, me))?.isPm) await registerTools($)
   else if (await isReporter($)) await registerReportTool($)
   let failure: string | null = null
   try {
@@ -395,7 +398,18 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('tool.call', { tool: REPORT_TOOL }, async ($, e) => ({ result: await report($, e as unknown as Record<string, unknown>) })).catch(() => ({
+  on('tool.call', { tool: REPORT_TOOL }, async ($, e, next) => {
+    // The core's report tool (E2): it keeps the report; the PM hears of it at once.
+    if (await usesCore($)) {
+      const result = await next(e)
+      refreshSoon($, 100)
+      await notifyPm($).catch(() => undefined)
+
+      return result
+    }
+
+    return { result: await report($, e as unknown as Record<string, unknown>) }
+  }).catch(() => ({
     deny: t('report.badStatus'),
   }))
 
@@ -409,13 +423,31 @@ export const register: Register = (on, options) => {
     return { consumed: `project-pm: update from ${id}` }
   })
 
-  on('tool.call', { tool: BOARD_TOOL }, async ($, e) => ({ result: await board($, e as unknown as Record<string, unknown>) })).catch(() => ({
+  on('tool.call', { tool: BOARD_TOOL }, async ($, e, next) => {
+    // The core's board (E2) reads the desktop app's sessions from this PM's last round: a fresh one first.
+    if (await usesCore($)) {
+      await refresh($, true, (e as unknown as Record<string, unknown>).scope === 'all')
+
+      return next(e)
+    }
+
+    return { result: await board($, e as unknown as Record<string, unknown>) }
+  }).catch(() => ({
     deny: t('command.denyBoard'),
   }))
-  on('tool.call', { tool: LEDGER_TOOL }, async ($, e) => {
+  on('tool.call', { tool: LEDGER_TOOL }, async ($, e, next) => {
+    const input = e as unknown as Record<string, unknown>
     // The PM's agents read the ledger; changing it is the PM's.
-    if (e.agentId !== undefined && (e as unknown as Record<string, unknown>).action !== 'list') return { deny: t('ledger.agentDenied') }
-    const text = await ledger($, e as unknown as Record<string, unknown>)
+    if (e.agentId !== undefined && input.action !== 'list') return { deny: t('ledger.agentDenied') }
+    if (await usesCore($)) {
+      // A close waits on its owner, as the core reads it from this PM's round: a fresh one first.
+      if (input.action === 'update' && input.status === 'done') await refresh($, true, true)
+      const result = await next(e)
+      refreshSoon($)
+
+      return result
+    }
+    const text = await ledger($, input)
     refreshSoon($)
 
     return { result: text }
@@ -440,6 +472,8 @@ export const register: Register = (on, options) => {
     await ensureTools($)
     const composed = await next(e)
     const self = await read($, me)
+    // Outside the desktop app the core's hooks hand each turn the same (E2): said once.
+    if (!self?.id && (await usesCore($))) return composed
     if (!self?.isPm) {
       // A session of a project with a PM declares its delivery at its end; other projects' sessions hear nothing.
       const ask = await deliveryAsk($)

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -211,6 +211,65 @@ for (const lang of LANGS) {
     })
   })
 }
+
+describe('E2: the v1.1 mod and the core take turns on one project', () => {
+  let w: World
+  let ref: ProjectRef
+  beforeEach(async () => {
+    w = world('en', { legacy: true })
+    ref = (await resolveProject(w.repo))!
+  })
+  afterEach(() => w.done())
+
+  const read = (file: string) => (existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as CoreProject) : null)
+  /**
+   * The v1.1 mod (hooks/actions.ts): reads both copies merged as the core does (hooks/core.ts mergedProject, which is
+   * mergeLegacy), changes what the mod changes, and writes its own copy whole (it never writes the core's: E2).
+   */
+  const mod = async (id: number, change: Partial<CoreItem>) => {
+    await new Promise(resolve => setTimeout(resolve, 20))
+    const legacyFile = paths(w.env).legacyProject(ref)
+    const coreFile = paths(w.env).project(ref)
+    const legacy = read(legacyFile)
+    const core = read(coreFile)
+    const isLegacyNewer = !!legacy && !!core && statSync(legacyFile).mtimeMs > statSync(coreFile).mtimeMs
+    const both = core && legacy ? mergeLegacy(core, legacy, isLegacyNewer) : (core ?? legacy)!
+    w.advance(1_000)
+    const now = w.ctx().now()
+    both.ledger = both.ledger.map(i => (i.id === id ? { ...i, ...change, updatedAt: now } : i))
+    writeFileSync(legacyFile, JSON.stringify(both, null, 2))
+  }
+  test('20 turns each way lose no field, and the mod\'s copy alone still reads as v1.0 reads it', async () => {
+    for (const text of ['Acme coupon field', 'Acme tax rounding']) await ledgerTool(w.ctx('local_pm'), { action: 'add', text, owner: 'local_dev', criteria: 'Acme tests pass' })
+    const sha = w.commit('coupon.txt', 'ACME10\n', 'Add the coupon field')
+    for (let turn = 0; turn < 20; turn++) {
+      const id = (turn % 2) + 1
+      await mod(id, { note: `Acme note ${turn}` })
+      w.advance(10_000)
+      const out = await ledgerTool(w.ctx('local_pm'), { action: 'update', id, commit: sha, ...(turn === 10 ? { qa: 'pass', qa_by: 'local_qa', qa_note: 'Acme checks pass' } : {}) })
+      assert.ok(!('error' in out.structured), out.text)
+    }
+    const core = read(paths(w.env).project(ref))!
+    const legacy = read(paths(w.env).legacyProject(ref))!
+    for (const copy of [core, legacy, await loadProject(ref, w.env)]) {
+      assert.equal(copy.ledger.length, 2)
+      for (const one of copy.ledger) {
+        // The core's fields…
+        assert.ok(one.uid)
+        assert.equal(one.createdBy?.actor, 'local_pm')
+        assert.ok((one.rev ?? 0) >= 11, String(one.rev))
+        assert.deepEqual(one.commits, [sha])
+        // …and the mod's, the last of each kept.
+        assert.equal(one.owner, 'local_dev')
+        assert.equal(one.criteria, 'Acme tests pass')
+        assert.equal(one.note, `Acme note ${one.id === 1 ? 18 : 19}`)
+      }
+      assert.equal(copy.ledger.find(i => i.id === 1)!.qa?.result, 'pass')
+    }
+    // Back to v1.0 (the core removed): its folder alone holds every item with every field v1.0 reads.
+    for (const one of legacy.ledger) for (const field of ['id', 'text', 'owner', 'status', 'note', 'createdAt', 'updatedAt', 'criteria']) assert.ok(field in one, field)
+  })
+})
 
 describe('E1 merge: no field is lost, whichever copy stands', () => {
   test('the mod\'s copy stands: every field the mod does not know comes back from the core\'s, and formerOwners from both', () => {

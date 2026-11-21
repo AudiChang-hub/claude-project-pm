@@ -385,6 +385,16 @@ add、update 同時寫 10.1 節的欄位（`uid`、`createdBy`、`updatedBy`、`
 
 兩者都會提供名為 `project-pm` 的 MCP server，會撞名。規則：mod 啟動時看 Claude Code 的 MCP 設定，已經有核心的 `project-pm` 就不再 `$.tool.register` board、ledger、report，只做面板和 Session 清單。這是 E2（v1.1）才改 mod；E1 期間 `init` 偵測到桌面版 mod 已安裝時，**不**幫 Claude Code 加核心的 MCP 設定，避免撞名（CLI 才需要核心）。
 
+**v1.1 的實作（T-40）**，細節和理由見 [v1.1-plan.md](v1.1-plan.md) 的「設計決定」：
+
+- 偵測：`~/.claude.json` 使用者層級或這個專案的 `mcpServers` 有 `project-pm`，或工具清單裡有只有核心才有的 `mcp__project-pm__pm`。
+- 有核心時 mod 不註冊工具；模型呼叫 board、結案時，mod 先更新一輪再交給核心回答。PM 的 Agent 改 ledger 照樣由 mod 擋。
+- 身分：桌面版的 `claude.exe` 帶 `CLAUDE_CODE_HOST_SESSION_ID=local_…`，核心的 MCP server 和 hook 都用它當 actor id，和 mod 同一個 id。
+- Session 清單：核心讀桌面版 PM 的 round 檔（`~/.claude/project-pm/rounds/<PM>.json`，mod 本來就每輪寫），超過 10 分鐘沒更新就不算有人在執行；用核心時 mod 每 4 分鐘至少重寫一次。
+- 寫入：mod 不直接寫核心的檔（`$.fs` 做不到加鎖和原子寫入），認領和卸任經核心的 `pm` 工具，其他照舊寫舊路徑，由核心合併（E1）。讀取用核心的純函式 `mergeLegacy`（`core/src/merge.ts`）合併兩份。
+- hook：桌面版而且裝了 mod 時，核心的 Claude Code hook 讓位，交付指示和準則由 mod 的 `prompt.compose` 放；CLI 照舊由核心的 hook 放，mod 在沒有桌面版 Session id 的地方不重複放。
+- `init`：mod 是 1.1 以上（依版本號，2.4 節）時照樣加 MCP 設定和 hook；更舊的 mod 照 E1 不加，並提示更新。
+
 ## 4. 網頁看板
 
 ### 4.1 內容
