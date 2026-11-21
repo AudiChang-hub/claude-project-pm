@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto'
 
 import type { Run } from './host'
 import { GH_TIMEOUT_MS, run as hostRun } from './host'
+import { hostSessionId } from './mod'
 import type { Author } from './types'
 
 /** A UUID v7: 48 bits of milliseconds, then random bits; sortable by time, never the same on two machines. */
@@ -35,8 +36,14 @@ export function sessionIdFromEnv(env: NodeJS.ProcessEnv = process.env): string |
   return id && /^[\w-]{6,}$/.test(id) ? id : null
 }
 
-/** The actor id of an MCP connection: the tool's session id when known, else a short random one for this process. */
+/**
+ * The actor id of an MCP connection: in the desktop app its session's own id (local_…, the one the mod knows it by, so
+ * the PM, owners and checkers the core records are the mod's: E2); else the tool's session id when known, else a short
+ * random one for this process.
+ */
 export function connectionActor(tool: string, env: NodeJS.ProcessEnv = process.env): string {
+  const desktop = hostSessionId(env)
+  if (desktop) return desktop
   const session = tool === 'claude-code' ? sessionIdFromEnv(env) : null
 
   return `${tool}:${session ?? randomBytes(4).toString('hex')}`

@@ -7,13 +7,14 @@
  */
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, rmdir, unlink } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 import type { Run } from './host'
 import { childEnv, noProgramsFromCurrentFolder, systemCmd } from './host'
 import { localRealpath } from './localpath'
+import { claudeDir, isModInstalled } from './mod'
 import { ct } from './messages'
 import { remoteTips } from './prepush'
 import type { ProjectRef } from './project'
@@ -77,10 +78,7 @@ export type InstallEnv = {
   now: number
 }
 
-/** Claude Code's folder: CLAUDE_CONFIG_DIR when set (Claude Code reads it too), else ~/.claude. */
-export function claudeDir(ie: Pick<InstallEnv, 'env' | 'home'>): string {
-  return ie.env.CLAUDE_CONFIG_DIR?.trim() || join(ie.home, '.claude')
-}
+export { claudeDir, isModInstalled }
 
 /** A command line for sh (git's hooks and aliases, Claude Code's hooks on every platform): slashes forward, odd words quoted. */
 export function shCommand(argv: string[]): string {
@@ -163,19 +161,6 @@ export function withoutBlock(text: string, sep = ''): string {
   else if (text[to] === '\n') to += 1
 
   return text.slice(0, from) + text.slice(to)
-}
-
-/** Whether the desktop mod is installed: it serves its own project-pm tools and hooks, and two would clash (3.7). */
-export function isModInstalled(ie: Pick<InstallEnv, 'env' | 'home'>): boolean {
-  const dir = claudeDir(ie)
-  if (existsSync(join(dir, 'local-mods', 'project-pm', '.claude-plugin', 'plugin.json'))) return true
-  try {
-    const settings = JSON.parse(readFileSync(join(dir, 'settings.json'), 'utf8')) as { enabledPlugins?: Record<string, boolean> }
-
-    return Object.entries(settings.enabledPlugins ?? {}).some(([name, on]) => on && name.startsWith('project-pm@'))
-  } catch {
-    return false
-  }
 }
 
 /**

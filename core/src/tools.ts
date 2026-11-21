@@ -26,7 +26,7 @@ import {
   statusOf,
 } from '../../hooks/sessions'
 import type { Status } from '../../hooks/sessions'
-import type { CiCheck, PushCheck, Session, Track } from '../../types'
+import type { CiCheck, LastWord, PushCheck, Session, Track } from '../../types'
 import { activeAt, projectSessions, trackOf } from './actors'
 import type { Ctx, ToolResult } from './context'
 import { projectOf } from './context'
@@ -81,11 +81,11 @@ async function fullSha(ctx: Ctx, ref: ProjectRef, sha: string): Promise<string> 
 const BLOCKING: Partial<Record<Status, true>> = { ci: true, failed: true, unreleased: true, running: true, waiting: true, asking: true, open: true }
 
 /** Facts for one session's latest words: its CI and push, asked now (an owner's close waits on them). */
-async function factsFor(ctx: Ctx, id: string, cwd: string, track: Track | undefined): Promise<{ ci?: CiCheck; push?: PushCheck }> {
-  if (!track) return {}
-  const said = ciWords(track, undefined)
+async function factsFor(ctx: Ctx, id: string, cwd: string, track: Track | undefined, word?: LastWord): Promise<{ ci?: CiCheck; push?: PushCheck }> {
+  if (!track && !word) return {}
+  const said = ciWords(track, word)
   const push = await checkPush(ctx.facts, id, cwd, said)
-  const ci = isCiPending(said) ? await checkCi(ctx.facts, id, cwd, said, track.turnAt || ctx.now()) : undefined
+  const ci = isCiPending(said) ? await checkCi(ctx.facts, id, cwd, said, track?.turnAt || ctx.now()) : undefined
 
   return { ci, push }
 }
@@ -95,10 +95,11 @@ async function factsFor(ctx: Ctx, id: string, cwd: string, track: Track | undefi
  * desktop app's session list). An agent holds the close until its record says done; a session until its report,
  * its words and git and GitHub say it delivered; an owner nobody knows of any more holds nothing.
  */
-export async function ownerBlocker(ctx: Ctx, ref: ProjectRef, owner: string): Promise<string | null> {
-  const { everyone, tracks, actors } = await projectSessions(ref, [owner], ctx.env)
+export async function ownerBlocker(ctx: Ctx, ref: ProjectRef, owner: string, pmId: string | null = null): Promise<string | null> {
+  const found = await projectSessions(ref, [owner], ctx.env, pmId, ctx.now())
+  const { everyone, tracks, actors, words } = found
   if (isAgentId(owner)) {
-    const record = actors.flatMap(a => a.agents ?? []).find(a => isSameId(`agent:${a.id}`, owner))
+    const record = [...found.agents, ...actors.flatMap(a => a.agents ?? [])].find(a => isSameId(`agent:${a.id}`, owner))
     if (!record || record.state === 'done') return null
 
     return t('blocker.agent', { name: record.description, why: t(`agent.state.${record.state}` as MessageKey) })
@@ -106,10 +107,12 @@ export async function ownerBlocker(ctx: Ctx, ref: ProjectRef, owner: string): Pr
   const one = everyone.find(s => isSameId(s.id, owner))
   if (!one) return null
   const track = hasReport(tracks[one.id]) ? tracks[one.id] : undefined
-  const { ci, push } = await factsFor(ctx, one.id, one.cwd, track)
-  const status = statusOf(one, track, undefined, ctx.now(), ci, push)
+  // A desktop session: what the PM's mod last found (its round), else asked now.
+  const kept = found.ci[one.id] || found.push[one.id] ? { ci: found.ci[one.id], push: found.push[one.id] } : null
+  const { ci, push } = kept ?? (await factsFor(ctx, one.id, one.cwd, track, words[one.id]))
+  const status = statusOf(one, track, words[one.id], ctx.now(), ci, push)
   if (!BLOCKING[status]) return null
-  const said = quoteOf(track, undefined)
+  const said = quoteOf(track, words[one.id])
   const why = t(`blocker.why.${status as 'ci' | 'failed' | 'unreleased' | 'running' | 'waiting' | 'asking' | 'open'}`)
 
   return said ? t('blocker.lastReport', { title: one.title, why, said: clip(said, 120) }) : t('blocker.plain', { title: one.title, why })
@@ -193,7 +196,7 @@ async function ledgerUpdate(ctx: Ctx, ref: ProjectRef, input: Record<string, unk
   if ('error' in checked) return { text: `${checked.error}\n${ledgerRow(item)}`, structured: { error: 'qa', message: checked.error, item: itemJson(item) } }
   let refusal = checked.refusal
   if (isClosing && !refusal && owner) {
-    const blocker = await ownerBlocker(ctx, ref, owner)
+    const blocker = await ownerBlocker(ctx, ref, owner, before.pmId)
     if (blocker) refusal = t('ledger.refused', { code: itemCode(id), blocker })
   }
   if (refusal && !checked.isRecorded) return { text: `${refusal}\n${ledgerRow(item)}`, structured: { refused: refusal, item: itemJson(item) } }
@@ -432,23 +435,25 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
   let found
   let sessionsError: string | null = null
   try {
-    found = await projectSessions(ref, owners, ctx.env)
+    found = await projectSessions(ref, owners, ctx.env, project.pmId, ctx.now())
     if (found.errors.length) sessionsError = found.errors.join('; ')
   } catch (err) {
     sessionsError = err instanceof Error ? err.message : String(err)
-    found = { sessions: [] as Session[], everyone: [] as Session[], tracks: {} as Record<string, Track>, actors: [] as Actor[], errors: [] }
+    found = { sessions: [] as Session[], everyone: [] as Session[], tracks: {} as Record<string, Track>, actors: [] as Actor[], errors: [], words: {}, ci: {}, push: {}, agents: [] }
   }
   // The PM is not one of the sessions it follows (the desktop app's list leaves the asking session out too).
   found = { ...found, sessions: found.sessions.filter(s => s.id !== project.pmId) }
   const now = ctx.now()
-  // Git and GitHub for every idle session whose words leave a push or CI: asked in parallel, waited on for a while.
-  const ci: Record<string, CiCheck> = {}
-  const push: Record<string, PushCheck> = {}
+  // Git and GitHub for every idle session whose words leave a push or CI: asked in parallel, waited on for a while. A
+  // desktop session's are what the PM's mod found at its last round (E2): not asked again.
+  const words = found.words
+  const ci: Record<string, CiCheck> = { ...found.ci }
+  const push: Record<string, PushCheck> = { ...found.push }
   let isCheckingCi = false
   const asks = found.everyone
-    .filter(s => !s.isRunning && hasReport(found.tracks[s.id]))
+    .filter(s => !s.isRunning && (hasReport(found.tracks[s.id]) || !!words[s.id]) && !found.ci[s.id] && !found.push[s.id])
     .map(async s => {
-      const facts = await factsFor(ctx, s.id, s.cwd, found.tracks[s.id])
+      const facts = await factsFor(ctx, s.id, s.cwd, found.tracks[s.id], words[s.id])
       if (facts.ci) ci[s.id] = facts.ci
       if (facts.push) push[s.id] = facts.push
     })
@@ -459,19 +464,19 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     // What the slow ones already know stays; the rest answer next time.
     for (const s of found.everyone) {
       const track = found.tracks[s.id]
-      const held = track ? heldCi(ctx.facts, s.id, ciWords(track, undefined)) : undefined
+      const held = track || words[s.id] ? heldCi(ctx.facts, s.id, ciWords(track, words[s.id])) : undefined
       if (held && !ci[s.id]) ci[s.id] = held
       const pushed = ctx.facts.push.get(s.id)
       if (pushed && !push[s.id]) push[s.id] = pushed
     }
   }
-  const agents = found.actors.filter(a => a.id === project.pmId).flatMap(a => a.agents ?? [])
+  const agents = found.agents
   let text = boardText({
     project: { name: ref.name, path: ref.path },
     sessions: found.sessions,
     everyone: found.everyone,
     tracks: found.tracks,
-    words: {},
+    words,
     ci,
     push,
     ledger: project.ledger,
@@ -502,7 +507,7 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
   const url = await boardUrl(ctx, ref)
   const actorById = new Map(found.actors.map(a => [a.id, a]))
   const statusById = new Map<string, Status>()
-  for (const s of found.everyone) statusById.set(s.id, statusOf(s, hasReport(found.tracks[s.id]) ? found.tracks[s.id] : undefined, undefined, now, ci[s.id], push[s.id]))
+  for (const s of found.everyone) statusById.set(s.id, statusOf(s, hasReport(found.tracks[s.id]) ? found.tracks[s.id] : undefined, words[s.id], now, ci[s.id], push[s.id]))
   const isDelivered = (owner: string | null) => {
     if (!owner) return false
     if (isAgentId(owner)) return true
@@ -523,7 +528,7 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
       .map(s => {
         const status = statusById.get(s.id) ?? 'done'
         const actor = actorById.get(s.id)
-        const track = actor ? trackOf(actor) : found.tracks[s.id]
+        const track = found.tracks[s.id] ?? (actor ? trackOf(actor) : undefined)
         const plan = track?.plan ?? []
 
         return {
@@ -532,8 +537,8 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
           status,
           label: STATUS[status].label,
           title: s.title,
-          said: track ? clip(track.report?.summary || quoteOf(track, undefined) || latestWords(track), 300) : '',
-          at: actor ? activeAt(actor) : Date.parse(s.lastActivityAt) || 0,
+          said: track ? clip(track.report?.summary || quoteOf(track, words[s.id]) || latestWords(track), 300) : clip(words[s.id]?.said ?? '', 300),
+          at: Math.max(actor ? activeAt(actor) : 0, Date.parse(s.lastActivityAt) || 0),
           plan: { done: plan.filter(p => p.status === 'completed').length, total: plan.length },
         }
       })

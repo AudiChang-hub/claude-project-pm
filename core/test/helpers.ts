@@ -52,9 +52,13 @@ export function world(lang: Lang, { legacy = false } = {}): World {
   mkdirSync(home, { recursive: true })
   mkdirSync(repo, { recursive: true })
   if (legacy) mkdirSync(join(home, '.claude', 'project-pm', 'projects'), { recursive: true })
-  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE }
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, CLAUDE_CODE_HOST_SESSION_ID: process.env.CLAUDE_CODE_HOST_SESSION_ID, CLAUDE_CODE_ENTRYPOINT: process.env.CLAUDE_CODE_ENTRYPOINT }
   process.env.HOME = home
   process.env.USERPROFILE = home
+  // Tests run as Claude Code in a terminal: run from a desktop app session, its id would stand for every session (E2).
+  // A test of the desktop app sets these itself.
+  delete process.env.CLAUDE_CODE_HOST_SESSION_ID
+  delete process.env.CLAUDE_CODE_ENTRYPOINT
   const env: NodeJS.ProcessEnv = { ...process.env, PROJECT_PM_HOME: join(home, '.project-pm'), PROJECT_PM_NO_GH: '1' }
   git(repo, 'init', '-q', '-b', 'main')
   git(repo, 'config', 'user.name', 'Acme Dev')
@@ -89,8 +93,10 @@ export function world(lang: Lang, { legacy = false } = {}): World {
       clock += ms
     },
     done: () => {
-      process.env.HOME = saved.HOME
-      process.env.USERPROFILE = saved.USERPROFILE
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
       rmSync(root, { recursive: true, force: true })
     },
   }

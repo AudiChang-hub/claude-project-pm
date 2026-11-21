@@ -1,13 +1,22 @@
 /**
  * The sessions of a project as the board reads them. Outside the desktop app there is no session list, so the
  * core's actors (what each session reported, and what its hooks wrote) stand for it: each turns into the mod's
- * Session and Track, and the mod's board and status logic read them unchanged.
+ * Session and Track, and the mod's board and status logic read them unchanged. When the project's PM is a desktop
+ * session, the desktop app's own list stands too, as the PM's mod kept it at its last round (E2, v1-core.md 3.2).
  */
-import { projectKey, projectPath } from '../../hooks/sessions'
-import type { Session, Track } from '../../types'
+import { stat } from 'node:fs/promises'
+import { join } from 'node:path'
+
+import { hasReport, projectKey, projectPath } from '../../hooks/sessions'
+import type { AgentRecord, CiCheck, LastWord, PushCheck, Session, Track } from '../../types'
+import { legacyHome } from './host'
+import { DESKTOP_ID } from './mod'
 import type { ProjectRef } from './project'
-import { loadActors, loadLegacyTrack } from './store'
+import { loadActors, loadLegacyTrack, readJsonFile } from './store'
 import type { Actor } from './types'
+
+/** How long the PM's last round counts as now: the mod makes one every 30 s while the desktop app runs. */
+export const ROUND_FRESH_MS = 10 * 60_000
 
 /** When an actor last did anything it wrote down: its turn, its report, its task list, or its last call. */
 export function activeAt(actor: Actor): number {
@@ -44,9 +53,75 @@ export function trackOf(actor: Actor): Track {
   }
 }
 
+/**
+ * A desktop session's track (the mod's file) with the report it made through the core's report tool, when that one is
+ * newer: the mod keeps the session's task list and last words, the core what it reported (E2).
+ */
+export function withReport(track: Track | null, actor: Actor | undefined): Track | null {
+  if (!actor?.report) return track
+  if (!track) return trackOf(actor)
+  if ((actor.reportAt ?? 0) <= (track.reportAt ?? 0)) return track
+
+  return { ...track, report: actor.report, reportAt: actor.reportAt ?? actor.lastSeenAt }
+}
+
 /** Whether an actor works on this project: the project it reported for, else its folder's. */
 export function isOfProject(actor: Actor, ref: ProjectRef): boolean {
   return (actor.projectKey ?? projectKey(projectPath(actor.cwd))) === ref.key
+}
+
+/** The PM's last round, as the mod writes it (hooks/actions.ts saveRound). */
+type Round = { sessions?: { list?: unknown }; lastWords?: unknown; ciChecks?: unknown; pushChecks?: unknown }
+
+const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+
+/** A session of the desktop app's list as the round holds it, or null for anything else. */
+function sessionIn(value: unknown): Session | null {
+  if (!isRecord(value)) return null
+  const { id, title, cwd, lastActivityAt } = value
+  if (typeof id !== 'string' || !DESKTOP_ID.test(id) || typeof cwd !== 'string' || typeof lastActivityAt !== 'string') return null
+
+  return {
+    id,
+    title: typeof title === 'string' ? title : '',
+    cwd,
+    isRunning: value.isRunning === true,
+    lastActivityAt,
+    isPinned: value.isPinned === true,
+    hasOpenPr: value.hasOpenPr === true,
+  }
+}
+
+/** Each entry of a round's map whose key is a desktop session's id. */
+function byDesktopId<T>(value: unknown): Record<string, T> {
+  if (!isRecord(value)) return {}
+
+  return Object.fromEntries(Object.entries(value).filter(([id, one]) => DESKTOP_ID.test(id) && isRecord(one))) as Record<string, T>
+}
+
+export type DesktopRound = { list: Session[]; words: Record<string, LastWord>; ci: Record<string, CiCheck>; push: Record<string, PushCheck>; isFresh: boolean }
+
+/**
+ * The desktop app's session list as a desktop PM's mod last saw it, with each session's last words and what git and
+ * GitHub said of them; null when the PM is no desktop session or its mod kept no round. A round older than
+ * ROUND_FRESH_MS (the desktop app closed) still names the sessions, but none of them counts as running.
+ */
+export async function desktopRound(pmId: string | null | undefined, now: number): Promise<DesktopRound | null> {
+  if (!pmId || !DESKTOP_ID.test(pmId)) return null
+  const file = join(legacyHome(), 'rounds', `${pmId}.json`)
+  let round: Round | null
+  let at: number
+  try {
+    round = await readJsonFile<Round>(file)
+    at = (await stat(file)).mtimeMs
+  } catch {
+    return null
+  }
+  if (!round || !Array.isArray(round.sessions?.list)) return null
+  const isFresh = now - at <= ROUND_FRESH_MS
+  const list = (round.sessions.list as unknown[]).map(sessionIn).filter((one): one is Session => !!one).map(one => (isFresh ? one : { ...one, isRunning: false }))
+
+  return { list, words: byDesktopId(round.lastWords), ci: byDesktopId(round.ciChecks), push: byDesktopId(round.pushChecks), isFresh }
 }
 
 export type ProjectSessions = {
@@ -56,24 +131,55 @@ export type ProjectSessions = {
   tracks: Record<string, Track>
   actors: Actor[]
   errors: string[]
+  /** The desktop sessions' last words, CI and push as the PM's mod last read them (empty without a desktop PM). */
+  words: Record<string, LastWord>
+  ci: Record<string, CiCheck>
+  push: Record<string, PushCheck>
+  /** The PM's agents: in its actor record, or in a desktop PM's track. */
+  agents: AgentRecord[]
 }
 
-/** The project's sessions, and the owners its open items name that work elsewhere or in the desktop app. */
-export async function projectSessions(ref: ProjectRef, owners: string[], env: NodeJS.ProcessEnv = process.env): Promise<ProjectSessions> {
+/**
+ * The project's sessions, and the owners its open items name that work elsewhere or in the desktop app. With a desktop
+ * PM (`pmId` local_…), the desktop app's list from the PM's last round comes first, each session's track from the mod's
+ * folder with what it reported to the core; the core's own actors (Claude Code in a terminal) are added after it.
+ */
+export async function projectSessions(ref: ProjectRef, owners: string[], env: NodeJS.ProcessEnv = process.env, pmId: string | null = null, now = Date.now()): Promise<ProjectSessions> {
   const { actors, errors } = await loadActors(env)
-  const mine = actors.filter(a => isOfProject(a, ref))
+  const actorById = new Map(actors.map(a => [a.id, a]))
   const tracks: Record<string, Track> = {}
   for (const actor of actors) tracks[actor.id] = trackOf(actor)
-  const everyone = actors.map(sessionOf)
-  for (const owner of owners) {
-    const id = owner.trim()
+  const wanted = new Set(owners.map(o => o.trim()))
+  const round = await desktopRound(pmId, now)
+  const everyone: Session[] = []
+  const mine: Session[] = []
+  for (const one of round?.list ?? []) {
+    everyone.push(one)
+    const isMine = projectKey(one.cwd) === ref.key
+    if (isMine) mine.push(one)
+    // Only the tracks the board reads: this project's sessions, and the owners its items name.
+    if (!isMine && !wanted.has(one.id)) continue
+    const track = withReport(await loadLegacyTrack(one.id, env), actorById.get(one.id))
+    if (track) tracks[one.id] = track
+    else delete tracks[one.id]
+  }
+  for (const actor of actors) {
+    if (everyone.some(s => s.id === actor.id)) continue
+    const one = sessionOf(actor)
+    everyone.push(one)
+    if (isOfProject(actor, ref)) mine.push(one)
+  }
+  for (const id of wanted) {
     if (!id || everyone.some(s => s.id === id)) continue
-    // A desktop session (local_…): its track is in the mod's folder; the desktop app alone knows if it still runs.
-    const track = await loadLegacyTrack(id, env)
-    if (!track) continue
+    // A desktop session (local_…) no list holds: its track is in the mod's folder; the desktop app alone knows if it still runs.
+    const track = withReport(await loadLegacyTrack(id, env), actorById.get(id))
+    if (!track || !hasReport(track)) continue
     tracks[id] = track
     everyone.push({ id, title: track.title || id, cwd: track.cwd, isRunning: false, lastActivityAt: new Date(Math.max(track.turnAt, track.planAt, track.reportAt ?? 0)).toISOString(), isPinned: false, hasOpenPr: false })
   }
+  // The PM's agents: a desktop PM's mod keeps them in its track, the core in its actor record.
+  const pmTrack = pmId && round ? await loadLegacyTrack(pmId, env) : null
+  const agents = [...(pmTrack?.agents ?? []), ...(pmId ? (actorById.get(pmId)?.agents ?? []) : [])].filter((a, i, all) => all.findIndex(b => b.id === a.id) === i)
 
-  return { sessions: mine.map(sessionOf), everyone, tracks, actors, errors }
+  return { sessions: mine, everyone, tracks, actors, errors, words: round?.words ?? {}, ci: round?.ci ?? {}, push: round?.push ?? {}, agents }
 }

@@ -19,6 +19,7 @@ import type { Run } from './host'
 import type { GuidelinesSetting } from './guard'
 import { GUARDED_TOOLS, alertText, watchGuidelines } from './guard'
 import { dataHome, run as hostRun } from './host'
+import { hostSessionId, isModInstalled } from './mod'
 import { NotPlainPathError, localRealpath, plainLocalPath } from './localpath'
 import { ct } from './messages'
 import type { ProjectRef } from './project'
@@ -54,7 +55,12 @@ const TITLE_CHARS = 60
 export async function runHook(tool: string, event: string, input: HookInput, env: NodeJS.ProcessEnv = process.env, now = Date.now(), run: Run = hostRun): Promise<HookOutput> {
   const session = input.session_id?.trim()
   if (!session || !/^[\w-]+$/.test(session)) return null
-  const id = `${tool}:${session}`
+  const desktop = hostSessionId(env)
+  // A desktop session with the mod installed: the mod keeps its record and hands its turns the delivery ask and the
+  // guidelines (prompt.compose), so the hooks stand aside rather than say it all twice (E2).
+  if (desktop && isModInstalled({ env, home: homedir() })) return null
+  // In the desktop app the session's own id (local_…), as the mod and the core's MCP server name it.
+  const id = desktop ?? `${tool}:${session}`
   const cwd = input.cwd || process.cwd()
   const ref = await resolveProject(cwd, run)
   // A folder outside git has no ledger and no board: nothing to keep.
