@@ -78,6 +78,10 @@ const WORDS = {
     emails: 'Fixed "recieve" in 3 email templates; email tests pass.',
     qaFail: 'A sold-out item still ranks first for "blu jeans" (typo query); case 3 in the detail file.',
     guidelinesBy: 'claude-code:2b7e4f19-c3a8-4d65-9f12-8e0b6d3a5c71',
+    pm: 'acme-storefront · PM',
+    agentQa: 'T-08 QA',
+    agentMeta: 'T-09 Find product pages without a meta description',
+    agentMetaResult: '[done] 7 product pages have no meta description; the list is in the detail file',
   },
   'zh-TW': {
     items: {
@@ -104,6 +108,10 @@ const WORDS = {
     emails: '修正 3 份通知信範本裡的錯字，通知信測試通過。',
     qaFail: '搜尋「牛仔褲」打錯字時，缺貨商品仍排第一；詳細檔的第 3 個案例。',
     guidelinesBy: 'claude-code:2b7e4f19-c3a8-4d65-9f12-8e0b6d3a5c71',
+    pm: 'acme-storefront · PM',
+    agentQa: 'T-08 QA',
+    agentMeta: 'T-09 找出沒有 meta description 的商品頁',
+    agentMetaResult: '[done] 有 7 個商品頁沒有 meta description，清單在詳細檔',
   },
 }
 
@@ -131,8 +139,16 @@ async function seed(home: string, lang: Lang, scene: Scene, now: number) {
   const passed = (at: number) => ({ qa: { result: 'pass', by: 'agent:a91c0f2e7b', at, note: '' } })
   let actors: Record<string, unknown>[]
   let ledger: Record<string, unknown>[]
+  // The PM itself: named, and keeping its agents (the board lists them as the pane does).
+  const pm = {
+    id: PM, tool: 'claude-code', title: w.pm, cwd: PATH, projectKey: KEY, lastSeenAt: min(0), turnAt: min(0),
+    agents: [
+      { id: 'a91c0f2e7b', description: w.agentQa, item: 8, type: 'general-purpose', isolated: true, state: 'running', startedAt: min(3) },
+      { id: '4c8d1e6f2a', description: w.agentMeta, item: 9, type: 'Explore', isolated: false, state: 'done', startedAt: min(9), endedAt: min(8), result: w.agentMetaResult, tokens: 38_400, tools: 9 },
+    ],
+  }
   if (scene === 'board') {
-    actors = Object.values(all)
+    actors = [...Object.values(all), pm]
     ledger = [
       ...[1, 2, 3, 4, 5, 9].map(id => item(id, null, 'done', passed(min(400 - id * 20)))),
       item(6, ID.tax, 'open'), item(7, ID.coupon, 'open'), item(8, ID.search, 'open'),
@@ -247,6 +263,20 @@ async function capture(url: string, shot: Shot) {
 }
 
 // ── The shots ──
+
+// `--serve` (and `--zh`): the board scene, served until stopped, its address printed; for looking at it in a browser.
+if (process.argv.includes('--serve')) {
+  const lang: Lang = process.argv.includes('--zh') ? 'zh-TW' : 'en'
+  setLang(lang)
+  await rm(work, { recursive: true, force: true })
+  await mkdir(fakeHome, { recursive: true })
+  const home = join(work, `serve-${lang}`)
+  await seed(home, lang, 'board', Date.now())
+  const served = await serve({ port: 0, env: { ...process.env, PROJECT_PM_HOME: home, PROJECT_PM_LANG: lang }, ctx: { run } })
+  setLang(lang)
+  console.log(boardAddress(served.info))
+  await new Promise(() => {})
+}
 
 const only = process.argv.slice(2)
 await rm(work, { recursive: true, force: true })
