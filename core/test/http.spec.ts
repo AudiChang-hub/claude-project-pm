@@ -3,7 +3,7 @@
  * (docs/design/v1-core.md 4.2). Requests are made the way a browser or another program on the machine would.
  */
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { request } from 'node:http'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
@@ -13,9 +13,10 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { Served } from '../src/http'
 import { boardAddress, runningServer, serve } from '../src/http'
 import { paths } from '../src/store'
-import { ledgerTool, pmTool } from '../src/tools'
+import { resolveProject } from '../src/project'
+import { boardOf, ledgerTool, pmTool } from '../src/tools'
 import type { World } from './helpers'
-import { LANGS, hostWith, world } from './helpers'
+import { LANGS, NOW, hostWith, world } from './helpers'
 
 type Raw = { status: number; headers: Record<string, string | string[] | undefined>; body: string }
 
@@ -122,6 +123,56 @@ for (const lang of LANGS) {
         assert.ok(out.content[0]!.text.includes('Acme coupon field'))
       } finally {
         await client.close()
+      }
+    })
+  })
+}
+
+for (const lang of LANGS) {
+  describe(`the web board for a project only the desktop mod has used (T-47, ${lang})`, () => {
+    let w: World
+    let served: Served
+    let port: number
+    let token: string
+    beforeEach(async () => {
+      w = world(lang, { legacy: true })
+      const ref = (await resolveProject(w.repo))!
+      // The mod's ledger alone (v1.0, the desktop app): the core has never written this project.
+      writeFileSync(paths(w.env).legacyProject(ref), JSON.stringify({ key: ref.key, name: ref.name, path: ref.path, pmId: 'local_pm', isDismissed: false, nextId: 3, ledger: [
+        { id: 1, text: 'Acme coupon field', owner: null, status: 'open', note: '', createdAt: NOW - 3_600_000, updatedAt: NOW - 3_600_000 },
+        { id: 2, text: 'Acme order emails', owner: null, status: 'done', note: '', createdAt: NOW - 3_600_000, updatedAt: NOW - 1_800_000 },
+      ] }))
+      served = await serve({ port: 0, env: w.env, ctx: { run: hostWith(), cwd: w.repo, now: () => NOW } })
+      port = served.info.port
+      token = served.info.token
+    })
+    afterEach(async () => {
+      await served.close()
+      w.done()
+    })
+
+    test('it lists the project, and the address open gives (its folder\'s key) shows its ledger as the board does', async () => {
+      const auth = { Host: `127.0.0.1:${port}`, Authorization: `Bearer ${token}` }
+      const ref = (await resolveProject(w.repo))!
+      const projects = JSON.parse((await raw(port, '/api/projects', auth)).body) as { projects: { key: string; open: number }[] }
+      assert.deepEqual(projects.projects.map(p => [p.key, p.open]), [[ref.key, 1]])
+      const board = await raw(port, `/api/board?p=${encodeURIComponent(ref.key)}`, auth)
+      assert.equal(board.status, 200)
+      const json = JSON.parse(board.body) as { items: { text: string }[] }
+      const { json: expected } = await boardOf(w.ctx('local_pm'), ref, false)
+      assert.deepEqual(json.items.map(i => i.text), expected.items.map(i => i.text))
+      assert.ok(json.items.some(i => i.text === 'Acme coupon field'))
+      // Read only: the web board writes nothing into the core's folder.
+      assert.equal(existsSync(paths(w.env).project(ref)), false)
+    })
+
+    test('the empty states say what to do next in plain words, in both languages', async () => {
+      const app = (await raw(port, '/app.js', { Host: `127.0.0.1:${port}` })).body
+      const empties = [...app.matchAll(/(noPm|noProject|noSessions|readonly): (\[[^\]]*\]|'[^']*')/g)].map(m => m[2]!)
+      assert.equal(empties.length, 8)
+      for (const text of empties) {
+        assert.ok(!/claim|action|pm tool|pm 工具|AI 工具|AI tool/i.test(text), text)
+        assert.ok(/Claude Code/.test(text), text)
       }
     })
   })

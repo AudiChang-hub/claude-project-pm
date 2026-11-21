@@ -17,8 +17,9 @@ import type { Ctx } from './context'
 import { newCtx } from './context'
 import { run as hostRun } from './host'
 import { McpSession, handleText } from './mcp'
+import { plainLocalPath } from './localpath'
 import { projectRefOf } from './project'
-import { paths, readJsonFile, writeAtomic } from './store'
+import { loadProject, paths, readJsonFile, writeAtomic } from './store'
 import { boardOf } from './tools'
 import type { CoreProject } from './types'
 import { VERSION } from './version'
@@ -89,15 +90,25 @@ async function lockDown(file: string) {
 
 /** The project the page asks about (its key), or every project the core keeps. */
 async function projectsKept(ctx: Ctx): Promise<CoreProject[]> {
-  const dir = join(paths(ctx.env).home, 'projects')
-  const names = (await readdir(dir).catch(() => [] as string[])).filter(name => name.endsWith('.json'))
-  const kept: CoreProject[] = []
-  for (const name of names) {
-    const one = await readJsonFile<CoreProject>(join(dir, name)).catch(() => null)
-    if (one?.path && one.key) kept.push(one)
+  const p = paths(ctx.env)
+  // The core's projects and the mod's (a desktop user's ledger may be in the mod's folder alone, T-47): each read as
+  // the board reads it, both merged (loadProject). Read only: nothing is written into either folder here.
+  const found = new Map<string, string>()
+  for (const dir of [join(p.home, 'projects'), join(p.legacy, 'projects')]) {
+    const names = (await readdir(dir).catch(() => [] as string[])).filter(name => name.endsWith('.json'))
+    for (const name of names) {
+      const one = await readJsonFile<CoreProject>(join(dir, name)).catch(() => null)
+      // A folder on this computer's own disks only, as everywhere a path is taken in.
+      const path = typeof one?.path === 'string' ? plainLocalPath(one.path, one.path) : null
+      if (!path || typeof one?.key !== 'string') continue
+      const ref = projectRefOf(path)
+      if (!found.has(ref.key)) found.set(ref.key, path)
+    }
   }
+  const kept: CoreProject[] = []
+  for (const path of found.values()) kept.push(await loadProject(projectRefOf(path), ctx.env).catch(() => null as never))
 
-  return kept
+  return kept.filter(Boolean)
 }
 
 export type ServeOptions = { port?: number; env?: NodeJS.ProcessEnv; idleMs?: number; ctx?: Partial<Ctx>; onIdle?: () => void }
