@@ -424,7 +424,7 @@ async function transcriptOwner($: EngineInterface): Promise<string | null> {
 // ── Reading the other sessions ──
 
 let fetchingSince = 0
-const trackSeen = new Map<string, number>()
+const trackSeen = new Map<string, string>()
 /** Each session's status at the last refresh, so the PM hears about a change once. */
 let statusesBefore: Map<string, Status> | null = null
 
@@ -703,8 +703,8 @@ export async function verifyPushes($: EngineInterface, list: Session[], asked = 
   }
 }
 
-/** Each project file's mtime when it was last read: an unchanged file is not read again. */
-const projectSeen = new Map<string, number>()
+/** Each project file's mtimes when it was last read, in the mod's folder and the core's (`<mine>:<core>`): an unchanged pair is not read again. */
+const projectSeen = new Map<string, string>()
 
 export async function readProjects($: EngineInterface, list: Session[]) {
   const seen = new Map<string, { name: string; path: string }>()
