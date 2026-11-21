@@ -6,7 +6,7 @@ import { COMMANDS } from './cli'
 import { run, systemProgram } from './host'
 import { boardAddress, runningServer, serve } from './http'
 import type { InstallEnv } from './install'
-import { init, uninstall } from './install'
+import { describe, init, readLog, uninstall } from './install'
 import { ct } from './messages'
 import { prePushHook, skipPush } from './prepush'
 import { resolveProject } from './project'
@@ -97,23 +97,40 @@ function installEnv(): InstallEnv {
 
 const say = (text: string) => process.stdout.write(`${text}\n`)
 
+/** One JSON line, for a program that runs init or uninstall for the person (the desktop mod's one-click setup, T-51). */
+const sayJson = (value: Record<string, unknown>) => process.stdout.write(`${JSON.stringify(value)}\n`)
+
 COMMANDS.init = async args => {
+  const isJson = args.includes('--json')
   const ref = await resolveProject(process.cwd())
   if (!ref) {
-    process.stderr.write(`${ct('error.notGit', { path: process.cwd() })}\n`)
+    if (isJson) sayJson({ error: 'notGit' })
+    else process.stderr.write(`${ct('error.notGit', { path: process.cwd() })}\n`)
 
     return 1
   }
-  const out = await init(ref, installEnv(), { yes: args.includes('--yes') || args.includes('-y'), ci: args.includes('--ci') }, say)
+  const out = await init(ref, installEnv(), { yes: args.includes('--yes') || args.includes('-y'), ci: args.includes('--ci') }, isJson ? () => undefined : say)
+  // --json: the list of changes (each as init words it), its notes, and what failed, in one line; else the words.
+  if (isJson) sayJson({ project: ref.path, changes: out.changes, notes: out.notes, applied: out.applied.length, failed: out.failed })
 
   return out.failed.length ? 1 : 0
 }
 
 COMMANDS.uninstall = async args => {
+  const isJson = args.includes('--json')
   const ref = await resolveProject(process.cwd())
-  await uninstall(ref, installEnv(), { yes: args.includes('--yes') || args.includes('-y'), hooksOnly: args.includes('--hooks') }, say)
+  const ie = installEnv()
+  const notes: string[] = []
+  const collect = (text: string) => {
+    if (text.startsWith('! ')) notes.push(text.slice(2))
+  }
+  const undone = await uninstall(ref, ie, { yes: args.includes('--yes') || args.includes('-y'), hooksOnly: args.includes('--hooks') }, isJson ? collect : say)
+  if (!isJson) return 0
+  // --json: what is still in the log for this project could not be undone.
+  const left = ref ? (await readLog(ie.env)).entries.filter(e => e.project === ref.key).map(e => describe(e).split('\n')[0]!) : []
+  sayJson({ undone, notes, failed: left })
 
-  return 0
+  return left.length ? 1 : 0
 }
 
 async function readStdin(): Promise<string> {

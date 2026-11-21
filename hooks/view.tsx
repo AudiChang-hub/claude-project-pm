@@ -2,9 +2,9 @@
 // short label; numbers are tabular; actions stay out of sight until hovered.
 
 import { atom, read, update } from 'claude-code'
-import type { ElementConstructor, EngineInterface, LinkProps, RenderInputOf, RenderSurface, SvgProps } from 'claude-code'
+import type { ElementConstructor, EngineInterface, RenderInputOf, RenderSurface, SvgProps } from 'claude-code'
 
-import type { AgentRecord, AgentState, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Step, Track } from '../types'
+import type { AgentRecord, AgentState, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Setup, Step, Track } from '../types'
 import { agentName } from './agents'
 import { AGENT_STATUS, STATUS, agentTime, ago, cardSummary, caveatOf, clip, kpiOf, groupProjects, isActive, isDeliveredAgent, isDeliveredStatus, isHandedOff, itemCode, limitOf, liveTracks, openSteps, projectKey, sessionName, settledAt, shortId, shownAgents, statusOf, statusText } from './sessions'
 import { isAgentId, isSameId, openBreakdown, qaShown, qaText } from './qa'
@@ -12,7 +12,8 @@ import type { OpenKind, QaShown } from './qa'
 import type { Project, Status } from './sessions'
 import { archive, claim, dismissBand, getMine, refresh, startPmSession } from './actions'
 import { t } from './messages'
-import { RELEASES_URL, openWebBoard } from './webboard'
+import { openWebBoard } from './webboard'
+import { NO_SETUP, applySetup, checkSetup, removeSetup } from './setup'
 import { compactedLine, contextLine } from './context'
 import { needsButton, setAutoCompact, undoAutoCompact } from './quota'
 
@@ -35,6 +36,7 @@ const agents = atom({ plugin: 'project-pm', key: 'agents' } as const, [] as Agen
 const webOpening = atom({ plugin: 'project-pm', key: 'webOpening' } as const, false)
 const webHelp = atom({ plugin: 'project-pm', key: 'webHelp' } as const, false)
 const liveContext = atom({ plugin: 'project-pm', key: 'liveContext' } as const, {} as Record<string, { tokens: number; at: number }>)
+const setup = atom({ plugin: 'project-pm', key: 'setup' } as const, NO_SETUP)
 
 /** An agent state's look, in the hues of the session statuses that mean the same (hooks/sessions.ts AGENT_STATUS). */
 const AGENT_LOOK = Object.fromEntries(
@@ -151,7 +153,6 @@ async function pressAutoCompact($: EngineInterface, isUndo: boolean) {
 export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', RenderSurface>) {
   const els = $.ui.resolve(e)
   const { Box, Text, Button } = els
-  const Link = 'Link' in els ? (els as { Link: ElementConstructor<LinkProps> }).Link : null
   const Svg = 'Svg' in els ? (els as unknown as { Svg: ElementConstructor<SvgProps> }).Svg : null
   const self = await read($, me)
   const state = await read($, sessions)
@@ -170,6 +171,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const isWebOpening = await read($, webOpening)
   const isWebHelp = await read($, webHelp)
   const liveFigures = await read($, liveContext)
+  const setupNow = await read($, setup)
   const now = await $.clock.now()
 
   if (state.fetchedAt === 0 && !state.error) {
@@ -662,6 +664,110 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
     )
   }
 
+  // ── One-click setup (T-51) ──
+
+  /**
+   * The card that sets this project up: one sentence, init's own list of changes, and 設定; a plain message and 再試一次
+   * when it stopped; 移除設定 once it is set up (asked once more before anything is undone).
+   */
+  const setupCard = () => {
+    if (!self || self.isScratch || isAll || setupNow.project !== self.projectKey) return null
+    const path = self.projectPath
+    const key = self.projectKey
+    const phase: Setup['phase'] = setupNow.phase
+    const isAskingRemove = asking === 'setup:remove'
+    if (phase === 'unknown' || (setupNow.isHidden && (phase === 'ready' || phase === 'fetching'))) return null
+    // 移除設定, asked once more before anything is undone.
+    const removeControls = () =>
+      phase === 'removing' ? (
+        <Text size="caption" dimColor>
+          {t('setup.removing')}
+        </Text>
+      ) : isAskingRemove ? (
+        <Box flexDirection="row" flexWrap="wrap" columnGap="sm" alignItems="center">
+          <Button
+            key="setup:remove-yes"
+            variant="secondary"
+            label={t('setup.removeYes')}
+            onPress={async () => {
+              await update($, confirm, () => null)
+              await removeSetup($, path, key)
+            }}
+          />
+          <Button key="setup:remove-no" plain label={t('setup.removeNo')} onPress={() => update($, confirm, () => null)} />
+        </Box>
+      ) : (
+        <Button key="setup:remove" plain dimColor label={t('setup.remove')} onPress={() => update($, confirm, () => 'setup:remove')} />
+      )
+    if (phase === 'set' || phase === 'removing') {
+      return (
+        <Box key="setup" flexDirection="row" flexWrap="wrap" columnGap="sm" rowGap="xs" alignItems="center" marginTop="sm">
+          <Text size="caption" dimColor wrap="wrap">
+            {isAskingRemove ? t('setup.removeAsk') : t('setup.set')}
+          </Text>
+          {removeControls()}
+        </Box>
+      )
+    }
+    const isFailed = phase === 'failed'
+    const canRetry = isFailed && setupNow.error !== 'platform'
+
+    return (
+      <Box key="setup" flexDirection="column" rowGap="xs" borderStyle="round" borderColor={isFailed ? 'error' : phase === 'done' ? 'success' : undefined} borderDimColor={!isFailed && phase !== 'done'} paddingX="sm" paddingY="xs" marginTop="sm">
+        <Text size="footnote" bold>
+          {t('setup.title')}
+        </Text>
+        {phase === 'done' ? (
+          <Text size="footnote" wrap="wrap">
+            {isAskingRemove ? t('setup.removeAsk') : t('setup.done')}
+          </Text>
+        ) : isFailed ? (
+          <Text size="footnote" color="error" wrap="wrap">
+            {t(`setup.error.${setupNow.error ?? 'download'}`)}
+          </Text>
+        ) : phase === 'fetching' ? (
+          <Text size="footnote" dimColor wrap="wrap">
+            {t('setup.fetching')}
+          </Text>
+        ) : (
+          <Text size="footnote" wrap="wrap">
+            {t('setup.intro')}
+          </Text>
+        )}
+        {(phase === 'ready' || phase === 'applying') &&
+          setupNow.changes.map((line, i) => (
+            <Text key={`setup-change:${i}`} size="caption" wrap="wrap">
+              {line.split('\n')[0]}
+            </Text>
+          ))}
+        {(phase === 'ready' || phase === 'applying') && setupNow.notes.length > 0 && (
+          <Text key="setup-notes" size="caption" dimColor wrap="wrap">
+            {[t('setup.notes'), ...setupNow.notes].join('\n')}
+          </Text>
+        )}
+        {isFailed &&
+          setupNow.failed.map((line, i) => (
+            <Text key={`setup-failed:${i}`} size="caption" wrap="wrap">
+              {line}
+            </Text>
+          ))}
+        {(phase === 'ready' || phase === 'applying' || canRetry) && (
+          <Box flexDirection="row" flexWrap="wrap" columnGap="sm" alignItems="center">
+            {phase === 'ready' && <Button key="setup:apply" variant="primary" label={t('setup.button')} onPress={() => applySetup($, path, key)} />}
+            {phase === 'applying' && (
+              <Text size="footnote" dimColor>
+                {t('setup.applying')}
+              </Text>
+            )}
+            {canRetry && <Button key="setup:retry" variant="primary" label={t('setup.retry')} onPress={() => checkSetup($, path, key, true)} />}
+            {phase === 'ready' && <Button key="setup:hide" plain dimColor label={t('setup.hide')} onPress={() => update($, setup, v => ({ ...v, isHidden: true }))} />}
+          </Box>
+        )}
+        {phase === 'done' && removeControls()}
+      </Box>
+    )
+  }
+
   const endedTotal = shown.reduce((n, p) => n + ended(p.sessions).length, 0)
   const liveTotal = everyone.length - endedTotal
   const canClaim = !!self?.id && !self.isScratch && !self.isPm && !isAll && !pmFile?.pmId
@@ -678,6 +784,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
           </Text>
         </Box>
       )}
+      {setupCard()}
       {self?.isPm && compactButton(getMine() ?? (self.id ? all[self.id] : undefined))}
       {canClaim && (
         <Box key="claim" flexDirection="row" flexWrap="wrap" columnGap="sm" alignItems="center" marginTop="sm">
@@ -718,7 +825,6 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
             {t('pane.webHelp')}
           </Text>
           <Box flexDirection="row" flexWrap="wrap" columnGap="sm" alignItems="center">
-            {Link ? <Link key="web-releases" href={RELEASES_URL} label={t('pane.webReleases')} /> : <Text size="footnote">{RELEASES_URL}</Text>}
             <Button key="web-help:close" plain label={t('pane.webHelpClose')} onPress={() => update($, webHelp, () => false)} />
           </Box>
         </Box>

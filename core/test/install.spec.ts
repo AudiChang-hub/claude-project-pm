@@ -5,7 +5,7 @@
  */
 import assert from 'node:assert/strict'
 import type { ChildProcess } from 'node:child_process'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
@@ -19,7 +19,7 @@ import type { ProjectRef } from '../src/project'
 import { resolveProject } from '../src/project'
 import { paths } from '../src/store'
 import type { World } from './helpers'
-import { LANGS, PROBE_HOST, fakeClaude, git, hostWith, watchFs, world } from './helpers'
+import { LANGS, PROBE_HOST, fakeClaude, git, hostWith, serverCommand, watchFs, world } from './helpers'
 
 /** Every file under `dir` (but the core's own data folder and git's objects), with its bytes and, off Windows, its mode. */
 function snapshot(...dirs: string[]): Record<string, string> {
@@ -535,5 +535,49 @@ describe('deleting the running program once it ends (T-37 QA2 2)', () => {
     assert.ok(existsSync(file))
     assert.equal(readFileSync(scheduled.note, 'utf8'), ct('uninstall.deleteFailed', { file }))
     rmSync(scheduled.note, { force: true })
+  })
+})
+
+describe('init and uninstall --json, for the desktop mod\'s one-click setup (T-51)', () => {
+  let w: World
+  beforeEach(() => {
+    w = world('en')
+    writeFileSync(join(w.home, '.claude.json'), `${JSON.stringify({ numStartups: 3 }, null, 2)}\n`)
+  })
+  afterEach(() => w.done())
+  const pm = (cwd: string, ...args: string[]) => {
+    const { command, args: before } = serverCommand(...args)
+    // A dry run asks Claude Code (when it is on PATH) only what it has: nothing changes either way.
+    const env = { ...w.env, PROJECT_PM_LANG: 'en' }
+
+    return spawnSync(command, before, { cwd, env, encoding: 'utf8', windowsHide: true, timeout: 120_000 })
+  }
+
+  test('init --json lists the changes and notes in one JSON line, and changes nothing', () => {
+    const before = snapshot(w.home, w.repo)
+    const ran = pm(w.repo, 'init', '--json')
+    assert.equal(ran.status, 0, ran.stderr)
+    const lines = ran.stdout.trim().split(/\r?\n/)
+    assert.equal(lines.length, 1)
+    const out = JSON.parse(lines[0]!) as { changes: string[]; notes: string[]; applied: number; failed: string[] }
+    assert.ok(out.changes.some(line => line.includes('CLAUDE.md')))
+    assert.ok(Array.isArray(out.notes))
+    assert.equal(out.applied, 0)
+    assert.deepEqual(out.failed, [])
+    assert.deepEqual(snapshot(w.home, w.repo), before)
+  })
+
+  test('init --json outside a git project says notGit, in JSON', () => {
+    const folder = join(w.home, 'acme-notes')
+    mkdirSync(folder)
+    const ran = pm(folder, 'init', '--json')
+    assert.equal(ran.status, 1)
+    assert.deepEqual(JSON.parse(ran.stdout.trim()), { error: 'notGit' })
+  })
+
+  test('uninstall --json with nothing set up: nothing undone, nothing left', () => {
+    const ran = pm(w.repo, 'uninstall', '--yes', '--json')
+    assert.equal(ran.status, 0, ran.stderr)
+    assert.deepEqual(JSON.parse(ran.stdout.trim()), { undone: 0, notes: [], failed: [] })
   })
 })

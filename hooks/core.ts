@@ -62,7 +62,7 @@ export async function hasCore($: EngineInterface, projectPath: string): Promise<
   let isOn = false
   try {
     isOn = (await $.tool.list()).some(tool => tool.name === CORE_PM_TOOL)
-    if (!isOn) {
+    if (!isOn && !isSetUpHere) {
       const dir = (await $.env.get('CLAUDE_CONFIG_DIR'))?.trim()
       for (const file of [...(dir ? [`${dir.replace(/\\/g, '/')}/.claude.json`] : []), `${await homeOf($)}/.claude.json`]) {
         if (!(await $.fs.exists(file))) continue
@@ -76,6 +76,18 @@ export async function hasCore($: EngineInterface, projectPath: string): Promise<
   known = { isOn, at: now, project: projectPath }
 
   return isOn
+}
+
+/**
+ * Set once this session ran the one-click setup (hooks/setup.ts): Claude Code's settings now start the core, but its
+ * server joins sessions started after that, so this one keeps the mod's own tools until the core's are in its list.
+ */
+let isSetUpHere = false
+
+/** This session just set the core up (one-click setup). */
+export function markSetUpHere() {
+  isSetUpHere = true
+  known = null
 }
 
 /** Forgets the answer: the next hasCore asks again. */

@@ -12,7 +12,7 @@ session, `~/.claude/project-pm/` or `~/.project-pm/`.
 | `webboard.mts` (the real web board) | `web-board-light.png`, `web-board-dark.png` and their `-zh-TW` versions; `how-qa*.png`, `how-guidelines*.png` | The CLI part of each README; docs/how-it-works*.md |
 | `webboard.mts` with `terminal.html` (the core's real output) | `cli-chat.png`, `cli-board.png` and their `-zh-TW` versions | *See it in the CLI* in each README |
 
-- `overview.html` is the v1.1.0 one-page overview: the two ways in (the desktop app through the mod,
+- `overview.html` is the v1.2.0 one-page overview: the two ways in (the desktop app through the mod,
   which uses the core from v1.1 on, and the CLI through the core's MCP server and hooks) on one shared
   core and one ledger, the v0.8.0 sessions-and-agents diagram, the QA layer (`docs/design/qa.md`) with
   the pre-push hook, and v1.1's three new pieces (one ledger for both, a clearer board, the web board

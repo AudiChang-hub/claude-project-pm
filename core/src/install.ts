@@ -499,7 +499,7 @@ export async function writeLog(env: NodeJS.ProcessEnv, log: InstallLog) {
   await writeAtomic(paths(env).installLog, `${JSON.stringify(log, null, 2)}\n`)
 }
 
-export type InitResult = { applied: Done[]; notes: string[]; failed: string[] }
+export type InitResult = { applied: Done[]; notes: string[]; failed: string[]; changes: string[] }
 
 /** init: lists the changes; with `yes`, applies them, records them, and checks Claude Code sees the server. */
 export async function init(ref: ProjectRef, ie: InstallEnv, options: { yes: boolean; ci: boolean }, say: (text: string) => void): Promise<InitResult> {
@@ -507,10 +507,11 @@ export async function init(ref: ProjectRef, ie: InstallEnv, options: { yes: bool
   say(ct('init.heading', { project: ref.name, path: ref.path }))
   for (const change of changes) say(describe(change))
   for (const note of notes) say(`! ${note}`)
+  const listed = changes.map(change => describe(change))
   if (!options.yes) {
     say(ct('init.dryRun'))
 
-    return { applied: [], notes, failed: [] }
+    return { applied: [], notes, failed: [], changes: listed }
   }
   const log = await readLog(ie.env)
   const applied: Done[] = []
@@ -554,7 +555,7 @@ export async function init(ref: ProjectRef, ie: InstallEnv, options: { yes: bool
   }
   say(failed.length ? ct('init.partly', { n: applied.length + retired, failed: failed.join('\n') }) : ct('init.done', { n: applied.length + retired }))
 
-  return { applied, notes, failed }
+  return { applied, notes, failed, changes: listed }
 }
 
 function sameTarget(a: Done | Change, b: Done | Change): boolean {

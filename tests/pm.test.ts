@@ -11,6 +11,8 @@ import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hoo
 import type { Lang, MessageKey } from '../hooks/messages'
 import { installOf, isReplaced } from '../hooks/update'
 import { boardAddressOf, coreProgramOf, isPlainProgram } from '../hooks/webboard'
+import { MAX_PROGRAM_BYTES, MAX_SUMS_BYTES, assetFor, curlFailure, isGithubUrl, isProjectSetUp, jsonOf, sumFor } from '../hooks/setup'
+import { Sha256, fromBase64 } from '../hooks/sha256'
 import { contextLine, contextOf, effectiveTokens, handoverMarker, idleText, parseThresholds, shouldCompact, thresholdsOf, tokensText, wakeCost, withAutoCompact, withoutAutoCompact } from '../hooks/context'
 
 const NOW = Date.parse('2026-10-17T12:00:00.000Z')
@@ -44,7 +46,7 @@ const track = (id: string, extra: object) => ({
 type Files = Map<string, string>
 type Pane = { id: string; title: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }
 /** What the mod asked of the disk and the app: files read and written, the app's tools called; `isAppAway` while a resumed session has no app tools yet. */
-type Counts = { reads: number; calls: string[]; writes?: string[]; isAppAway?: boolean; env?: Record<string, string>; core?: (tool: string, args: Record<string, unknown>) => { text: string; isError: boolean }; sessions?: typeof SESSIONS }
+type Counts = { reads: number; calls: string[]; writes?: string[]; isAppAway?: boolean; env?: Record<string, string>; core?: (tool: string, args: Record<string, unknown>) => { text: string; isError: boolean }; sessions?: typeof SESSIONS; read?: (e: { path: string; as?: string; offset?: number; length?: number }) => unknown }
 
 /** The test host spells paths its own way: compare them by what follows the data folder. */
 // On Linux a Windows path is not absolute, so the host puts the working folder before it: the drive starts the path.
@@ -91,6 +93,9 @@ function world(on: On, self: string, files: Files, archived: string[] = [], host
   })
   on('fs.exists', ($, e) => ({ value: files.has(norm(e.path)) || [...files.keys()].some(k => k.startsWith(`${norm(e.path)}/`)) }))
   on('fs.read', ($, e) => {
+    // A test's own answer first (a file's bytes, the mod's manifest): undefined leaves it to the files.
+    const own = counts.read?.(e)
+    if (own !== undefined) return { value: own as string }
     counts.reads += 1
     const text = files.get(norm(e.path))
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
@@ -3572,6 +3577,12 @@ async function webButton($: Parameters<TestBody>[0], on: On, kind: 'running' | '
   const ran: { argv: readonly string[]; cwd: string | undefined }[] = []
   const fetched: { url: string; auth: string | undefined }[] = []
   const logs: string[] = []
+  const toasts: string[] = []
+  on('ui.toast', ($, e) => {
+    toasts.push(e.text)
+
+    return { value: undefined }
+  })
   on('http.fetch', ($, e) => {
     fetched.push({ url: e.url, auth: e.init?.headers?.Authorization })
     if (server === 'gone') throw new Error('ECONNREFUSED')
@@ -3597,14 +3608,14 @@ async function webButton($: Parameters<TestBody>[0], on: On, kind: 'running' | '
   await ui.press({ key: 'web:open' })
   const opened = ran.filter(r => r.argv[0] !== 'git' && r.argv[0] !== 'gh')
 
-  return { ui, opened, fetched, logs }
+  return { ui, opened, fetched, logs, toasts }
 }
 
 for (const lang of ['zh-TW', 'en'] as const) {
   const words =
     lang === 'en'
-      ? { opened: 'Opened the web board in your browser.', started: 'Started the web board and opened it in your browser.', help: 'The web board needs the core installed first' }
-      : { opened: '已在瀏覽器打開網頁看板。', started: '已啟動網頁看板，並在瀏覽器打開。', help: '網頁看板要先安裝核心' }
+      ? { opened: 'Opened the web board in your browser.', started: 'Started the web board and opened it in your browser.', help: 'The web board needs Project PM set up first', first: 'Set up Project PM first: press Set up at the top of the pane.' }
+      : { opened: '已在瀏覽器打開網頁看板。', started: '已啟動網頁看板，並在瀏覽器打開。', help: '網頁看板要先設定 Project PM', first: '要先設定 Project PM：按面板上方的「設定」。' }
   const options = { options: { language: lang } } as const
 
   test(`T-45 (${lang}): installed and running, the button opens the board at the address server.json keeps`, options, async ($, on) => {
@@ -3640,12 +3651,14 @@ for (const lang of ['zh-TW', 'en'] as const) {
     await ui.unmount()
   })
 
-  test(`T-45 (${lang}): not installed, the button shows how to install the core and starts nothing`, options, async ($, on) => {
-    const { ui, opened } = await webButton($, on, 'none')
+  test(`T-45 (${lang}): not installed, the button points to Set up and starts nothing`, options, async ($, on) => {
+    const { ui, opened, toasts } = await webButton($, on, 'none')
     expect(opened).toEqual([])
     expect(await ui.find({ type: 'Text', text: words.help })).toBeDefined()
-    const releases = await ui.find({ type: 'Link' })
-    expect(releases?.props.href).toBe('https://github.com/AudiChang-hub/claude-project-pm/releases')
+    // T-51: the press never looks like nothing happened.
+    expect(toasts).toEqual([words.first])
+    // T-51: no download page to go to and no command to type: the pane's own Set up does it.
+    expect(await ui.find({ type: 'Link' })).toBeUndefined()
     await ui.press({ key: 'web-help:close' })
     expect(await ui.find({ type: 'Text', text: words.help })).toBeUndefined()
     await ui.unmount()
@@ -4015,4 +4028,269 @@ test('T-48: /pm context shows, sets and resets the thresholds', ZH, async ($, on
   expect(await pm('context')).toMatch(/^交接和壓縮的門檻：150k 250k/)
   expect(await pm('context default')).toBe('已恢復預設門檻：交接 200k、壓縮 300k。')
   expect(saved).toEqual(['150k 250k', ''])
+})
+
+// ── T-51: one-click setup ──
+
+const SUMS_URL = 'https://github.com/AudiChang-hub/claude-project-pm/releases/download/v1.2.0/SHA256SUMS'
+const ASSET_URL = 'https://github.com/AudiChang-hub/claude-project-pm/releases/download/v1.2.0/project-pm-windows-x64.exe'
+const CDN_URL = 'https://release-assets.githubusercontent.com/github-production-release-asset/acme?sig=demo'
+const CURL = 'C:\\Windows\\System32\\curl.exe'
+const PLUGIN_DATA = 'C:\\home\\.claude\\plugins\\data\\project-pm'
+const DOWNLOADED = 'C:/home/.claude/plugins/data/project-pm/core/project-pm-1.2.0.exe'
+/** A made-up program: what matters is that its SHA-256 is the one SHA256SUMS lists, or not. */
+const PROGRAM = 'MZ acme demo program, not a real one'
+const asBytes = (text: string) => new Uint8Array([...text].map(c => c.charCodeAt(0)))
+
+test('T-51: SHA-256 in plain code gives the standard answers', () => {
+  expect(new Sha256().hex()).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
+  expect(new Sha256().update(asBytes('abc')).hex()).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
+  const long = 'abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq'
+  expect(new Sha256().update(asBytes(long)).hex()).toBe('248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1')
+  // In pieces of any size, as the file is read in ranges.
+  const pieces = new Sha256()
+  for (let i = 0; i < long.length; i += 5) pieces.update(asBytes(long.slice(i, i + 5)))
+  expect(pieces.hex()).toBe('248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1')
+  expect([...fromBase64('TVogYWNtZQ==')]).toEqual([...asBytes('MZ acme')])
+})
+
+test('T-51: a download reaches only https on the GitHub hosts', () => {
+  for (const good of [SUMS_URL, ASSET_URL, CDN_URL, 'https://objects.githubusercontent.com/x/y']) expect(isGithubUrl(good)).toBe(true)
+  for (const bad of ['http://github.com/a', 'https://github.com.acme.example/a', 'https://acme.example/github.com', 'https://user@github.com/a', 'https://github.com:8443/a', 'file:///C:/x', 'https://github.com/a b', 'https://evil-github.com/a', '']) {
+    expect(isGithubUrl(bad)).toBe(false)
+  }
+})
+
+test('T-51: the release file for each computer, SHA256SUMS lines, and what the curl failures mean', () => {
+  expect(assetFor('windows', 'x86_64')).toBe('project-pm-windows-x64.exe')
+  expect(assetFor('macos', 'arm64')).toBe('project-pm-macos-arm64')
+  expect(assetFor('macos', 'x86_64')).toBe('project-pm-macos-x64')
+  expect(assetFor('linux', 'aarch64')).toBe('project-pm-linux-arm64')
+  expect(assetFor('wsl', 'x86_64')).toBe('project-pm-linux-x64')
+  expect(assetFor('linux', 'riscv64')).toBeNull()
+  expect(assetFor('unknown', 'x86_64')).toBeNull()
+  const sums = `${'a'.repeat(64)}  project-pm-linux-x64\n${'b'.repeat(64)}  project-pm-windows-x64.exe\n`
+  expect(sumFor(sums, 'project-pm-windows-x64.exe')).toBe('b'.repeat(64))
+  expect(sumFor(sums, 'project-pm-macos-arm64')).toBeNull()
+  expect(sumFor(`${'c'.repeat(63)}  project-pm-windows-x64.exe`, 'project-pm-windows-x64.exe')).toBeNull()
+  expect(curlFailure(6)).toBe('offline')
+  expect(curlFailure(7)).toBe('offline')
+  expect(curlFailure(28)).toBe('offline')
+  expect(curlFailure(22)).toBe('download')
+  expect(jsonOf('noise\n{"changes":["• Create C:/x"]}\n')).toEqual({ changes: ['• Create C:/x'] })
+  expect(jsonOf('not json')).toBeNull()
+  expect(isProjectSetUp({ version: '1.2.0', entries: [{ kind: 'text', project: projectKey(PROJECT) }] }, projectKey(PROJECT))).toBe(true)
+  expect(isProjectSetUp({ version: '1.2.0', entries: [{ kind: 'mcp' }] }, projectKey(PROJECT))).toBe(false)
+  expect(isProjectSetUp(null, projectKey(PROJECT))).toBe(false)
+})
+
+type SetupWorld = { ran: (readonly string[])[]; files: Files; logs: string[]; fetched: string[] }
+
+/**
+ * The pane of a project not set up yet, on Windows, with GitHub and the core stood in for: `net` says how the
+ * download goes (fine, offline, a file that does not match, a redirect off GitHub, the host's policy refusing GitHub
+ * while curl gets through, a file over the size cap).
+ */
+async function setupPane($: Parameters<TestBody>[0], on: On, net: 'fine' | 'offline' | 'tampered' | 'elsewhere' | 'blocked' | 'huge') {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  files.set('C:/Windows/System32/curl.exe', 'MZ')
+  const sums = `${'a'.repeat(64)}  project-pm-linux-x64\n${new Sha256().update(asBytes(PROGRAM)).hex()}  project-pm-windows-x64.exe\n`
+  const ran: (readonly string[])[] = []
+  const logs: string[] = []
+  on('ui.log', ($, e) => {
+    logs.push(JSON.stringify(e))
+
+    return { value: undefined }
+  })
+  const store = new Map<string, unknown>()
+  on('store.get', ($, e) => ({ value: store.get(e.key) }))
+  on('store.set', ($, e) => {
+    store.set(e.key, e.value)
+
+    return { value: undefined }
+  })
+  const fetched: string[] = []
+  on('http.fetch', ($, e) => {
+    fetched.push(e.url)
+    if (net === 'blocked') throw new Error('refused by the web fetch policy')
+
+    return { value: { status: 200, ok: true, headers: {}, text: '' } }
+  })
+  on('session.info', () => ({ value: { platform: 'windows' as const, isHosted: false, transcriptPath: '' } }))
+  on('process.hookEnv', () => ({ value: { CLAUDE_PLUGIN_DATA: PLUGIN_DATA } }))
+  on('mcp.connect', () => ({ value: { isConnected: false as const, reason: 'failed' as never, message: 'not listed' } }))
+  // The mod's own manifest, and a file's bytes, which the world's disk does not answer; and a file's size.
+  const read = (e: { path: string; as?: string; offset?: number; length?: number }) => {
+    if (/\.claude-plugin\/plugin\.json$/.test(e.path.replace(/\\/g, '/'))) return '{"name":"project-pm","version":"1.2.0"}'
+    if (e.as !== 'bytes') return undefined
+    const text = files.get(e.path.replace(/\\/g, '/'))
+    if (text === undefined) throw new Error(`ENOENT ${e.path}`)
+
+    return { base64: btoa(text.slice(e.offset ?? 0, (e.offset ?? 0) + (e.length ?? text.length))) }
+  }
+  on('fs.stat', ($, e) => {
+    const text = files.get(e.path.replace(/\\/g, '/'))
+    if (text === undefined) throw new Error(`ENOENT ${e.path}`)
+
+    return { value: { kind: 'file' as const, size: text.length, mtimeMs: 1, isLink: false } }
+  })
+  const host: Host = argv => {
+    ran.push(argv)
+    if (argv[0] === 'git' || argv[0] === 'gh') return null
+    if (argv[0] === CURL) {
+      if (net === 'offline') return { exitCode: 6, stdout: '' }
+      const url = argv.at(-1)!
+      const out = argv[argv.indexOf('--output') + 1]!.replace(/\\/g, '/')
+      if (url === SUMS_URL) files.set(out, sums)
+      else if (url === ASSET_URL) return { exitCode: 0, stdout: `302 ${net === 'elsewhere' ? 'https://downloads.acme.example/pm.exe' : CDN_URL}` }
+      else if (url === CDN_URL && net === 'huge') {
+        // curl stops past --max-filesize (exit 63), part of it written.
+        files.set(out, PROGRAM.slice(0, 10))
+
+        return { exitCode: 63, stdout: '' }
+      } else if (url === CDN_URL) files.set(out, net === 'tampered' ? `${PROGRAM}!` : PROGRAM)
+      else return { exitCode: 0, stdout: '404 ' }
+
+      return { exitCode: 0, stdout: '200 ' }
+    }
+    if (argv[0] === DOWNLOADED) {
+      if (argv[1] === 'init' && argv.includes('--yes')) {
+        files.set('C:/home/.project-pm/install-log.json', JSON.stringify({ version: '1.2.0', entries: [{ kind: 'text', project: projectKey(PROJECT) }] }))
+
+        return { exitCode: 0, stdout: JSON.stringify({ changes: [], notes: [], applied: 6, failed: [] }) }
+      }
+      if (argv[1] === 'init') {
+        const changes = ['• Add this section to C:\\Users\\dev\\Projects\\Acme\\CLAUDE.md:\n<!-- project-pm:start v1 -->', '• Create C:\\home\\.claude\\skills\\project-pm\\SKILL.md']
+
+        return { exitCode: 0, stdout: JSON.stringify({ changes, notes: [], applied: 0, failed: [] }) }
+      }
+      if (argv[1] === 'uninstall') {
+        files.set('C:/home/.project-pm/install-log.json', JSON.stringify({ version: '1.2.0', entries: [] }))
+
+        return { exitCode: 0, stdout: JSON.stringify({ undone: 6, notes: [], failed: [] }) }
+      }
+    }
+
+    return { exitCode: 1, stdout: '' }
+  }
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files, [], host, [], [], { reads: 0, calls: [], env: { SystemRoot: 'C:\\Windows' }, read })
+  await $.session.start(START)
+  await clock.advance(400)
+  const ui = await $.ui.mount({ plugin: 'project-pm', surface: 'desktop', component: 'Pane', requestId: 'project-pm', props: PANE_PROPS } as never)
+  // The check runs on its own beside the board's refresh: let it finish.
+  for (let i = 0; i < 20 && !(await ui.find({ key: 'setup' })); i++) await clock.advance(100)
+  for (let i = 0; i < 20 && (await ui.find({ type: 'Text', text: /^(Getting|正在準備)/ })); i++) await clock.advance(100)
+
+  return { ui, clock, world: { ran, files, logs, fetched } as SetupWorld }
+}
+
+const curlRuns = (w: SetupWorld) => w.ran.filter(argv => argv[0] === CURL)
+
+for (const lang of ['zh-TW', 'en'] as const) {
+  const words =
+    lang === 'en'
+      ? { intro: /^Project PM isn’t set up for this project yet/, button: 'Set up', done: /^All set\./, offline: /^Can’t reach GitHub/, checksum: /^The downloaded file doesn’t match/, download: /^The download didn’t finish/, blocked: /^This computer’s network rules don’t allow/, removed: /^Setup removed/, retry: 'Try again' }
+      : { intro: /^這個專案還沒設定 Project PM/, button: '設定', done: /^設定好了/, offline: /^連不上 GitHub/, checksum: /^下載的檔案和發布時的不一樣/, download: /^下載沒有完成/, blocked: /^這台電腦的網路規定不允許/, removed: /^已移除設定/, retry: '重試' }
+  const options = { options: { language: lang } } as const
+
+  test(`T-51 (${lang}): not set up, the pane gets the program, checks it, shows the init list and Set up; one press sets it up, and Remove setup undoes it`, options, async ($, on) => {
+    const { ui, world: w } = await setupPane($, on, 'fine')
+    expect(w.logs).toEqual([])
+    expect(await ui.find({ type: 'Text', text: words.intro })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /CLAUDE\.md:$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /SKILL\.md$/ })).toBeDefined()
+    // Nothing changed yet: init ran only without --yes, and every curl hop was https on GitHub, redirects off.
+    expect(w.ran.some(argv => argv.includes('--yes'))).toBe(false)
+    expect(curlRuns(w).map(argv => argv.at(-1))).toEqual([SUMS_URL, ASSET_URL, CDN_URL])
+    for (const argv of curlRuns(w)) expect(argv.slice(1, 9)).toEqual(['--proto', '=https', '--tlsv1.2', '--silent', '--show-error', '--max-redirs', '0', '--connect-timeout'])
+    // A size cap on every hop: SHA256SUMS small, the program at most 300 MB.
+    expect(curlRuns(w).map(argv => argv[argv.indexOf('--max-filesize') + 1])).toEqual([String(MAX_SUMS_BYTES), String(MAX_PROGRAM_BYTES), String(MAX_PROGRAM_BYTES)])
+    // The mod's data folder may not be there yet on a first run: curl makes it.
+    for (const argv of curlRuns(w)) expect(argv).toContain('--create-dirs')
+    // The host's own network rules were asked about the release first.
+    expect(w.fetched).toEqual([SUMS_URL])
+    expect((await ui.find({ key: 'setup:apply' }))?.props.label).toBe(words.button)
+
+    await ui.press({ key: 'setup:apply' })
+    expect(w.ran.filter(argv => argv[0] === DOWNLOADED && argv.includes('--yes'))).toEqual([[DOWNLOADED, 'init', '--yes', '--json']])
+    expect(await ui.find({ type: 'Text', text: words.done })).toBeDefined()
+    // Checked once: the program is not downloaded again for the next step.
+    expect(curlRuns(w).length).toBe(3)
+
+    await ui.press({ key: 'setup:remove' })
+    await ui.press({ key: 'setup:remove-yes' })
+    expect(w.ran.filter(argv => argv[1] === 'uninstall')).toEqual([[DOWNLOADED, 'uninstall', '--yes', '--json']])
+    expect(await ui.find({ type: 'Text', text: words.removed })).toBeDefined()
+    // Not set up any more: Set up is offered again.
+    expect(await ui.find({ key: 'setup:apply' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test(`T-51 (${lang}): offline, the pane says so in plain words and offers to try again`, options, async ($, on) => {
+    const { ui, world: w } = await setupPane($, on, 'offline')
+    expect(await ui.find({ type: 'Text', text: words.offline })).toBeDefined()
+    expect(await ui.find({ key: 'setup:apply' })).toBeUndefined()
+    expect((await ui.find({ key: 'setup:retry' }))?.props.label).toBe(words.retry)
+    expect(w.ran.some(argv => argv[0] === DOWNLOADED)).toBe(false)
+    await ui.unmount()
+  })
+
+  test(`T-51 (${lang}): the host's network policy refusing GitHub stops it, though curl would get through`, options, async ($, on) => {
+    const { ui, world: w } = await setupPane($, on, 'blocked')
+    expect(await ui.find({ type: 'Text', text: words.blocked })).toBeDefined()
+    expect(await ui.find({ key: 'setup:retry' })).toBeDefined()
+    // Only SHA256SUMS came (it told the network works); the program was neither downloaded nor run.
+    expect(curlRuns(w).map(argv => argv.at(-1))).toEqual([SUMS_URL])
+    expect(w.ran.some(argv => argv[0] === DOWNLOADED)).toBe(false)
+    await ui.unmount()
+  })
+
+  test(`T-51 (${lang}): a download over the size cap stops, is emptied and is never run`, options, async ($, on) => {
+    const { ui, world: w } = await setupPane($, on, 'huge')
+    expect(await ui.find({ type: 'Text', text: words.download })).toBeDefined()
+    expect(w.files.get(DOWNLOADED)).toBe('')
+    expect(w.ran.some(argv => argv[0] === DOWNLOADED)).toBe(false)
+    expect(await ui.find({ key: 'setup:retry' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test(`T-51 (${lang}): a program that does not match SHA256SUMS is never run, and is emptied`, options, async ($, on) => {
+    const { ui, world: w } = await setupPane($, on, 'tampered')
+    expect(await ui.find({ type: 'Text', text: words.checksum })).toBeDefined()
+    expect(w.ran.some(argv => argv[0] === DOWNLOADED)).toBe(false)
+    expect(w.files.get(DOWNLOADED)).toBe('')
+    expect(await ui.find({ key: 'setup:retry' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test(`T-51 (${lang}): a redirect off the GitHub hosts stops the download`, options, async ($, on) => {
+    const { ui, world: w } = await setupPane($, on, 'elsewhere')
+    expect(await ui.find({ type: 'Text', text: words.download })).toBeDefined()
+    expect(curlRuns(w).map(argv => argv.at(-1))).toEqual([SUMS_URL, ASSET_URL])
+    expect(w.ran.some(argv => argv[0] === DOWNLOADED)).toBe(false)
+    await ui.unmount()
+  })
+}
+
+test('T-51: a project set up before shows Remove setup, and gets no program', ZH, async ($, on) => {
+  const files: Files = new Map()
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  files.set('C:/home/.project-pm/install-log.json', JSON.stringify({ version: '1.2.0', entries: [{ kind: 'text', project: projectKey(PROJECT) }] }))
+  const ran: (readonly string[])[] = []
+  const clock = mock.clock(on, { now: NOW })
+  world(on, 'local_pm', files, [], argv => {
+    ran.push(argv)
+
+    return null
+  })
+  await $.session.start(START)
+  await clock.advance(400)
+  const ui = await $.ui.mount({ plugin: 'project-pm', surface: 'desktop', component: 'Pane', requestId: 'project-pm', props: PANE_PROPS } as never)
+  for (let i = 0; i < 20 && !(await ui.find({ key: 'setup' })); i++) await clock.advance(100)
+  expect(await ui.find({ type: 'Text', text: 'Project PM 已經設定好。' })).toBeDefined()
+  expect(await ui.find({ key: 'setup:remove' })).toBeDefined()
+  expect(ran.some(argv => /curl/.test(argv[0] ?? ''))).toBe(false)
+  await ui.unmount()
 })

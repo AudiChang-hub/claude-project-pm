@@ -5,7 +5,7 @@
 import type { EngineInterface } from 'claude-code'
 import { atom, update } from 'claude-code'
 
-import type { Notice } from '../types'
+import type { Notice, Setup } from '../types'
 import { CORE_SERVER, coreHome } from './core'
 import { t } from './messages'
 
@@ -14,6 +14,7 @@ const notice = atom({ plugin: 'project-pm', key: 'notice' } as const, null as No
 export const webOpening = atom({ plugin: 'project-pm', key: 'webOpening' } as const, false)
 /** True when the core is not installed and the pane shows how to install it. */
 export const webHelp = atom({ plugin: 'project-pm', key: 'webHelp' } as const, false)
+const setup = atom({ plugin: 'project-pm', key: 'setup' } as const, { phase: 'unknown', project: '', changes: [], notes: [], error: null, failed: [] } as Setup)
 
 /** Where the core's program is downloaded from. */
 export const RELEASES_URL = 'https://github.com/AudiChang-hub/claude-project-pm/releases'
@@ -120,7 +121,7 @@ async function opener($: EngineInterface, url: string): Promise<string[]> {
 
 /**
  * The button: opens the running board at its address; starts it with the core's own `open` (which prints the address
- * and opens it) when it is installed but not running; shows how to install it when it is not. What either program
+ * and opens it) when it is installed but not running; points to Set up when it is not. What either program
  * prints is never read into the pane: it holds the key.
  */
 export async function openWebBoard($: EngineInterface, projectPath: string, projectKey: string | null): Promise<void> {
@@ -129,7 +130,11 @@ export async function openWebBoard($: EngineInterface, projectPath: string, proj
   try {
     const board = await webBoardOf($, projectPath, projectKey)
     if (board.kind === 'none') {
+      // T-51: never a press that seems to do nothing. The setup card comes back if it was hidden, and a toast says
+      // to set up first.
       await update($, webHelp, () => true)
+      await update($, setup, s => (s.isHidden ? { ...s, isHidden: false } : s))
+      $.ui.toast(t('setup.first'))
 
       return
     }

@@ -60,6 +60,7 @@ import {
 } from './sessions'
 import { isAgentId, isSameId, qaKeptText, qaUpdate } from './qa'
 import { callCore, coreHome, hasCore, mergedProject, trackWithReport } from './core'
+import { checkSetup } from './setup'
 import type { CoreActor } from './core'
 import type { CiRun, Project, Status } from './sessions'
 import { t } from './messages'
@@ -785,6 +786,9 @@ export async function refresh($: EngineInterface, isForced = false, isWide = fal
   const pane = (await $.ui.panes()).find(one => one.id === PANE)
   const isPaneOpen = pane !== undefined
   if (!isForced && !self?.isPm && !isPaneOpen) return
+  // One-click setup (T-51): with the board open, whether this project is set up, and if not what 設定 would change.
+  // Left to run on its own: getting the program may take minutes.
+  if (isPaneOpen && self && !self.isScratch) void checkSetup($, self.projectPath, self.projectKey).catch(err => $.ui.log(`project-pm: setup: ${reason(err)}`))
   await ensureTools($)
   const started = Date.now()
   if (fetchingSince && started - fetchingSince < STUCK_MS) return

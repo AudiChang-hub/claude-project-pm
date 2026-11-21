@@ -13,7 +13,7 @@
 </picture>
 
 <p align="center">
-  <img src="docs/images/overview-zh-TW.png" alt="Project PM v1.1.0 一頁圖解：你從 Claude Code 桌面版或 CLI 跟 PM 說話，兩邊用同一個共用核心；PM 把工作交給 Session 或 Agent；結案和 push 前都要過 QA 關卡；v1.1 新增兩邊同一份交辦清單、更好懂的看板、從面板打開網頁看板；以及每次派工的實測成本。" width="100%">
+  <img src="docs/images/overview-zh-TW.png" alt="Project PM v1.2.0 一頁圖解：你從 Claude Code 桌面版或 CLI 跟 PM 說話，兩邊用同一個共用核心；PM 把工作交給 Session 或 Agent；結案和 push 前都要過 QA 關卡；v1.2 新增在桌面版看板一鍵設定、一鍵移除，設定時認得桌面版內建的 Claude Code；以及每次派工的實測成本。" width="100%">
 </p>
 
 ## 解決什麼問題
@@ -22,15 +22,13 @@
 
 Project PM 讓專案裡的一個 Session 擔任 PM。它即時掌握每個 Session 和 Agent 的狀態，記下你交辦的每件事；只要還有事在等你、沒做完、等 CI，或還沒 push、還沒發布，它就不會說「都完成了」。
 
-## v1.1 新功能
+## v1.2 新功能
 
-- **兩邊同一份清單。** 裝了核心之後，桌面版和 CLI 用同一份交辦清單、同一道 QA 關卡。v1.0 的資料會自動帶過來。
-- **數字加得起來。** 看板把每個進行中的項目只算一次，歸在它最需要處理的那一類。
-- **用名稱，不用代碼。** Session 用標題或你交代的事顯示，不再出現一長串 id。
-- **網頁看板一鍵打開。** 按桌面版面板最下面的**在瀏覽器開啟**。網頁看板現在和面板長得一樣，也列出你在桌面版的專案。
-- **PM 的說明寫進 `CLAUDE.md`。** `init` 把專案段落寫在這裡，不再寫進 `AGENTS.md`。
+- **一鍵設定。** 裝好 mod，在看板上按**設定**就好，不用下載檔案、不用打指令：mod 會從這個專案的 GitHub 發布頁取得核心、用發布頁的 SHA-256 清單核對，改任何東西之前先列出會改哪些地方。
+- **一鍵移除。** 按**移除設定**，每個檔案都還原成原本的樣子。
+- **設定時認得你的 Claude Code。** 認得桌面版內建的 Claude Code，也看得到你實際在用的 mod 版本。
 
-v1.0（CLI、push 前驗收、CI 範本、單一執行檔）和更早的版本：[CHANGELOG](CHANGELOG.md)
+v1.1（兩邊同一份交辦清單、更好懂的看板、從面板打開網頁看板）和更早的版本：[CHANGELOG](CHANGELOG.md)
 
 ## 安裝
 
@@ -40,18 +38,23 @@ v1.0（CLI、push 前驗收、CI 範本、單一執行檔）和更早的版本�
 /plugin install project-pm --marketplace AudiChang-hub/claude-project-pm
 ```
 
-或點提示框旁的 **+** → **Plugins** → **Add marketplace** → 輸入 `AudiChang-hub/claude-project-pm` → **Add plugin**。接著在專案裡新開一個 Session，輸入 `/pm`。保持更新：`claude` → `/plugin` → **Marketplaces** → `claude-project-pm` → **Enable auto-update**。
+或點提示框旁的 **+** → **Plugins** → **Add marketplace** → 輸入 `AudiChang-hub/claude-project-pm` → **Add plugin**。
 
-**Claude Code CLI：** 從 [Releases](https://github.com/AudiChang-hub/claude-project-pm/releases) 下載你電腦用的檔，在專案資料夾裡加上 `init` 執行。沒加 `--yes` 之前不會改任何東西。npm 版（`npx`）之後的版本才提供。
+接著在專案裡新開一個 Session，讓它當 PM（按提示框上方的按鈕，或輸入 `/pm`），在看板最上面按**設定**，就完成了。改任何東西之前，看板會先列出會改哪些地方；按**移除設定**可以全部還原。沒有網路或下載失敗時，看板會說明原因，並提供**重試**按鈕。
+
+保持更新：`claude` → `/plugin` → **Marketplaces** → `claude-project-pm` → **Enable auto-update**。
+
+**Claude Code CLI**（沒有桌面版時）：從 [Releases](https://github.com/AudiChang-hub/claude-project-pm/releases) 下載你電腦用的檔，在專案資料夾裡加上 `init` 執行。沒加 `--yes` 之前不會改任何東西。npm 版（`npx`）之後的版本才提供。
 
 逐步說明，以及 Windows 或 macOS 跳出警告時怎麼辦（放行步驟還沒實際驗證）：[core/README.zh-TW.md](core/README.zh-TW.md)。
 
 ## 支援平台
 
-✅ 可用 · ◐ 部分
+✅ 可用 · ◐ 部分 · — 不提供
 
 | 功能 | Claude Code 桌面版 | Claude Code CLI¹ |
 | --- | :-: | :-: |
+| 一鍵設定 | ✅ | — |
 | 看板 | ✅ | ✅ |
 | 網頁看板² | ✅ | ✅ |
 | 交辦清單，兩邊共用³ | ✅ | ✅ |
@@ -63,11 +66,11 @@ v1.0（CLI、push 前驗收、CI 範本、單一執行檔）和更早的版本�
 | CI 範本⁴ | ✅ | ✅ |
 
 ¹ 在 Claude Code 2.1.326 實測。看板是網頁看板和 `git pm board`。部分支援的地方：CI 狀態（git 有檢查）、只看得到裝了 hook 的 Session、不會自動設定 Agent。
-² 要先裝核心（上面 CLI 的步驟）。桌面版按面板上的**在瀏覽器開啟**。
-³ 裝了核心之後；沒裝核心時，桌面版用自己的一份。
+² 要先有核心：在桌面版看板按**設定**，或上面 CLI 的步驟。桌面版按面板上的**在瀏覽器開啟**。
+³ 設定好之後；設定之前，桌面版用自己的一份。
 ⁴ GitHub Actions，在你的 repo 每次 push 和 pull request 時執行。
 
-這張表是 v1.1 的狀態，每次推版都會更新。
+這張表是 v1.2 的狀態，每次推版都會更新。
 
 ## PM 幫你守住什麼
 
@@ -101,7 +104,7 @@ v1.0（CLI、push 前驗收、CI 範本、單一執行檔）和更早的版本�
 
 **兩種看板。** Claude Code 桌面版：看板在右側面板（最上面那張）。網頁看板在瀏覽器裡顯示同一份工作，給 CLI 或第二個螢幕用：
 
-- **先安裝核心：** 就是上面 Claude Code CLI 那一步（下載後在專案資料夾用 `init` 執行）。
+- **先設定：** 在桌面版看板最上面按**設定**（沒有桌面版時，用上面 Claude Code CLI 那一步）。
 - **打開：** 桌面版按面板最下面的 **在瀏覽器開啟**；終端機在專案資料夾執行 `git pm open`；或直接問 PM「看板網址」。
 - **只輸入 `127.0.0.1:47130` 會看到錯誤頁。** 看板只能用 Project PM 給的連結打開，連結裡有一把私密金鑰，電腦上其他程式才讀不到。
 
@@ -122,6 +125,7 @@ v1.0（CLI、push 前驗收、CI 範本、單一執行檔）和更早的版本�
 ## 需求
 
 - Claude Code 桌面版（Mod，已在 2.1.317 測試），或 Claude Code 的 CLI（核心，已在 2.1.326 測試）。
+- 一鍵設定用系統內建的 `curl` 下載（Windows 10 和 11、macOS、大部分的 Linux 都有）。
 - 選用：已登入的 [GitHub CLI](https://cli.github.com/)，讓 PM 能查 CI。
 - 會改檔案的 Agent 需要 git repo。在桌面版，Agent 跑在 PM 的程序裡，重開 Claude Code 會中斷它們，看板會標成「已中斷」。
 

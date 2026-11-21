@@ -232,6 +232,32 @@ export type Notice = { tone: 'good' | 'bad'; text: string }
 
 export type Scope = 'project' | 'all'
 
+/**
+ * Why one-click setup stopped (hooks/setup.ts): offline, the host's network policy refused the release, the download
+ * failed (or was too big), the file did not match SHA256SUMS, no program for this computer, not a git project, init or
+ * uninstall did not finish.
+ */
+export type SetupError = 'offline' | 'blocked' | 'download' | 'checksum' | 'platform' | 'notGit' | 'init' | 'remove'
+
+/**
+ * One-click setup for this session's project (T-51): unknown until checked; fetching (getting and checking the core's
+ * program, then reading init's list); ready (the list is shown, 設定 waits); applying (init --yes); done (set up in this
+ * session); set (set up before); removing (uninstall --yes); failed.
+ */
+export type Setup = {
+  phase: 'unknown' | 'fetching' | 'ready' | 'applying' | 'done' | 'set' | 'removing' | 'failed'
+  /** The project (its key) it stands for. */
+  project: string
+  /** What init would change, one line each, and its notes, as `init --json` lists them. */
+  changes: string[]
+  notes: string[]
+  error: SetupError | null
+  /** What init or uninstall could not do, as it says it. */
+  failed: string[]
+  /** The person hid the card for this session. */
+  isHidden?: boolean
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'project-pm': {
@@ -258,6 +284,8 @@ declare module 'claude-code' {
       webHelp: boolean
       /** The desktop app's live context of running sessions (get_usage), by session id (T-48). */
       liveContext: Record<string, { tokens: number; at: number }>
+      /** One-click setup of the core for this project (T-51). */
+      setup: Setup
     }
   }
 }
