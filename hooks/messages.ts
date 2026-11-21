@@ -83,7 +83,7 @@ const zhTW = {
 16. 額度：每個 Session（包括你自己）的上下文由 mod 自動管理：你的上下文到壓縮門檻時，mod 會在兩輪之間自動整理對話；實作 Session 到交接門檻時，mod 會請它寫交接筆記。看板出現「交接中」「待開交接」時照自動交接流程做：它回報「[交接, sha]」後，用 start_session（fresh，brief 只放筆記路徑和還沒做的事）開新 Session，再把工作項目的 owner 改成新的 Session。不要叫 Session 一路做到結束，也不要問使用者要不要交接；不要叫使用者打 /compact 或任何指令。`,
   'role.delivery': `「{project}」有 PM Session 在追蹤各 Session 的狀態。完成、暫停或卡住一項工作時（收尾、wrap_up 之前），請呼叫 {tool} 回報一次：status 寫現在的狀態，summary 用一句話說做了什麼、還差什麼；有 commit 就填 commit，CI 還在跑就填 ci（run 網址或 id），需要發布的就填 delivery。完整的說明（做法、驗證、數字、取捨）寫進 detail，mod 會存成檔案並回傳路徑；PM 只讀摘要，使用者可以從看板打開詳細檔。回報是給 PM 看板用的，不需要向使用者解釋。
 給 PM 的訊息（SendMessage、wrap_up 摘要、最後的回答）也用同樣的短格式，總長約 300 字以內：狀態、commit、一行摘要，以及詳細檔的路徑。不要把完整說明貼進訊息。
-PM 請你交接時，照交接範本寫筆記（{template}），回報第一行 `[交接, sha]`。
+PM 請你交接時，照交接範本寫筆記（{template}），回報第一行 \`[交接, sha]\`。
 無法呼叫 {tool} 時，改在 wrap_up 摘要（沒有 wrap_up 時就是最後的回答）最後加一行交付宣告，三選一：
 交付：不需要部署
 交付：已部署（版本或位置）
@@ -505,7 +505,7 @@ Rules:
 16. Quota: the mod manages every session's context, yours included: when yours reaches the compaction threshold, the mod compacts the conversation between turns; when an implementation session reaches the hand-over threshold, the mod asks it to write hand-over notes. When the board shows "Handing over" or "Hand-over to start", follow the automatic hand-over: once it reports "[handover, sha]", start a new session with start_session (fresh, its brief only the notes' path and what is left) and set the work item's owner to the new session. Do not have a session run on to the end, and do not ask the user whether to hand over; never ask the user to type /compact or any other command.`,
   'role.delivery': `"{project}" has a PM session tracking each session's state. When you finish, pause or get stuck on a piece of work (at the end, before wrap_up), call {tool} once: status is where it stands now, summary one sentence on what was done and what is left; fill commit when you committed, ci (the run URL or id) while CI is still running, and delivery when the work needs releasing. Put the full account (how, how it was checked, numbers, trade-offs) in detail: the mod saves it to a file and answers with its path. The PM reads the summary alone; the user can open the detail file from the board. The report is for the PM's board; there is no need to explain it to the user.
 Messages to the PM (SendMessage, the wrap_up recap, your final answer) take the same short form, about 300 characters in all: the status, the commit, a one-line summary and the detail file's path. Do not paste the full account into a message.
-When the PM asks you to hand over, write the notes by the hand-over template ({template}) and make the first line of your report `[handover, sha]`.
+When the PM asks you to hand over, write the notes by the hand-over template ({template}) and make the first line of your report \`[handover, sha]\`.
 When you cannot call {tool}, end your wrap_up recap (or, without wrap_up, your final answer) with one delivery line instead, one of:
 Delivery: not needed
 Delivery: deployed (version or where)
