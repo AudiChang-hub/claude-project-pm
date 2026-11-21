@@ -12,16 +12,19 @@ session, `~/.claude/project-pm/` or `~/.project-pm/`.
 | `webboard.mts` (the real web board) | `web-board-light.png`, `web-board-dark.png` and their `-zh-TW` versions; `how-qa*.png`, `how-guidelines*.png` | The CLI part of each README; docs/how-it-works*.md |
 | `webboard.mts` with `terminal.html` (the core's real output) | `cli-chat.png`, `cli-board.png` and their `-zh-TW` versions | *See it in the CLI* in each README |
 
-- `overview.html` is the v1.0.0 one-page overview: the two ways in (the desktop app through the mod,
-  the CLI through the core's MCP server and hooks) on one shared core, the v0.8.0 sessions-and-agents
-  diagram, the QA layer (`docs/design/qa.md`) with the pre-push hook, and the core's three new pieces
-  (web board, CI template, single executable). Its four costs are the T-30 quota measurements in
-  input-equivalent tokens (PM rule 10 in `hooks/messages.ts`, which the core's PM gets too); it shows
-  no other number.
+- `overview.html` is the v1.1.0 one-page overview: the two ways in (the desktop app through the mod,
+  which uses the core from v1.1 on, and the CLI through the core's MCP server and hooks) on one shared
+  core and one ledger, the v0.8.0 sessions-and-agents diagram, the QA layer (`docs/design/qa.md`) with
+  the pre-push hook, and v1.1's three new pieces (one ledger for both, a clearer board, the web board
+  opened from the pane). It does not show T-48 (the PM managing its own context) yet. Its four costs
+  are the T-30 quota measurements in input-equivalent tokens (PM rule 10 in `hooks/messages.ts`, which
+  the core's PM gets too); it shows no other number.
 - `board.html` is the PM's pane for a made-up project ("Acme Storefront"). Its marks (ring, status
   dots, agent diamonds, step bars) and colors are copied from `hooks/view.tsx` and
   `hooks/sessions.ts`, its words from `hooks/messages.ts` (only the keys the pane uses), and its
-  layout follows `renderPane()`. When those change, update this page to match. `view=states` shows
+  layout follows `renderPane()`. The line under the progress counts the open items by kind as
+  `openBreakdown` in `hooks/qa.ts` does (T-42: "5 open: 2 awaiting QA · 3 on track"), each item once,
+  in `OPEN_COLOR`'s colors. When those change, update this page to match. `view=states` shows
   only the session cards of the statuses under *Needs attention*, with a usage limit (whose words are
   Claude Code's own error, in English in either language) and a session waiting on CI added.
 - `hero.html` is a schematic Claude Code desktop window: the person asks the PM whether anything is

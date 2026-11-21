@@ -13,7 +13,7 @@
 </picture>
 
 <p align="center">
-  <img src="docs/images/overview-zh-TW.png" alt="Project PM v1.0.0 一頁圖解：你從 Claude Code 桌面版或 CLI 跟 PM 說話，兩邊用同一個共用核心；PM 把工作交給 Session 或 Agent；結案和 push 前都要過 QA 關卡；v1.0 新增網頁看板、CI 範本和單一執行檔；以及每次派工的實測成本。" width="100%">
+  <img src="docs/images/overview-zh-TW.png" alt="Project PM v1.1.0 一頁圖解：你從 Claude Code 桌面版或 CLI 跟 PM 說話，兩邊用同一個共用核心；PM 把工作交給 Session 或 Agent；結案和 push 前都要過 QA 關卡；v1.1 新增兩邊同一份交辦清單、更好懂的看板、從面板打開網頁看板；以及每次派工的實測成本。" width="100%">
 </p>
 
 ## 解決什麼問題
@@ -22,15 +22,15 @@
 
 Project PM 讓專案裡的一個 Session 擔任 PM。它即時掌握每個 Session 和 Agent 的狀態，記下你交辦的每件事；只要還有事在等你、沒做完、等 CI，或還沒 push、還沒發布，它就不會說「都完成了」。
 
-## v1.0 亮點
+## v1.1 新功能
 
-- **CLI 也能用。** 一份共用核心用 MCP 提供 PM 的工具，Claude Code 的命令列也有看板、交辦清單和 QA 關卡，而且和桌面版共用同一份交辦清單。
-- **push 前先驗收。** git 的 pre-push hook 會擋下沒通過 QA 的 commit；`git pm skip "<理由>"` 可以明確放行一次，理由會留下紀錄。
-- **給你的專案用的 CI 範本。** `init --ci` 加上 GitHub Actions：跑你的測試、找外洩的金鑰、有風險的套件和不能公開的詞。
-- **一個程式，不用裝 Node.js。** Windows、macOS、Linux 都有單一執行檔（npm 版之後提供）。`init` 先列出要改的每個檔，`uninstall` 把每個檔還原。
-- **網頁看板**，在瀏覽器裡看，唯讀，只在你自己的電腦上。
+- **兩邊同一份清單。** 裝了核心之後，桌面版和 CLI 用同一份交辦清單、同一道 QA 關卡。v1.0 的資料會自動帶過來。
+- **數字加得起來。** 看板把每個進行中的項目只算一次，歸在它最需要處理的那一類。
+- **用名稱，不用代碼。** Session 用標題或你交代的事顯示，不再出現一長串 id。
+- **網頁看板一鍵打開。** 按桌面版面板最下面的**在瀏覽器開啟**。網頁看板現在和面板長得一樣，也列出你在桌面版的專案。
+- **PM 的說明寫進 `CLAUDE.md`。** `init` 把專案段落寫在這裡，不再寫進 `AGENTS.md`。
 
-v0.9.x（QA 關卡、額度優先派工）：[CHANGELOG](CHANGELOG.md)
+v1.0（CLI、push 前驗收、CI 範本、單一執行檔）和更早的版本：[CHANGELOG](CHANGELOG.md)
 
 ## 安裝
 
@@ -53,18 +53,21 @@ v0.9.x（QA 關卡、額度優先派工）：[CHANGELOG](CHANGELOG.md)
 | 功能 | Claude Code 桌面版 | Claude Code CLI¹ |
 | --- | :-: | :-: |
 | 看板 | ✅ | ✅ |
-| 交辦清單 | ✅ | ✅ |
-| QA 關卡 | ✅ | ✅ |
+| 網頁看板² | ✅ | ✅ |
+| 交辦清單，兩邊共用³ | ✅ | ✅ |
+| QA 關卡，兩邊共用³ | ✅ | ✅ |
 | 交付判斷（git、CI） | ✅ | ◐ |
 | 即時追蹤 Session | ✅ | ◐ |
 | Agent 派工 | ✅ | ◐ |
 | 開發準則 | ✅ | ✅ |
-| CI 範本² | ✅ | ✅ |
+| CI 範本⁴ | ✅ | ✅ |
 
 ¹ 在 Claude Code 2.1.326 實測。看板是網頁看板和 `git pm board`。部分支援的地方：CI 狀態（git 有檢查）、只看得到裝了 hook 的 Session、不會自動設定 Agent。
-² GitHub Actions，在你的 repo 每次 push 和 pull request 時執行。
+² 要先裝核心（上面 CLI 的步驟）。桌面版按面板上的**在瀏覽器開啟**。
+³ 裝了核心之後；沒裝核心時，桌面版用自己的一份。
+⁴ GitHub Actions，在你的 repo 每次 push 和 pull request 時執行。
 
-這張表每次推版都會更新。
+這張表是 v1.1 的狀態，每次推版都會更新。
 
 ## PM 幫你守住什麼
 

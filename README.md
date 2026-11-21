@@ -13,7 +13,7 @@
 </picture>
 
 <p align="center">
-  <img src="docs/images/overview.png" alt="Project PM v1.0.0 at a glance: you talk to the PM from the Claude Code desktop app or the CLI, both on one shared core; the PM hands work to sessions or agents; a QA gate before anything closes or is pushed; new in v1.0, a web board, a CI template and a single executable; and the measured cost of each hand-off." width="100%">
+  <img src="docs/images/overview.png" alt="Project PM v1.1.0 at a glance: you talk to the PM from the Claude Code desktop app or the CLI, both on one shared core; the PM hands work to sessions or agents; a QA gate before anything closes or is pushed; new in v1.1, one ledger for both, a clearer board and the web board opened from the pane; and the measured cost of each hand-off." width="100%">
 </p>
 
 ## Why
@@ -22,15 +22,15 @@ With several sessions open on one project, work slips: a question waits an hour 
 
 Project PM makes one session the project's PM. It keeps a live board of every session and agent and a ledger of everything you asked for, and it won't call work done while anything is waiting on you, unfinished, waiting on CI, or not yet pushed or released.
 
-## New in v1.0
+## New in v1.1
 
-- **The CLI works too.** One shared core serves the PM's tools over MCP, so Claude Code's command line gets the board, the ledger and the QA gate. It shares one ledger with the desktop app.
-- **QA before the push.** A git pre-push hook holds commits no QA passed; `git pm skip "<reason>"` lets one through on the record.
-- **A CI template for your projects.** `init --ci` adds GitHub Actions: your tests, leaked keys, risky packages and words you keep private.
-- **One program, no Node.js.** A single executable for Windows, macOS and Linux (an npm version comes later). `init` lists every change before making it; `uninstall` puts every file back.
-- **A web board** in your browser, read only and on your own computer.
+- **One list for both apps.** With the core installed, the desktop app and the CLI use the same ledger and the same QA gate. Your v1.0 data carries over by itself.
+- **Numbers that add up.** The board counts each open item once, under what it needs most.
+- **Names, not codes.** Sessions show by their title or what you asked them, never by a long id.
+- **The web board, one click away.** Press **Open in browser** at the bottom of the desktop pane. The web board now looks like the pane and lists your desktop projects too.
+- **The PM's notes go in `CLAUDE.md`.** `init` writes its project section there, no longer in `AGENTS.md`.
 
-v0.9.x (QA gate, quota-first hand-offs): [CHANGELOG](CHANGELOG.md)
+v1.0 (the CLI, QA before the push, the CI template, one program) and earlier: [CHANGELOG](CHANGELOG.md)
 
 ## Install
 
@@ -53,18 +53,21 @@ Step by step, and what to do when Windows or macOS warns you (those steps are no
 | Feature | Claude Code desktop | Claude Code CLI¹ |
 | --- | :-: | :-: |
 | Board | ✅ | ✅ |
-| Ledger | ✅ | ✅ |
-| QA gate | ✅ | ✅ |
+| Web board² | ✅ | ✅ |
+| Ledger, shared by both³ | ✅ | ✅ |
+| QA gate, shared by both³ | ✅ | ✅ |
 | Delivery check (git, CI) | ✅ | ◐ |
 | Live session tracking | ✅ | ◐ |
 | Agent hand-off | ✅ | ◐ |
 | Development guidelines | ✅ | ✅ |
-| CI template² | ✅ | ✅ |
+| CI template⁴ | ✅ | ✅ |
 
 ¹ Tested with Claude Code 2.1.326. The board is the web board and `git pm board`. Partial: CI status (git is checked), sessions seen only through hooks, and no automatic agent set-up.
-² GitHub Actions, run in your repository on every push and pull request.
+² Needs the core (the CLI step above). In the desktop app: **Open in browser** on the pane.
+³ Once the core is installed; without it, the desktop app keeps its own.
+⁴ GitHub Actions, run in your repository on every push and pull request.
 
-Updated with every release.
+As of v1.1. Updated with every release.
 
 ## What the PM guards
 

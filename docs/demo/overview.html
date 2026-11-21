@@ -1,10 +1,12 @@
 <!doctype html>
 <!--
-  The v1.0.0 one-page overview at the top of the READMEs, as a static page to capture.
-  Built on the v0.8.0 design canvas "Project PM v0.8.0 一頁圖解" and the v0.9.0 QA layer. v1.0 adds the
-  two ways in (the desktop app through the mod, the CLI through the core's MCP server and hooks, both on
-  one shared store: docs/design/v1-core.md) and the core's three new pieces: the web board, the CI
-  template for your own projects and the single executable.
+  The v1.1.0 one-page overview at the top of the READMEs, as a static page to capture.
+  Built on the v0.8.0 design canvas "Project PM v0.8.0 一頁圖解" and the v0.9.0 QA layer. v1.0 added the
+  two ways in (the desktop app through the mod, the CLI through the core's MCP server and hooks) and the
+  core. v1.1 has the desktop mod use the core too (E2, docs/design/v1-core.md 2.4 and 3.7), so both ways
+  share one ledger and one QA gate (T-40), and shows v1.1's three new pieces: the shared ledger, a clearer
+  board (T-42, T-43, T-44) and the web board opened from the pane (T-45, T-47). T-48 (the PM managing its
+  own context) is not on it yet.
 
   Views:  overview.html?lang=en      docs/images/overview.png
           overview.html?lang=zh-TW   docs/images/overview-zh-TW.png
@@ -103,7 +105,7 @@
   .way b { display: block; font-size: 24px; font-weight: 700; }
   .way small { display: block; font-size: 18px; color: var(--ink-2); margin-top: 4px; }
   .way.new { border-color: var(--violet); }
-  .way b .badge { margin-left: 10px; vertical-align: 3px; }
+  .way small .badge { margin-right: 10px; vertical-align: 2px; }
   .badge { font: 700 13px/1 var(--num); letter-spacing: .1em; color: var(--violet); border: 1.5px solid rgba(180, 156, 255, .5); border-radius: 6px; padding: 6px 8px 5px; white-space: nowrap; }
   :lang(zh-TW) .badge { font: 700 14px/1 var(--sans); letter-spacing: .04em; padding: 6px 8px; }
   /* You → the two ways in → the PM: a stem, then a bracket whose ends meet each box at its middle (columns 400px apart). */
@@ -147,10 +149,10 @@ const COPY = {
     title: 'You only talk to the PM',
     you: 'You',
     ways: [
-      ['Claude Code desktop', 'Board pane · the mod', ''],
-      ['Claude Code CLI', 'MCP server · hooks', 'NEW'],
+      ['Claude Code desktop', 'The pane · on the core', 'v1.1'],
+      ['Claude Code CLI', 'MCP server · hooks', ''],
     ],
-    pm: 'One shared core · Board · Ledger',
+    pm: 'One shared core · one ledger for both',
     session: ['Remembers', 'Follow-ups', 'Push · CI'],
     agent: ['One-off', 'Read-heavy', 'Background'],
     qaTitle: 'QA gate',
@@ -160,11 +162,11 @@ const COPY = {
       ['Independent QA agent', 'Before each push; sees only the diff'],
       ['No pass, no close', 'The ledger won’t close it; git’s <span class="nowrap">pre-push hook</span> holds the push'],
     ],
-    coreTitle: 'New in v1.0',
+    coreTitle: 'New in v1.1',
     pieces: [
-      ['Web board', 'project-pm open', 'Read-only, on your own computer. Phone to desktop, light or dark.'],
-      ['CI template', 'init --ci', 'GitHub Actions for your project: tests, leaked keys, risky packages, private words.'],
-      ['Single executable', 'Windows · macOS · Linux', 'No Node.js needed (or npx). init lists every change first; uninstall puts files back.'],
+      ['One ledger for both', 'desktop · CLI', 'The desktop app now runs on the shared core: one ledger and one QA gate, wherever you talk to the PM.'],
+      ['A clearer board', 'names, not ids', 'Each open item counted once, so the numbers add up. Sessions by name. The web board looks like the pane.'],
+      ['Open in browser', 'a button in the pane', 'The web board opens from the desktop pane, and it lists the desktop app’s projects too.'],
     ],
     costsTitle: 'Quota first · cost per hand-off, input-equivalent tokens',
     stats: [
@@ -179,10 +181,10 @@ const COPY = {
     title: '你只跟 PM 說話',
     you: '你',
     ways: [
-      ['Claude Code 桌面版', '看板面板 · mod', ''],
-      ['Claude Code CLI', 'MCP server · hook', '新'],
+      ['Claude Code 桌面版', '看板面板 · 改用核心', 'v1.1'],
+      ['Claude Code CLI', 'MCP server · hook', ''],
     ],
-    pm: '共用核心 · 看板 · 交辦清單',
+    pm: '共用核心 · 兩邊同一份交辦清單',
     session: ['要記憶', '會追問', 'push · CI'],
     agent: ['做完就走', '大量讀取', '背景執行'],
     qaTitle: 'QA 關卡',
@@ -192,11 +194,11 @@ const COPY = {
       ['獨立驗收 Agent', 'push 前派出，只看 diff'],
       ['沒通過不能結案', '交辦清單拒絕結案，git 的 <span class="nowrap">pre-push hook</span> 擋下 push'],
     ],
-    coreTitle: 'v1.0 新增',
+    coreTitle: 'v1.1 新增',
     pieces: [
-      ['網頁看板', 'project-pm open', '唯讀，只在你自己的電腦上。手機到桌面、淺色深色都能看。'],
-      ['CI 範本', 'init --ci', '給你的專案用的 GitHub Actions：測試、外洩的金鑰、有風險的套件、不能公開的詞。'],
-      ['單一執行檔', 'Windows · macOS · Linux', '不用裝 Node.js（也可用 npx）。init 先列出要改的檔，uninstall 會還原。'],
+      ['同一份交辦清單', '桌面版 · CLI', '桌面版改用共用核心：不管在哪裡跟 PM 說話，都是同一份交辦清單、同一道 QA 關卡。'],
+      ['看板更好懂', '用名稱，不用 id', '每個進行中的項目只算一次，數字加得起來。Session 用名稱顯示，網頁看板和面板長得一樣。'],
+      ['在瀏覽器開啟', '面板上的一個按鈕', '從桌面版面板直接打開網頁看板，桌面版的專案也列得出來。'],
     ],
     costsTitle: '額度優先 · 每次派工的成本（等值輸入 tokens）',
     stats: [
@@ -229,9 +231,10 @@ const ICON = {
     '<rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path>',
   ],
   pieces: [
-    '<rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18M9 9v11"></path>',
+    // Two ways meeting in one ledger; the board; a window opening outward.
     '<circle cx="6" cy="6" r="2.5"></circle><circle cx="6" cy="18" r="2.5"></circle><circle cx="18" cy="12" r="2.5"></circle><path d="M6 8.5v7M8.5 6h3a4 4 0 0 1 4 4M8.5 18h3a4 4 0 0 0 4-4"></path>',
-    '<path d="M12 3 4 7v10l8 4 8-4V7z"></path><path d="m4 7 8 4 8-4M12 11v10"></path>',
+    '<rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 9h18M9 9v11"></path>',
+    '<path d="M14 4h6v6M20 4l-8 8"></path><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"></path>',
   ],
   stats: [
     '<circle cx="12" cy="12" r="3"></circle><circle cx="12" cy="12" r="8"></circle>',
@@ -243,7 +246,7 @@ const ICON = {
 document.getElementById('poster').innerHTML = `
   <div class="row head">
     <div>
-      <div class="eyebrow">PROJECT PM · v1.0.0</div>
+      <div class="eyebrow">PROJECT PM · v1.1.0</div>
       <h1>${c.title}</h1>
     </div>
     <div class="row legend"><span><i class="dot"></i>Session</span><span><i class="diamond"></i>Agent</span></div>
@@ -253,7 +256,7 @@ document.getElementById('poster').innerHTML = `
     <div class="row you">${svg(56, '#eef1f8', 1.8, ICON.person)}${c.you}</div>
     <div class="stem short"></div>
     <div class="fork"><i></i><i></i></div>
-    <div class="ways">${c.ways.map(([b, t, tag], i) => `<div class="way${tag ? ' new' : ''}">${svg(40, tag ? '#b49cff' : '#eef1f8', 1.8, ICON.ways[i])}<div><b>${b}${tag ? `<span class="badge">${tag}</span>` : ''}</b><small>${dot(t)}</small></div></div>`).join('')}</div>
+    <div class="ways">${c.ways.map(([b, t, tag], i) => `<div class="way${tag ? ' new' : ''}">${svg(40, tag ? '#b49cff' : '#eef1f8', 1.8, ICON.ways[i])}<div><b>${b}</b><small>${tag ? `<span class="badge">${tag}</span>` : ''}${dot(t)}</small></div></div>`).join('')}</div>
     <div class="join"><i></i><i></i></div>
     <div class="stem short"></div>
     <div class="row pm">${svg(64, '#0e1322', 1.8, ICON.clipboard)}<div><b>PM</b><small>${dot(c.pm)}</small></div></div>
@@ -271,7 +274,7 @@ document.getElementById('poster').innerHTML = `
   </div>
 
   <div class="core">
-    <h2><span class="badge">v1.0</span>${c.coreTitle}</h2>
+    <h2><span class="badge">v1.1</span>${c.coreTitle}</h2>
     <div class="three">${c.pieces.map(([b, code, t], i) => `<div class="piece">${svg(44, '#b49cff', 1.8, ICON.pieces[i])}<b>${b}</b><code>${dot(code)}</code><p>${t}</p></div>`).join('')}</div>
   </div>
 
