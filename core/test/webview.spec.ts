@@ -62,6 +62,38 @@ describe('the web board in a browser (T-43)', () => {
     assert.ok(dom.includes('Coupon &lt;img'), 'the session by its reported title')
   })
 
+  test('an empty project draws its empty states, the pane figures at zero and no horizontal scroll at 375px (T-44)', async t => {
+    const exe = browserPath()
+    if (!exe) return t.skip('no Edge or Chrome here: set PROJECT_PM_BROWSER to run it')
+    const empty = world('en')
+    const server = await serve({ port: 0, env: empty.env, ctx: { run: hostWith(), cwd: empty.repo } })
+    const page = await openBrowser(exe)
+    try {
+      await pmTool(empty.ctx(), { action: 'claim' })
+      const ref = (await resolveProject(empty.repo))!
+      const seen = await page.evaluate<{ empties: string[]; figures: string[]; percent: string; overflow: number }>(
+        boardAddress(server.info, ref.key),
+        `!!document.getElementById('board') && !document.getElementById('board').hidden`,
+        `({ empties: [...document.querySelectorAll('.empty strong')].map(e => e.textContent), figures: [...document.querySelectorAll('.metric dd')].map(e => e.textContent), percent: document.getElementById('percent').textContent, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth })`,
+        { width: 375, scheme: 'dark' },
+      )
+      assert.deepEqual(seen.empties, ['Nothing needs you right now', 'No work items yet', 'No session has reported yet'])
+      assert.deepEqual(seen.figures, ['0', '0', '0'])
+      assert.equal(seen.percent, '—')
+      assert.equal(seen.overflow, 0)
+      // The live mark pulses, unless the person asked for less motion.
+      const url = boardAddress(server.info, ref.key)
+      const ready = `!!document.getElementById('board') && !document.getElementById('board').hidden`
+      const motion = `getComputedStyle(document.querySelector('.live__dot')).animationName`
+      assert.notEqual(await page.evaluate<string>(url, ready, motion), 'none')
+      assert.equal(await page.evaluate<string>(url, ready, motion, { reducedMotion: true }), 'none')
+    } finally {
+      await page.close()
+      await server.close()
+      empty.done()
+    }
+  })
+
   test('the page sets every word as text: no innerHTML, outerHTML, insertAdjacentHTML or document.write', () => {
     const source = readFileSync(fileURLToPath(new URL('../src/web/app.js', import.meta.url)), 'utf8')
     for (const sink of ['innerHTML', 'outerHTML', 'insertAdjacentHTML', 'document.write', 'eval(', 'new Function']) assert.ok(!source.includes(sink), sink)

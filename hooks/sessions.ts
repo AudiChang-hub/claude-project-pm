@@ -1486,3 +1486,38 @@ export function boardText(input: BoardInput): string {
 export function emptyProject(key: string, name: string, path: string): ProjectFile {
   return { key, name, path, pmId: null, isDismissed: false, ledger: [], nextId: 1 }
 }
+
+// ── The pane's figures and words, shared with the web board (T-44) ──
+
+/** The session status an agent's state reads as: its color and meaning on the pane's diamonds and on the web board. */
+export const AGENT_STATUS: Record<AgentState, Status> = { running: 'running', verify: 'unreleased', decide: 'asking', failed: 'failed', lost: 'failed', done: 'done', dropped: 'done' }
+
+export type Kpi = { running: number; runningAgents: number; asking: number; open: number }
+
+/** The pane's three figures: running (its running agents included), waiting on the person, not finished. */
+export function kpiOf(statuses: Status[], agents: AgentRecord[]): Kpi {
+  const count = (...wanted: Status[]) => statuses.filter(s => wanted.includes(s)).length
+  const agentCount = (...wanted: AgentState[]) => agents.filter(a => wanted.includes(a.state)).length
+  const runningAgents = agentCount('running')
+
+  return {
+    running: count('running', 'waiting') + runningAgents,
+    runningAgents,
+    asking: count('asking') + agentCount('decide'),
+    open: count('open', 'ci', 'failed', 'limit', 'unreleased') + agentCount('verify', 'failed', 'lost'),
+  }
+}
+
+/** The line under a session's card: its question, its report and what is next, its recap, last answer or instruction. */
+export function cardSummary(track: Track | undefined, word: LastWord | undefined): string {
+  if (track) {
+    if (track.ask) return t('pane.question', { text: track.ask })
+    // The session's own report, when it made one this turn: what it says it did and what is next.
+    if (track.report?.summary) return track.report.next ? `${track.report.summary} → ${track.report.next}` : track.report.summary
+
+    return track.recap || track.lastAnswer || (track.lastPrompt ? t('pane.instruction', { text: track.lastPrompt }) : t('pane.noReport'))
+  }
+  if (word?.error) return t('pane.cannotReadTranscript', { error: word.error })
+
+  return word ? word.said || t('pane.noReport') : t('pane.reading')
+}

@@ -2497,7 +2497,7 @@ const QA_WORDS = {
     paneAwaiting: '1 項待 QA',
     paneFailed: '1 項 QA 不通過',
     paneItemAwaiting: '待 QA',
-    paneItemFailed: 'QA 不通過（agent:q1，於 3fa1c2e）',
+    paneItemFailed: 'QA 不通過（agent q1，於 3fa1c2e）',
   },
   en: {
     row: 'T-01 (id 1) [open] Batch edit | owner: local_open',
@@ -2516,7 +2516,7 @@ const QA_WORDS = {
     paneAwaiting: '1 awaiting QA',
     paneFailed: '1 failed QA',
     paneItemAwaiting: 'awaiting QA',
-    paneItemFailed: 'QA failed (agent:q1 at 3fa1c2e)',
+    paneItemFailed: 'QA failed (agent q1 at 3fa1c2e)',
   },
 } as const
 

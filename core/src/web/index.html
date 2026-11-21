@@ -26,38 +26,71 @@
     <main id="main" class="page" tabindex="-1">
       <section id="state" class="state" hidden aria-live="polite"></section>
       <div id="board" hidden>
-        <section class="hero" aria-labelledby="name">
-          <p class="hero__eyebrow" id="path"></p>
-          <h1 class="hero__name" id="name"></h1>
-          <div class="hero__meta">
-            <div class="progress" id="progress" role="img"></div>
-            <p class="live" id="live"><span class="live__dot" aria-hidden="true"></span><span id="live-text"></span></p>
+        <section class="head" aria-labelledby="name">
+          <div class="head__titles">
+            <p class="eyebrow" id="eyebrow"></p>
+            <h1 class="head__name" id="name"></h1>
+            <p class="head__meta"><span id="path"></span><span class="sep" aria-hidden="true">·</span><span id="pm"></span></p>
           </div>
-          <p class="hero__breakdown" id="breakdown"></p>
-          <p class="hero__pm" id="pm"></p>
+          <p class="live" id="live"><span class="live__dot" aria-hidden="true"></span><span id="live-text"></span></p>
         </section>
+
+        <section class="kpi card" aria-label="Progress">
+          <div class="kpi__progress">
+            <svg class="ring" id="ring" viewBox="0 0 42 42" width="56" height="56" role="img">
+              <circle class="ring__track" cx="21" cy="21" r="17" />
+              <circle class="ring__arc" id="ring-arc" cx="21" cy="21" r="17" transform="rotate(-90 21 21)" />
+            </svg>
+            <div class="kpi__text">
+              <p class="kpi__percent" id="percent"></p>
+              <p class="kpi__caption" id="ratio-caption"></p>
+              <p class="kpi__breakdown" id="breakdown"></p>
+            </div>
+          </div>
+          <dl class="kpi__metrics">
+            <div class="metric is-success" id="m-running"><dt></dt><dd></dd><span class="metric__sub"></span></div>
+            <div class="metric is-warning" id="m-asking"><dt></dt><dd></dd></div>
+            <div class="metric is-claude" id="m-open"><dt></dt><dd></dd></div>
+          </dl>
+        </section>
+
         <div class="grid">
           <div class="grid__main">
             <section class="block" aria-labelledby="attention-h">
-              <h2 class="block__title" id="attention-h"><span data-t="attention"></span><span class="count" id="attention-n"></span></h2>
+              <div class="block__head">
+                <h2 class="block__title" id="attention-h" data-t="attention"></h2>
+                <span class="block__meta" id="attention-n"></span>
+              </div>
               <ul class="attention" id="attention"></ul>
             </section>
             <section class="block" aria-labelledby="items-h">
               <div class="block__head">
-                <h2 class="block__title" id="items-h"><span data-t="items"></span><span class="count" id="items-n"></span></h2>
-                <label class="toggle"><input type="checkbox" id="done" /><span data-t="showDone"></span></label>
+                <h2 class="block__title" id="items-h"></h2>
+                <span class="block__meta" id="items-n"></span>
               </div>
+              <label class="toggle"><input type="checkbox" id="done" /><span data-t="showDone"></span></label>
               <ol class="items" id="items"></ol>
             </section>
           </div>
           <aside class="grid__side">
-            <section class="block" aria-labelledby="sessions-h">
-              <h2 class="block__title" id="sessions-h"><span data-t="sessions"></span><span class="count" id="sessions-n"></span></h2>
-              <ul class="sessions" id="sessions"></ul>
-            </section>
             <section class="block" id="agents-block" hidden aria-labelledby="agents-h">
-              <h2 class="block__title" id="agents-h"><span data-t="agents"></span></h2>
-              <ul class="sessions" id="agents"></ul>
+              <div class="block__head">
+                <h2 class="block__title" id="agents-h"></h2>
+                <span class="block__meta" id="agents-n"></span>
+              </div>
+              <ul class="cards" id="agents"></ul>
+              <p class="block__note" id="agents-hidden" hidden></p>
+            </section>
+            <section class="block" aria-labelledby="sessions-h">
+              <div class="block__head">
+                <h2 class="block__title" id="sessions-h"></h2>
+                <span class="block__meta" id="sessions-n"></span>
+              </div>
+              <ul class="cards" id="sessions"></ul>
+              <details class="ended" id="ended" hidden>
+                <summary id="ended-toggle"></summary>
+                <ul class="rows" id="ended-list"></ul>
+              </details>
             </section>
             <p class="readonly" data-t="readonly"></p>
           </aside>

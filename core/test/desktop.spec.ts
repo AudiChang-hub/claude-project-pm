@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
 import { t } from '../../hooks/messages'
-import { boardText, keyFile, projectKey } from '../../hooks/sessions'
+import { STATUS, boardText, keyFile, kpiOf, projectKey } from '../../hooks/sessions'
 import type { Session, Track } from '../../types'
 import { ROUND_FRESH_MS, projectSessions } from '../src/actors'
 import { runHook } from '../src/hook'
@@ -114,6 +114,14 @@ for (const lang of LANGS) {
       assert.ok(!text.includes('Weather app'))
       // The PM's agents, from its track.
       assert.deepEqual(json.agents.map(a => (a as { id: string }).id), ['a1b2c3'])
+      // The pane's figures and looks, for the web board to draw alike (T-44): kpiOf over the same statuses, STATUS colors.
+      assert.deepEqual(json.pane.kpi, kpiOf(json.actors.map(a => a.status), found.agents))
+      assert.deepEqual(json.pane.kpi, { running: 2, runningAgents: 1, asking: 2, open: 0 })
+      assert.equal(json.pane.words.kpiAsking, t('pane.kpiAsking'))
+      for (const actor of json.actors) assert.equal(actor.look, STATUS[actor.status].color)
+      assert.deepEqual(json.agentCards.map(c => [c.name, c.look, c.isRunning]), [['T-02 Add alt text to product images', STATUS.running.color, true]])
+      const ask = json.actors.find(a => a.id === 'local_ask')!
+      assert.equal(ask.summary, t('pane.question', { text: 'Drop the coupon_v1 columns in this release, or keep them read-only until 0.9?' }))
     })
 
     test('a round older than the desktop app\'s refresh counts nobody as running', async () => {

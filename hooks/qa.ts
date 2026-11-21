@@ -44,13 +44,13 @@ export function qaShown(item: LedgerItem, isOwnerDelivered: boolean): QaShown | 
 }
 
 /** An item's QA in words: passed or failed and by whom, skipped and why, or awaiting. */
-export function qaText(item: LedgerItem, shown: QaShown, isWhole = false): string {
+export function qaText(item: LedgerItem, shown: QaShown, isWhole = false, who: (id: string) => string = id => id): string {
   if (shown === 'awaiting' || !item.qa) return t('qa.awaiting')
   if (shown === 'skipped') return t('qa.skipped', { note: isWhole ? item.qa.note : clip(item.qa.note, NOTE) })
 
   const commit = item.qa.commit ? t('qa.commit', { sha: item.qa.commit }) : ''
 
-  return t(shown === 'pass' ? 'qa.pass' : 'qa.fail', { by: item.qa.by, commit })
+  return t(shown === 'pass' ? 'qa.pass' : 'qa.fail', { by: who(item.qa.by), commit })
 }
 
 /**

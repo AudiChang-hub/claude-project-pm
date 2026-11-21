@@ -6,7 +6,7 @@ import type { ElementConstructor, EngineInterface, RenderInputOf, RenderSurface,
 
 import type { AgentRecord, AgentState, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Step, Track } from '../types'
 import { agentName } from './agents'
-import { STATUS, agentTime, ago, caveatOf, clip, groupProjects, isActive, isDeliveredAgent, isDeliveredStatus, isHandedOff, itemCode, limitOf, liveTracks, openSteps, projectKey, sessionName, settledAt, shownAgents, statusOf, statusText } from './sessions'
+import { AGENT_STATUS, STATUS, agentTime, ago, cardSummary, caveatOf, clip, kpiOf, groupProjects, isActive, isDeliveredAgent, isDeliveredStatus, isHandedOff, itemCode, limitOf, liveTracks, openSteps, projectKey, sessionName, settledAt, shortId, shownAgents, statusOf, statusText } from './sessions'
 import { isAgentId, isSameId, openBreakdown, qaShown, qaText } from './qa'
 import type { OpenKind, QaShown } from './qa'
 import type { Project, Status } from './sessions'
@@ -30,16 +30,10 @@ const isEndedShown = atom({ plugin: 'project-pm', key: 'isEndedShown' } as const
 const detailShown = atom({ plugin: 'project-pm', key: 'detailShown' } as const, null as { id: string; text: string } | null)
 const agents = atom({ plugin: 'project-pm', key: 'agents' } as const, [] as AgentRecord[])
 
-/** An agent state's look, in the hues of the session statuses that mean the same (hooks/sessions.ts STATUS). */
-const AGENT_LOOK: Record<AgentState, { color: string; hex: string }> = {
-  running: { color: STATUS.running.color, hex: STATUS.running.hex },
-  verify: { color: STATUS.unreleased.color, hex: STATUS.unreleased.hex },
-  decide: { color: STATUS.asking.color, hex: STATUS.asking.hex },
-  failed: { color: STATUS.failed.color, hex: STATUS.failed.hex },
-  lost: { color: STATUS.failed.color, hex: STATUS.failed.hex },
-  done: { color: STATUS.done.color, hex: STATUS.done.hex },
-  dropped: { color: STATUS.done.color, hex: STATUS.done.hex },
-}
+/** An agent state's look, in the hues of the session statuses that mean the same (hooks/sessions.ts AGENT_STATUS). */
+const AGENT_LOOK = Object.fromEntries(
+  (Object.keys(AGENT_STATUS) as AgentState[]).map(state => [state, { color: STATUS[AGENT_STATUS[state]].color, hex: STATUS[AGENT_STATUS[state]].hex }]),
+) as Record<AgentState, { color: string; hex: string }>
 
 /** An agent's mark: the session dot's size and hues, as a diamond, so an owner shows which kind it is. */
 function diamondSvg(hex: string, isPulsing: boolean): string {
@@ -221,6 +215,17 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
 
     return qaShown(item, !owner || isDeliveredStatus(statusOfOne(owner)))
   }
+  /** Who checked an item, as people read it (T-43): an agent by its task, a session by its name, else a short id. */
+  const whoIs = (id: string) => {
+    if (isAgentId(id)) {
+      const agent = agentOwner(id)
+
+      return agent ? agentName(agent) : `agent ${shortId(id)}`
+    }
+    const one = sessionOwner(id)
+
+    return one ? sessionName(one, all[one.id]) : shortId(id)
+  }
   // Each open item under the one kind it most needs, so the counts add up (T-42): the board and the web board say the same.
   const breakdown = openBreakdown(ledgers.map(({ item, project }) => ({ item, qa: qaOfItem(item, project) })))
   const steps = everyone.flatMap(one => all[one.id]?.plan ?? [])
@@ -228,9 +233,9 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   const isByItems = items.length > 0
   const ratio = isByItems ? itemsDone / items.length : steps.length ? stepsDone / steps.length : 0
   const hasRatio = isByItems || steps.length > 0
-  const count = (s: Status) => everyone.filter(one => statusOfOne(one) === s).length
-  const agentCount = (...states: AgentState[]) => myAgents.filter(a => states.includes(a.state)).length
-  const runningAgents = agentCount('running')
+  // The three figures, as the web board counts them too (kpiOf).
+  const kpi = kpiOf(everyone.map(statusOfOne), myAgents)
+  const runningAgents = kpi.runningAgents
   const pmFile: ProjectFile | undefined = !isAll && self ? files[self.projectKey] : undefined
   const role = isAll
     ? t('pane.projects', { n: shown.length })
@@ -285,9 +290,9 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
         </Box>
       </Box>
       <Box flexDirection="row">
-        {metric('kpi:running', count('running') + count('waiting') + runningAgents, t('pane.kpiRunning'), 'success', runningAgents ? t('pane.kpiAgents', { n: runningAgents }) : undefined)}
-        {metric('kpi:asking', count('asking') + agentCount('decide'), t('pane.kpiAsking'), 'warning')}
-        {metric('kpi:open', count('open') + count('ci') + count('failed') + count('limit') + count('unreleased') + agentCount('verify', 'failed', 'lost'), t('pane.kpiOpen'), 'claude')}
+        {metric('kpi:running', kpi.running, t('pane.kpiRunning'), 'success', runningAgents ? t('pane.kpiAgents', { n: runningAgents }) : undefined)}
+        {metric('kpi:asking', kpi.asking, t('pane.kpiAsking'), 'warning')}
+        {metric('kpi:open', kpi.open, t('pane.kpiOpen'), 'claude')}
       </Box>
     </Box>
   )
@@ -356,19 +361,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
       </Box>
     )
 
-  const summaryOf = (track: Track | undefined, one: Session) => {
-    if (track) {
-      if (track.ask) return t('pane.question', { text: track.ask })
-      // The session's own report, when it made one this turn: what it says it did and what is next.
-      if (track.report?.summary) return track.report.next ? `${track.report.summary} → ${track.report.next}` : track.report.summary
-
-      return track.recap || track.lastAnswer || (track.lastPrompt ? t('pane.instruction', { text: track.lastPrompt }) : t('pane.noReport'))
-    }
-    const word = words[one.id]
-    if (word?.error) return t('pane.cannotReadTranscript', { error: word.error })
-
-    return word ? word.said || t('pane.noReport') : t('pane.reading')
-  }
+  const summaryOf = (track: Track | undefined, one: Session) => cardSummary(track, words[one.id])
 
   const card = (one: Session) => {
     const status = statusOfOne(one)
@@ -511,7 +504,7 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
           </Box>
           {qa && (
             <Text key={`qa:${item.id}`} size="caption" color={QA_COLOR[qa]} dimColor={!QA_COLOR[qa]} wrap="truncate-end">
-              {qaText(item, qa)}
+              {qaText(item, qa, false, whoIs)}
             </Text>
           )}
         </Box>

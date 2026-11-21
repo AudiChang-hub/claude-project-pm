@@ -52,7 +52,7 @@ function end(child: ChildProcess) {
 
 export type Browser = {
   /** Opens `url` at `width`, waits until `ready` (a JS expression) holds, and evaluates `expression` there. */
-  evaluate: <T>(url: string, ready: string, expression: string, options?: { width?: number; scheme?: 'light' | 'dark' }) => Promise<T>
+  evaluate: <T>(url: string, ready: string, expression: string, options?: { width?: number; scheme?: 'light' | 'dark'; reducedMotion?: boolean }) => Promise<T>
   close: () => Promise<void>
 }
 
@@ -80,7 +80,7 @@ export async function openBrowser(exe: string): Promise<Browser> {
   })
   child.stderr!.resume()
 
-  const evaluate = async <T>(url: string, ready: string, expression: string, options: { width?: number; scheme?: 'light' | 'dark' } = {}): Promise<T> => {
+  const evaluate = async <T>(url: string, ready: string, expression: string, options: { width?: number; scheme?: 'light' | 'dark'; reducedMotion?: boolean } = {}): Promise<T> => {
     const target = (await (await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: 'PUT' })).json()) as { webSocketDebuggerUrl: string }
     const ws = new WebSocket(target.webSocketDebuggerUrl)
     await new Promise((ok, fail) => {
@@ -102,7 +102,8 @@ export async function openBrowser(exe: string): Promise<Browser> {
     const value = async (expr: string) => ((await send('Runtime.evaluate', { expression: expr, returnByValue: true })).result as { value?: unknown } | undefined)?.value
     try {
       await send('Emulation.setDeviceMetricsOverride', { width: options.width ?? 1280, height: 900, deviceScaleFactor: 1, mobile: false })
-      if (options.scheme) await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: options.scheme }] })
+      const features = [...(options.scheme ? [{ name: 'prefers-color-scheme', value: options.scheme }] : []), ...(options.reducedMotion ? [{ name: 'prefers-reduced-motion', value: 'reduce' }] : [])]
+      if (features.length) await send('Emulation.setEmulatedMedia', { features })
       await send('Page.navigate', { url })
       for (let i = 0; i < 150 && !(await value(ready)); i++) await sleep(100)
       await sleep(300)

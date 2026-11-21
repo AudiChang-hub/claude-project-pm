@@ -1,4 +1,6 @@
-// Project PM web board: read-only. Every word from the board is set as text (never as HTML).
+// Project PM web board: read-only, drawn as the desktop pane draws it (hooks/view.tsx). Every word from the board is set
+// as text (never as HTML). The pane's own words and figures come with the board (data.pane); the words here are only
+// the page's own: its states, its controls, its empty lists.
 ;(() => {
   'use strict'
 
@@ -6,29 +8,23 @@
     en: {
       project: 'Project',
       attention: 'Needs attention',
-      items: 'Work items',
-      sessions: 'Sessions',
-      agents: 'Agents',
       showDone: 'Show done and dropped',
       readonly: 'This board only shows. To close, hand over or drop a work item, tell the PM in your AI tool, for example "close T-03".',
       theme: { auto: 'Theme: system', light: 'Theme: light', dark: 'Theme: dark' },
+      themeShort: { auto: 'System', light: 'Light', dark: 'Dark' },
       progress: (d, n) => `${d} of ${n} work items done`,
-      done: 'done',
       updated: s => (s < 5 ? 'Live · just updated' : `Live · updated ${s}s ago`),
       stale: 'Not updating: the board server does not answer',
-      pm: id => `PM: ${id}`,
-      noPm: 'No PM yet. In your AI tool, ask it to call the pm tool with action "claim".',
-      nothing: 'Nothing needs you right now.',
+      pm: name => `PM: ${name}`,
+      noPm: 'No PM yet: ask your AI tool to call the pm tool with action "claim"',
+      nothing: ['Nothing needs you right now', 'Questions, failed checks and work left half done show up here.'],
       noItems: ['No work items yet', 'Tell the PM what you want built; it adds each request to this list.'],
-      allDone: ['Every work item is done', 'Show done items to see them.'],
+      allDone: ['Every work item is done', 'Tick "Show done and dropped" to see them.'],
       noSessions: ['No session has reported yet', 'Sessions show up here once their hooks or the report tool write to Project PM.'],
-      owner: who => `Owner: ${who}`,
-      unassigned: 'unassigned',
-      qa: { pass: 'QA passed', fail: 'QA failed', skipped: 'QA skipped', awaiting: 'Awaiting QA' },
       status: { open: 'open', done: 'done', dropped: 'dropped' },
       criteria: 'How it is checked',
       note: 'Note',
-      tasks: (d, n) => `Tasks ${d}/${n}`,
+      untracked: 'No record',
       ago: ms => {
         const m = Math.round(ms / 60000)
         if (m < 1) return 'just now'
@@ -48,29 +44,23 @@
     'zh-TW': {
       project: '專案',
       attention: '需要處理',
-      items: '工作項目',
-      sessions: 'Sessions',
-      agents: 'Agents',
       showDone: '顯示已結案和放棄的',
       readonly: '這個看板只能看。要結案、換負責人或放棄工作項目，請在 AI 工具裡對 PM 說，例如「T-03 結案」。',
       theme: { auto: '配色：跟隨系統', light: '配色：淺色', dark: '配色：深色' },
+      themeShort: { auto: '跟隨系統', light: '淺色', dark: '深色' },
       progress: (d, n) => `${n} 項工作完成 ${d} 項`,
-      done: '完成',
       updated: s => (s < 5 ? '即時 · 剛更新' : `即時 · ${s} 秒前更新`),
       stale: '沒有更新：看板伺服器沒有回應',
-      pm: id => `PM：${id}`,
-      noPm: '還沒有 PM。在 AI 工具裡請它呼叫 pm 工具，action 填 claim。',
-      nothing: '目前沒有需要你處理的事。',
+      pm: name => `PM：${name}`,
+      noPm: '還沒有 PM：在 AI 工具裡請它呼叫 pm 工具，action 填 claim',
+      nothing: ['目前沒有需要你處理的事', '等你回覆的問題、沒過的檢查、做到一半停下的工作，都會出現在這裡。'],
       noItems: ['還沒有工作項目', '把要做的事告訴 PM，它會一項一項登記在這裡。'],
-      allDone: ['工作項目都完成了', '勾選「顯示已結案」可以看到它們。'],
+      allDone: ['工作項目都完成了', '勾選「顯示已結案和放棄的」可以看到它們。'],
       noSessions: ['還沒有 Session 回報', 'Session 的 hook 或 report 工具寫入 Project PM 後，就會出現在這裡。'],
-      owner: who => `負責：${who}`,
-      unassigned: '未指派',
-      qa: { pass: 'QA 通過', fail: 'QA 不通過', skipped: 'QA 略過', awaiting: '待 QA' },
       status: { open: '進行中', done: '已結案', dropped: '已放棄' },
       criteria: '驗收條件',
       note: '備註',
-      tasks: (d, n) => `任務 ${d}/${n}`,
+      untracked: '無追蹤紀錄',
       ago: ms => {
         const m = Math.round(ms / 60000)
         if (m < 1) return '剛剛'
@@ -89,18 +79,9 @@
     },
   }
 
-  const STATUS_COLOR = {
-    asking: '--s-asking',
-    failed: '--s-failed',
-    open: '--s-open',
-    unreleased: '--s-unreleased',
-    ci: '--s-ci',
-    running: '--s-running',
-    waiting: '--s-waiting',
-    done: '--s-done',
-    stale: '--s-stale',
-  }
-  const QA_COLOR = { pass: '--s-running', fail: '--s-failed', skipped: '--s-done', awaiting: '--s-asking' }
+  /** The pane's theme colors (hooks/sessions.ts STATUS .color), as this page's text tokens. */
+  const TONES = ['claude', 'success', 'warning', 'error', 'permission', 'suggestion', 'planMode', 'inactive', 'subtle']
+  const tone = look => (TONES.includes(look) ? `var(--c-${look})` : 'var(--muted)')
 
   const $ = id => document.getElementById(id)
   const el = (tag, cls, text) => {
@@ -109,6 +90,8 @@
     if (text !== undefined && text !== null) node.textContent = String(text)
     return node
   }
+  /** A hue from the board, used only as a color: anything else is left out. */
+  const hue = value => (/^#[0-9a-f]{3,8}$/i.test(String(value || '')) ? value : '')
 
   let lang = /^zh/i.test(navigator.language || '') ? 'zh-TW' : 'en'
   let words = WORDS[lang]
@@ -160,14 +143,17 @@
   const THEMES = ['auto', 'light', 'dark']
   let theme = store.local('pm-theme') || 'auto'
   function setTheme(next) {
-    theme = next
+    theme = THEMES.includes(next) ? next : 'auto'
     if (theme === 'auto') delete document.documentElement.dataset.theme
     else document.documentElement.dataset.theme = theme
     store.local('pm-theme', theme)
     themeLabel()
   }
   function themeLabel() {
-    $('theme').textContent = words.theme[theme]
+    const button = $('theme')
+    button.textContent = words.themeShort[theme]
+    button.setAttribute('aria-label', words.theme[theme])
+    button.title = words.theme[theme]
   }
   $('theme').addEventListener('click', () => setTheme(THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]))
   setTheme(theme)
@@ -191,7 +177,9 @@
 
   function showLoading() {
     const box = $('state')
-    box.replaceChildren(el('p', '', words.loading))
+    const line = el('p')
+    line.append(el('span', 'spinner'), document.createTextNode(words.loading))
+    box.replaceChildren(line)
     box.classList.remove('is-error')
     box.hidden = false
   }
@@ -212,11 +200,13 @@
       applyWords()
     }
     const select = $('project')
-    select.replaceChildren(...data.projects.map(p => {
-      const option = el('option', '', `${p.name}${p.open ? ` (${p.open})` : ''}`)
-      option.value = p.key
-      return option
-    }))
+    select.replaceChildren(
+      ...data.projects.map(p => {
+        const option = el('option', '', `${p.name}${p.open ? ` (${p.open})` : ''}`)
+        option.value = p.key
+        return option
+      }),
+    )
     select.closest('.picker').hidden = data.projects.length < 2
     if (!data.projects.length) return 'noProject'
     if (!data.projects.some(p => p.key === project)) project = data.projects[0].key
@@ -261,90 +251,123 @@
   }
   setInterval(tickLive, 1000)
 
-  // ── Render ──
-  function empty([title, body]) {
-    const box = el('li', 'empty')
-    box.append(el('strong', '', title), document.createTextNode(body))
+  // ── Pieces ──
+
+  function empty([title, body], tag = 'li') {
+    const box = el(tag, 'empty')
+    box.append(el('strong', '', title))
+    if (body) box.append(document.createTextNode(body))
     return box
   }
+
+  /** A session's dot or an agent's diamond, in the pane's hue; it pulses while it runs. */
+  function mark(color, isAgent, isRunning) {
+    const node = el('span', `mark${isAgent ? ' is-agent' : ''}${isRunning ? ' is-running' : ''}`)
+    node.setAttribute('aria-hidden', 'true')
+    if (hue(color)) node.style.setProperty('--hue', hue(color))
+    return node
+  }
+
+  /** The pane's step bar: one segment per step. */
+  function stepsBar(steps, color) {
+    const bar = el('div', `steps${steps.length > 24 ? ' is-dense' : ''}`)
+    bar.setAttribute('aria-hidden', 'true')
+    if (hue(color)) bar.style.setProperty('--hue', hue(color))
+    for (const status of steps) bar.append(el('span', `is-${['completed', 'in_progress', 'pending'].includes(status) ? status : 'pending'}`))
+    return bar
+  }
+
+  /** The lines of a card's status: the label in its color, then each piece of meta after a dot. */
+  function statusLine(label, look, meta) {
+    const line = el('p', 'scard__status')
+    const strong = el('span', 'label', label)
+    strong.style.setProperty('--tone', tone(look))
+    line.append(strong)
+    for (const piece of meta.filter(Boolean)) line.append(el('span', 'meta', piece))
+    return line
+  }
+
+  // ── Render ──
 
   function render(data) {
     if (data.lang && WORDS[data.lang] && data.lang !== lang) {
       lang = data.lang
       applyWords()
     }
+    const pane = data.pane
     $('state').hidden = true
     $('board').hidden = false
     document.title = `${data.project.name} · Project PM`
+    $('eyebrow').textContent = pane.words.project
     $('name').textContent = data.project.name
     $('path').textContent = data.project.path
     $('pm').textContent = data.project.pmId ? words.pm(data.project.pmName) : words.noPm
 
-    // Progress: one segment per counted work item.
-    const { done, total } = data.progress
-    const progress = $('progress')
-    progress.setAttribute('aria-label', words.progress(done, total))
-    const rail = el('div', 'progress__rail')
-    for (let i = 0; i < Math.max(total, 1); i++) rail.append(el('span', `progress__seg${i < done ? ' is-done' : ''}`))
-    const num = el('p', 'progress__num', `${done}/${total}`)
-    num.append(el('small', '', words.done))
-    progress.replaceChildren(rail, num)
+    renderProgress(data)
+    renderAttention(data.attention)
+    renderItems(data)
+    renderAgents(data)
+    renderSessions(data)
+  }
 
+  function renderProgress(data) {
+    const { pane, breakdown } = data
+    const ratio = pane.percent === null ? 0 : pane.percent / 100
+    const circumference = 2 * Math.PI * 17
+    $('ring-arc').setAttribute('stroke-dasharray', `${(ratio * circumference).toFixed(2)} ${circumference.toFixed(2)}`)
+    $('ring').setAttribute('aria-label', words.progress(data.progress.done, data.progress.total))
+    $('percent').textContent = pane.percent === null ? '—' : `${pane.percent}%`
+    $('ratio-caption').textContent = pane.words.ratioCaption
     // The open items by kind, in the board's own words (T-42): the line the pane and the text board say.
-    const breakdown = $('breakdown')
-    const b = data.breakdown
-    breakdown.hidden = !b || !b.total
-    if (b && b.total) {
-      breakdown.replaceChildren(el('span', 'breakdown__lead', b.prefix))
-      b.parts.forEach((part, i) => {
-        if (i) breakdown.append(el('span', 'breakdown__sep', b.joiner))
-        breakdown.append(el('span', `breakdown__part is-${part.kind}`, part.text))
+    const line = $('breakdown')
+    line.hidden = !breakdown || !breakdown.total
+    if (breakdown && breakdown.total) {
+      line.replaceChildren(el('span', '', breakdown.prefix))
+      breakdown.parts.forEach((part, i) => {
+        if (i) line.append(el('span', '', breakdown.joiner))
+        line.append(el('span', `is-${part.kind}`, part.text))
       })
     }
+    const metric = (id, value, label, sub) => {
+      const box = $(id)
+      box.querySelector('dt').textContent = label
+      box.querySelector('dd').textContent = String(value)
+      box.classList.toggle('is-zero', !value)
+      const small = box.querySelector('.metric__sub')
+      if (small) {
+        small.textContent = sub || ''
+        small.hidden = !sub
+      }
+    }
+    metric('m-running', pane.kpi.running, pane.words.kpiRunning, pane.words.kpiAgents)
+    metric('m-asking', pane.kpi.asking, pane.words.kpiAsking)
+    metric('m-open', pane.kpi.open, pane.words.kpiOpen)
+  }
 
-    // Attention.
-    const attention = $('attention')
-    $('attention-n').textContent = data.attention.length ? String(data.attention.length) : ''
-    if (!data.attention.length) attention.replaceChildren(empty([words.nothing, '']))
-    else
-      attention.replaceChildren(
-        ...data.attention.map(a => {
-          const li = el('li')
-          const m = /^-\s*\[([^\]]+)\]\s*(.*)$/s.exec(a.text)
-          if (m) {
-            li.append(el('span', 'tag', m[1]), document.createTextNode(m[2]))
-            if (/fail|失敗|不通過|lost|遺失/i.test(m[1])) li.classList.add('is-failed')
-          } else li.textContent = a.text.replace(/^-\s*/, '')
-          return li
-        }),
-      )
-
-    // Work items.
-    const items = $('items')
-    const open = data.items.filter(i => i.status === 'open').length
-    $('items-n').textContent = String(open)
-    if (!data.items.length) items.replaceChildren(empty(data.progress.total ? words.allDone : words.noItems))
-    else items.replaceChildren(...data.items.map(itemRow))
-
-    // Sessions.
-    const sessions = $('sessions')
-    $('sessions-n').textContent = data.actors.length ? String(data.actors.length) : ''
-    if (!data.actors.length) sessions.replaceChildren(empty(words.noSessions))
-    else sessions.replaceChildren(...data.actors.map(sessionCard))
-
-    const agents = data.agents || []
-    $('agents-block').hidden = !agents.length
-    $('agents').replaceChildren(
-      ...agents.map(a => {
-        const li = el('li', 'session')
-        const head = el('div', 'session__head')
-        const mark = el('span', 'mark')
-        mark.style.background = `var(${a.state === 'failed' || a.state === 'lost' ? '--s-failed' : a.state === 'running' ? '--s-running' : a.state === 'done' ? '--s-done' : '--s-asking'})`
-        head.append(mark, el('span', '', a.state))
-        li.append(head, el('p', 'session__title', a.description), el('p', 'session__said', a.result || ''))
+  function renderAttention(list) {
+    const box = $('attention')
+    $('attention-n').textContent = list.length ? String(list.length) : ''
+    if (!list.length) return box.replaceChildren(empty(words.nothing))
+    box.replaceChildren(
+      ...list.map(a => {
+        const li = el('li')
+        const m = /^-\s*\[([^\]]+)\]\s*(.*)$/s.exec(a.text)
+        if (m) {
+          li.append(el('span', 'tag', m[1]), document.createTextNode(m[2]))
+          if (/fail|失敗|不通過|lost|遺失|失聯|gone/i.test(m[1])) li.classList.add('is-failed')
+        } else li.textContent = a.text.replace(/^-\s*/, '')
         return li
       }),
     )
+  }
+
+  function renderItems(data) {
+    const pane = data.pane
+    $('items-h').textContent = pane.words.items
+    $('items-n').textContent = pane.words.itemsMeta
+    const list = $('items')
+    if (!data.items.length) return list.replaceChildren(empty(data.progress.total ? words.allDone : words.noItems))
+    list.replaceChildren(...data.items.map(itemRow))
   }
 
   function itemRow(item) {
@@ -352,19 +375,20 @@
     li.append(el('span', 'item__code', item.code))
     const body = el('div')
     body.append(el('p', 'item__text', item.text))
-    const facts = el('p', 'item__facts')
-    const status = el('span', 'fact', words.status[item.status] || item.status)
-    facts.append(status)
-    facts.append(el('span', 'fact', words.owner(item.ownerName || words.unassigned)))
-    if (item.qaShown) {
-      const qa = el('span', 'fact')
-      const mark = el('span', 'mark')
-      mark.style.background = `var(${QA_COLOR[item.qaShown] || '--s-done'})`
-      qa.append(mark, document.createTextNode(words.qa[item.qaShown] || item.qaShown))
-      facts.append(qa)
+    if (item.status !== 'open') body.append(el('p', 'item__state', words.status[item.status] || item.status))
+    // An owner missing is something to see to only while the item is open; a closed one keeps a known owner quietly.
+    const isOpen = item.status === 'open'
+    if (isOpen || item.ownerLook !== 'warning') {
+      const owner = el('p', `item__owner${isOpen && item.ownerLook === 'warning' ? ' is-warning' : ''}`)
+      if (item.ownerAgentHex) owner.append(mark(item.ownerAgentHex, true, item.ownerAgentRunning))
+      owner.append(document.createTextNode(item.ownerLine))
+      body.append(owner)
     }
-    body.append(facts)
-    for (const [label, text] of [[words.criteria, item.criteria], [words.note, item.note]]) {
+    if (item.qaText) body.append(el('p', `item__qa${item.qaLook ? ` is-${item.qaLook}` : ''}`, item.qaText))
+    for (const [label, text] of [
+      [words.criteria, item.criteria],
+      [words.note, item.note],
+    ]) {
       if (!text) continue
       const details = el('details')
       details.append(el('summary', '', label), el('p', '', text))
@@ -374,17 +398,64 @@
     return li
   }
 
-  function sessionCard(actor) {
-    const li = el('li', 'session')
-    const head = el('div', 'session__head')
-    const mark = el('span', 'mark')
-    mark.style.background = `var(${STATUS_COLOR[actor.status] || '--s-done'})`
-    head.append(mark, el('span', '', actor.label), el('span', 'session__tool', actor.tool))
-    li.append(head, el('p', 'session__title', actor.title))
-    if (actor.said) li.append(el('p', 'session__said', actor.said))
-    const foot = [words.ago(Date.now() - actor.at)]
-    if (actor.plan && actor.plan.total) foot.push(words.tasks(actor.plan.done, actor.plan.total))
-    li.append(el('p', 'session__foot', foot.join(' · ')))
+  function renderAgents(data) {
+    const pane = data.pane
+    const cards = data.agentCards || []
+    $('agents-block').hidden = !cards.length && !data.agentsHidden
+    $('agents-h').textContent = pane.words.agents
+    $('agents-n').textContent = pane.words.agentsMeta
+    $('agents').replaceChildren(...cards.map(agentCard))
+    const hidden = $('agents-hidden')
+    hidden.hidden = !data.agentsHidden
+    hidden.textContent = data.agentsHidden ? pane.words.agentsHidden : ''
+  }
+
+  function agentCard(one) {
+    const li = el('li', 'scard')
+    if (hue(one.hex)) li.style.setProperty('--hue', hue(one.hex))
+    const head = el('div', 'scard__head')
+    head.append(mark(one.hex, true, one.isRunning), el('span', 'scard__title', one.name), el('span', 'card__time', one.time))
+    li.append(head, statusLine(one.label, one.look, one.meta), el('p', 'scard__line', one.line))
+    if (one.usage) li.append(el('p', 'scard__usage', one.usage))
+    return li
+  }
+
+  function renderSessions(data) {
+    const pane = data.pane
+    $('sessions-h').textContent = pane.words.sessions
+    $('sessions-n').textContent = pane.words.sessionsMeta
+    const active = data.actors.filter(a => a.isActive)
+    const ended = data.actors.filter(a => !a.isActive)
+    const list = $('sessions')
+    if (!data.actors.length) list.replaceChildren(empty(words.noSessions))
+    else if (!active.length) list.replaceChildren(empty([pane.words.noLive, '']))
+    else list.replaceChildren(...active.map(sessionCard))
+    const fold = $('ended')
+    fold.hidden = !ended.length
+    $('ended-toggle').textContent = fold.open ? pane.words.hideEnded : pane.words.showEnded
+    $('ended-list').replaceChildren(
+      ...ended.map(one => {
+        const li = el('li')
+        li.append(mark(one.hex, false, false), el('span', 'row__title', one.title), el('span', 'card__time', words.ago(Date.now() - one.at)))
+        return li
+      }),
+    )
+  }
+
+  function sessionCard(one) {
+    const li = el('li', 'scard')
+    if (hue(one.hex)) li.style.setProperty('--hue', hue(one.hex))
+    const head = el('div', 'scard__head')
+    head.append(mark(one.hex, false, one.status === 'running'), el('span', 'scard__title', one.title), el('span', 'card__time', words.ago(Date.now() - one.at)))
+    const meta = [one.stepsText, one.untracked ? words.untracked : '']
+    li.append(head, statusLine(one.label, one.look, meta))
+    if (one.steps.length) li.append(stepsBar(one.steps, one.hex))
+    if (one.current) li.append(el('p', `scard__current${one.status === 'open' ? ' is-open' : ''}`, one.current))
+    if (one.caveat) {
+      const line = el('p', 'scard__caveat')
+      line.append(el('b', '', board ? board.pane.words.caveat : ''), document.createTextNode(one.caveat))
+      li.append(line)
+    } else li.append(el('p', 'scard__line', one.summary))
     return li
   }
 
@@ -398,6 +469,10 @@
   $('done').addEventListener('change', () => {
     etag = ''
     load(false)
+  })
+  // The folded ended sessions say whether they open or close, in the pane's words.
+  $('ended').addEventListener('toggle', () => {
+    if (board) $('ended-toggle').textContent = $('ended').open ? board.pane.words.hideEnded : board.pane.words.showEnded
   })
 
   // A fresh link opened in a tab that already shows the board changes only the fragment: take its token and start over.

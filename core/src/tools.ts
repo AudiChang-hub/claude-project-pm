@@ -8,11 +8,24 @@ import { join } from 'node:path'
 
 import { t } from '../../hooks/messages'
 import type { MessageKey } from '../../hooks/messages'
-import { isAgentId, isSameId, openBreakdown, qaKeptText, qaShown, qaUpdate } from '../../hooks/qa'
+import { agentName } from '../../hooks/agents'
+import { isAgentId, isSameId, openBreakdown, qaKeptText, qaShown, qaText, qaUpdate } from '../../hooks/qa'
 import type { OpenBreakdown, QaShown } from '../../hooks/qa'
 import {
+  AGENT_STATUS,
   STATUS,
+  agentTime,
   boardText,
+  cardSummary,
+  caveatOf,
+  isActive,
+  isHandedOff,
+  kpiOf,
+  limitOf,
+  openSteps,
+  settledAt,
+  shownAgents,
+  statusText,
   ciWords,
   clip,
   hasReport,
@@ -29,8 +42,8 @@ import {
   reportOf,
   statusOf,
 } from '../../hooks/sessions'
-import type { BoardInput, Status } from '../../hooks/sessions'
-import type { CiCheck, LastWord, PushCheck, Session, Track } from '../../types'
+import type { BoardInput, Kpi, Status } from '../../hooks/sessions'
+import type { AgentRecord, AgentState, CiCheck, LastWord, PushCheck, Session, Step, Track } from '../../types'
 import { activeAt, projectSessions, trackOf } from './actors'
 import type { Ctx, ToolResult } from './context'
 import { projectOf } from './context'
@@ -391,8 +404,13 @@ export type BoardJson = {
   attention: { text: string; item?: number }[]
   /** ownerName: the owner as people read it, with its status (T-43); owner stays the id, for programs. */
   items: (ReturnType<typeof itemJson> & { qaShown: QaShown | null; ownerName: string })[]
-  actors: { id: string; tool: string; status: Status; label: string; title: string; said: string; at: number; plan: { done: number; total: number } }[]
+  actors: BoardActor[]
   agents: unknown[]
+  /** The PM's agents as the pane's cards show them (T-44): listed ones only; `agentsHidden` more are folded away. */
+  agentCards: AgentCard[]
+  agentsHidden: number
+  /** The pane's figures and words, so the web board says and counts what the pane does (T-44). */
+  pane: PaneJson
   progress: { done: number; total: number }
   /** The open items by kind, in the board's words (T-42): `text` is the line the pane and the text board say. */
   breakdown: OpenBreakdown
@@ -405,6 +423,45 @@ export type BoardJson = {
   /** Pushes the pre-push check could not check, in the last week. */
   pushProblems: { at: number; reason: string }[]
 }
+
+/** A session's card, as the pane draws it (T-44): its theme color (`look`), its steps, and its lines in the pane's words. */
+export type BoardActor = {
+  id: string
+  tool: string
+  status: Status
+  label: string
+  /** The pane's theme color for the status: warning, error, claude, planMode, permission, success, suggestion, inactive, subtle. */
+  look: string
+  /** The pane's own hue for the status's marks (its dot, its step bar). */
+  hex: string
+  title: string
+  said: string
+  at: number
+  plan: { done: number; total: number }
+  /** "Steps 3/7", in the pane's words; '' without a task list. */
+  stepsText: string
+  steps: Step['status'][]
+  /** The step now (in progress, else the next), with how many more: "▸ Boost in-stock items (+3 more)". */
+  current: string | null
+  /** What the session left to follow up (the pane's caveat), else null; `summary` is the line otherwise. */
+  caveat: string | null
+  summary: string
+  /** Listed among the active sessions, not folded with the ended ones. */
+  isActive: boolean
+  untracked: boolean
+}
+
+export type AgentCard = { id: string; name: string; state: AgentState; label: string; look: string; hex: string; time: string; meta: string[]; line: string; usage: string | null; isRunning: boolean }
+
+export type PaneJson = {
+  kpi: Kpi
+  /** null with nothing to count (no work items, no steps). */
+  percent: number | null
+  words: Record<'project' | 'ratioCaption' | 'kpiRunning' | 'kpiAsking' | 'kpiOpen' | 'kpiAgents' | 'items' | 'itemsMeta' | 'agents' | 'agentsMeta' | 'sessions' | 'sessionsMeta' | 'showEnded' | 'hideEnded' | 'noLive' | 'noSessions' | 'caveat' | 'agentsHidden', string>
+}
+
+/** A work item's QA by the pane's theme colors (hooks/view.tsx QA_COLOR). */
+const QA_LOOK: Record<QaShown, string | null> = { pass: 'success', fail: 'error', awaiting: 'warning', skipped: null }
 
 export async function boardTool(ctx: Ctx, input: Record<string, unknown>): Promise<ToolResult> {
   if (input.scope === 'all') return boardOfAll(ctx, input.include_done === true)
@@ -516,7 +573,8 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
   const url = await boardUrl(ctx, ref)
   const actorById = new Map(found.actors.map(a => [a.id, a]))
   const statusById = new Map<string, Status>()
-  for (const s of found.everyone) statusById.set(s.id, statusOf(s, hasReport(found.tracks[s.id]) ? found.tracks[s.id] : undefined, words[s.id], now, ci[s.id], push[s.id]))
+  // As the board and the pane read it: the person's closing (settledAt) and a handover (isHandedOff) count too.
+  for (const s of found.everyone) statusById.set(s.id, statusOf(s, hasReport(found.tracks[s.id]) ? found.tracks[s.id] : undefined, words[s.id], now, ci[s.id], push[s.id], settledAt(s.id, project.ledger), isHandedOff(s.id, project.ledger)))
   // Each item's QA as the text board reads it (deliveredOf), so the web board's counts and the board's words agree (T-42).
   const isDelivered = deliveredOf(input)
   const openItems = project.ledger.filter(i => i.status === 'open')
@@ -525,6 +583,84 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
   const ownerName = ownerTextOf(peopleInput)
   const pmTrack = project.pmId ? found.tracks[project.pmId] : undefined
   const pmSession = project.pmId ? found.everyone.find(s => s.id === project.pmId) : undefined
+  // ── What the pane shows (hooks/view.tsx renderPane), for the web board to draw alike (T-44) ──
+  const trackFor = (s: Session) => found.tracks[s.id] ?? (actorById.get(s.id) ? trackOf(actorById.get(s.id)!) : undefined)
+  const isOwner = (s: Session) => openItems.some(item => isSameId(item.owner, s.id))
+  const actors: BoardActor[] = found.sessions
+    .map(s => {
+      const status = statusById.get(s.id) ?? 'done'
+      const actor = actorById.get(s.id)
+      const track = trackFor(s)
+      const kept = hasReport(track) ? track : undefined
+      const plan = track?.plan ?? []
+      const left = openSteps(kept)
+      const now_ = left.find(step => step.status === 'in_progress') ?? left[0]
+      const caveat = status === 'running' || settledAt(s.id, project.ledger) !== undefined ? null : caveatOf(kept, push[s.id])
+
+      return {
+        id: s.id,
+        tool: actor?.tool ?? 'claude-code',
+        status,
+        label: statusText(status, status === 'limit' ? limitOf(s, kept, words[s.id]) : null, 'label'),
+        look: STATUS[status].color,
+        hex: STATUS[status].hex,
+        title: sessionName(s, track),
+        said: track ? clip(track.report?.summary || quoteOf(track, words[s.id]) || latestWords(track), 300) : clip(words[s.id]?.said ?? '', 300),
+        at: Math.max(actor ? activeAt(actor) : 0, Date.parse(s.lastActivityAt) || 0),
+        plan: { done: plan.filter(p => p.status === 'completed').length, total: plan.length },
+        steps: plan.map(p => p.status),
+        stepsText: plan.length ? t('pane.steps', { done: plan.length - left.length, total: plan.length }) : '',
+        current: now_ ? `▸ ${now_.content}${left.length > 1 ? t('pane.moreSteps', { n: left.length - 1 }) : ''}` : null,
+        caveat: caveat ? clip(caveat, 160) : null,
+        summary: clip(cardSummary(kept, words[s.id]), 160),
+        isActive: isActive(status) || !!caveat || s.hasOpenPr || isOwner(s),
+        untracked: !kept,
+      }
+    })
+    .sort((a, b) => STATUS[a.status].rank - STATUS[b.status].rank || b.at - a.at)
+  const liveCount = actors.filter(a => a.isActive).length
+  const kpi = kpiOf(actors.map(a => a.status), agents)
+  const items = project.ledger.filter(i => i.status !== 'dropped')
+  const itemsDone = items.filter(i => i.status === 'done').length
+  const steps = actors.flatMap(a => a.steps)
+  const stepsDone = steps.filter(s => s === 'completed').length
+  const hasRatio = items.length > 0 || steps.length > 0
+  const ratio = items.length ? itemsDone / items.length : steps.length ? stepsDone / steps.length : 0
+  const listedAgents = shownAgents(agents, now, isIncludingDone)
+  const agentCard = (one: AgentRecord): AgentCard => ({
+    id: one.id,
+    name: agentName(one),
+    state: one.state,
+    label: t(`agent.state.${one.state}` as MessageKey),
+    look: STATUS[AGENT_STATUS[one.state]].color,
+    hex: STATUS[AGENT_STATUS[one.state]].hex,
+    time: agentTime(one, now),
+    meta: [one.type, one.isolated ? t('pane.agentWorktree') : t('pane.agentReadOnly')],
+    line: one.result ? clip(one.result, 160) : t('pane.agentWorking'),
+    usage: one.tokens !== undefined ? t('pane.agentUsage', { tokens: Math.round(one.tokens / 1000), tools: one.tools ?? 0 }) : null,
+    isRunning: one.state === 'running',
+  })
+  /** A work item's owner as the pane's row says it, with the color it marks it in. */
+  const paneOwner = (owner: string | null): { ownerLine: string; ownerLook: string | null; ownerAgentHex: string | null; ownerAgentRunning: boolean } => {
+    const plain = { ownerAgentHex: null, ownerAgentRunning: false }
+    if (!owner) return { ownerLine: t('pane.ownerNone'), ownerLook: 'warning', ...plain }
+    if (isAgentId(owner)) {
+      const agent = agents.find(a => isSameId(`agent:${a.id}`, owner))
+      if (agent) {
+        const name = agentName(agent).replace(/^\s*T-\d+\s*/i, '')
+
+        return { ownerLine: t('pane.ownerAgent', { name, status: t(`agent.state.${agent.state}` as MessageKey) }), ownerLook: null, ownerAgentHex: STATUS[AGENT_STATUS[agent.state]].hex, ownerAgentRunning: agent.state === 'running' }
+      }
+
+      return { ownerLine: t('pane.ownerGone'), ownerLook: 'warning', ...plain }
+    }
+    const one = found.everyone.find(s => isSameId(s.id, owner))
+    if (!one) return { ownerLine: t('pane.ownerGone'), ownerLook: 'warning', ...plain }
+    const status = statusById.get(one.id) ?? 'done'
+    const elsewhere = found.sessions.some(s => s.id === one.id) ? '' : t('pane.elsewhere')
+
+    return { ownerLine: t('pane.owner', { title: sessionName(one, found.tracks[one.id]), status: statusText(status, status === 'limit' ? limitOf(one, found.tracks[one.id], words[one.id]) : null, 'label'), elsewhere }), ownerLook: null, ...plain }
+  }
   const json: BoardJson = {
     project: { name: ref.name, path: ref.path, key: ref.key, pmId: project.pmId, pmName: project.pmId ? sessionName(pmSession ?? { id: project.pmId, title: pmTrack?.title }, pmTrack) : null },
     attention: attentionOf(forPeople).map(line => {
@@ -532,27 +668,39 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
 
       return code ? { text: line, item: Number(code[1]) } : { text: line }
     }),
-    items: (isIncludingDone ? project.ledger : project.ledger.filter(i => i.status === 'open')).map(item => ({ ...itemJson(item), qaShown: qaShown(item, isDelivered(item.owner)), ownerName: ownerName(item.owner) })),
-    actors: found.sessions
-      .map(s => {
-        const status = statusById.get(s.id) ?? 'done'
-        const actor = actorById.get(s.id)
-        const track = found.tracks[s.id] ?? (actor ? trackOf(actor) : undefined)
-        const plan = track?.plan ?? []
+    items: (isIncludingDone ? project.ledger : project.ledger.filter(i => i.status === 'open')).map(item => {
+      const shown = qaShown(item, isDelivered(item.owner))
 
-        return {
-          id: s.id,
-          tool: actor?.tool ?? 'claude-code',
-          status,
-          label: STATUS[status].label,
-          title: sessionName(s, track),
-          said: track ? clip(track.report?.summary || quoteOf(track, words[s.id]) || latestWords(track), 300) : clip(words[s.id]?.said ?? '', 300),
-          at: Math.max(actor ? activeAt(actor) : 0, Date.parse(s.lastActivityAt) || 0),
-          plan: { done: plan.filter(p => p.status === 'completed').length, total: plan.length },
-        }
-      })
-      .sort((a, b) => STATUS[a.status].rank - STATUS[b.status].rank || b.at - a.at),
+      return { ...itemJson(item), qaShown: shown, ownerName: ownerName(item.owner), ...paneOwner(item.owner), qaText: shown ? qaText(item, shown, false, who) : null, qaLook: shown ? QA_LOOK[shown] : null }
+    }),
+    actors,
     agents,
+    agentCards: listedAgents.map(agentCard),
+    agentsHidden: agents.length - listedAgents.length,
+    pane: {
+      kpi,
+      percent: hasRatio ? Math.round(ratio * 100) : null,
+      words: {
+        project: t('pane.project'),
+        ratioCaption: items.length ? t('pane.itemsDone', { done: itemsDone, total: items.length }) : steps.length ? t('pane.stepsDone', { done: stepsDone, total: steps.length }) : t('pane.noItems'),
+        kpiRunning: t('pane.kpiRunning'),
+        kpiAsking: t('pane.kpiAsking'),
+        kpiOpen: t('pane.kpiOpen'),
+        kpiAgents: kpi.runningAgents ? t('pane.kpiAgents', { n: kpi.runningAgents }) : '',
+        items: t('pane.items'),
+        itemsMeta: t('pane.itemsOpen', { n: openItems.length }),
+        agents: t('pane.agents'),
+        agentsMeta: t('pane.agentsMeta', { running: kpi.runningAgents, ended: agents.length - kpi.runningAgents }),
+        sessions: t('pane.sessions'),
+        sessionsMeta: t('pane.sessionsMeta', { live: liveCount, ended: actors.length - liveCount }),
+        showEnded: t('pane.showEnded', { n: actors.length - liveCount }),
+        hideEnded: t('pane.hideEnded'),
+        noLive: actors.length ? t('pane.noLive') : t('pane.noSessions'),
+        noSessions: t('pane.noSessions'),
+        caveat: t('pane.caveat'),
+        agentsHidden: t('pane.agentsHidden', { n: agents.length - listedAgents.length }),
+      },
+    },
     progress: { done: counted.filter(i => i.status === 'done').length, total: counted.length },
     breakdown,
     boardUrl: url,
