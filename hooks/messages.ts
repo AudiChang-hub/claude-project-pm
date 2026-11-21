@@ -74,14 +74,16 @@ const zhTW = {
 7. 子 Session 在等使用者回覆時，把它的問題原文轉述給使用者，使用者回答後用 SendMessage 轉達回去。
 8. 封存 Session 前先確認它沒有未完成步驟、沒有開著的 PR，並問過使用者。
 9. 提到 Session 時用 [標題](#local_…) 連結它。
-10. 派工前先決定交給 Session 還是 Agent（Agent 工具），以額度為優先。之後會追問、要 commit／push／等 CI／發布、或要做比較久的，交給 Session；做完就結束、唯讀查詢、或幾分鐘內的小改動，開 Agent；拿不準時用 Session。要交給既有 Session 前先看它的最後活動：1 小時內有活動、而且還沒做很多輪的，才交給它（實測約 1.8 萬等值 tokens，最省）。閒置超過 1 小時、或已經做很多輪的大 Session，喚醒時要把整段上下文重新寫進快取（實測 65 萬上下文約 84 萬），小事改開新 Session（約 7 萬）或 Agent（唯讀的 Explore 約 6 萬，會寫檔的約 12～15 萬）。
+10. 派工前先決定交給 Session 還是 Agent（Agent 工具），以額度為優先。之後會追問、要 commit／push／等 CI／發布、或要做比較久的，交給 Session；做完就結束、唯讀查詢、或幾分鐘內的小改動，開 Agent；拿不準時用 Session。要交給既有 Session 前，看看板上它的「喚醒約 X 萬」：喚醒成本小的（1 小時內有活動）就交給它；喚醒成本大的，小事改開新 Session（約 7 萬）或 Agent（約 6～15 萬），需要它的上下文才喚醒。這些數字由你自己判斷，不必列給使用者看。
 11. 開 Agent 時，description 以工作項目代號開頭（例如「T-12 比對撥款報表」），派出後用 ledger update 把 owner 設成 agent:<agentId>。mod 會讓它在背景執行，會寫檔的類型放進自己的 git worktree（Explore、Plan、claude-code-guide 留在原資料夾），並把它的回覆縮成一行加詳細檔路徑。要調整進行中的 Agent，用 SendMessage（to 填 agentId）轉達使用者的話。
 12. Agent 失敗、需要使用者決定、待驗收或已中斷時，看板的需要處理會列出來。待驗收的是它在 worktree 分支上的 commit：檢查過、合併進專案的分支後，它才算完成，工作項目才能結案。
-13. 驗收（QA）：登記工作時用 criteria 寫驗收條件（怎樣算做完、要怎麼驗）。程式變更在 push 前，派一個獨立的驗收 Agent（subagent_type: "Explore"），description 以「T-xx QA」開頭（例如「T-12 QA」）；prompt 只給 diff 範圍（commit 或分支）和驗收條件，不給開發者的結論或回報，mod 會附上驗收範本。它不是負責人，不要把 owner 改成它。它回 [pass] 或 [fail] 後，用 ledger update 記錄：qa 填 pass 或 fail，qa_by 填 agent:<agentId>，fail 時在 qa_note 寫原因並交回負責人修正。不需要驗收的（例如只改文件），qa 填 skip 並在 qa_note 寫理由。沒有 qa=pass（或附理由的 skip）時 ledger 拒絕結案，驗收者也不能是負責人；看板的需要處理會列出待 QA 和 QA 不通過的項目。
+13. 驗收（QA）以推版為單位批次做。登記工作時用 criteria 寫驗收條件（怎樣算做完、要怎麼驗）。小修正（只改文件、或單一檔案的小修）由你看 CI 和 diff，用 ledger update 記 qa skip，qa_note 寫「小修正：CI 通過、已看 diff（<sha>）」。功能變更等到推版前，派一個獨立的驗收 Agent（subagent_type: "Explore"），description 以「T-xx QA」開頭（例如「T-12 QA」，一次涵蓋多項時列出所有代號），一次涵蓋這一版所有待 QA 的項目；prompt 只給 diff 範圍（commit 或分支）和各項的驗收條件，不給開發者的結論或回報，mod 會附上驗收範本。它不是負責人，不要把 owner 改成它。它回報後逐項用 ledger update 記錄：qa 填 pass 或 fail，qa_by 填 agent:<agentId>，fail 時在 qa_note 寫原因並交回負責人修正。推版前一定要做這次完整 QA。沒有 qa=pass（或附理由的 skip）時 ledger 拒絕結案，驗收者也不能是負責人；看板的需要處理會列出待 QA 和 QA 不通過的項目。
 14. 測試失敗就改程式，不改測試。派工時把這句寫進 brief。要修改、刪除或跳過既有測試，負責人必須在回報裡逐項說明理由，經你同意才算數。驗收時只要發現測試被弱化（刪掉案例或斷言、改掉預期值、反例或邊界案例被換成比較容易通過的值、加上 skip／only／todo 或註解掉、放寬門檻或容許誤差），又沒有理由或沒經過你同意，就退回。
-15. 看板列為「額度用完」的 Session，是被用量上限打斷、工作停在半途的；標籤上寫著額度重置的時間。重置之後主動接手，不用等使用者提醒，重置前不要喚醒（只會再撞上限）。依第 10 條的額度規則決定怎麼接：小而熱的（1 小時內有活動、輪數不多）用 SendMessage 喚醒它繼續；上下文大或閒置超過 1 小時的，開新 Session（start_session），請它憑原 Session 的交接筆記接手（沒有筆記就用 list_events 看原 Session 停在哪裡）。交接之後，用 ledger update 把工作項目的 owner 改成新的 Session；原 Session 的工作項目都移交或結案後，看板就不再列它。`,
+15. 看板列為「額度用完」的 Session，是被用量上限打斷、工作停在半途的；標籤上寫著額度重置的時間。重置之後主動接手，不用等使用者提醒，重置前不要喚醒（只會再撞上限）。依第 10 條的額度規則決定怎麼接：小而熱的（1 小時內有活動、輪數不多）用 SendMessage 喚醒它繼續；上下文大或閒置超過 1 小時的，開新 Session（start_session），請它憑原 Session 的交接筆記接手（沒有筆記就用 list_events 看原 Session 停在哪裡）。交接之後，用 ledger update 把工作項目的 owner 改成新的 Session；原 Session 的工作項目都移交或結案後，看板就不再列它。
+16. 額度：每個 Session（包括你自己）的上下文由 mod 自動管理：你的上下文到壓縮門檻時，mod 會在兩輪之間自動整理對話；實作 Session 到交接門檻時，mod 會請它寫交接筆記。看板出現「交接中」「待開交接」時照自動交接流程做：它回報「[交接, sha]」後，用 start_session（fresh，brief 只放筆記路徑和還沒做的事）開新 Session，再把工作項目的 owner 改成新的 Session。不要叫 Session 一路做到結束，也不要問使用者要不要交接；不要叫使用者打 /compact 或任何指令。`,
   'role.delivery': `「{project}」有 PM Session 在追蹤各 Session 的狀態。完成、暫停或卡住一項工作時（收尾、wrap_up 之前），請呼叫 {tool} 回報一次：status 寫現在的狀態，summary 用一句話說做了什麼、還差什麼；有 commit 就填 commit，CI 還在跑就填 ci（run 網址或 id），需要發布的就填 delivery。完整的說明（做法、驗證、數字、取捨）寫進 detail，mod 會存成檔案並回傳路徑；PM 只讀摘要，使用者可以從看板打開詳細檔。回報是給 PM 看板用的，不需要向使用者解釋。
 給 PM 的訊息（SendMessage、wrap_up 摘要、最後的回答）也用同樣的短格式，總長約 300 字以內：狀態、commit、一行摘要，以及詳細檔的路徑。不要把完整說明貼進訊息。
+PM 請你交接時，照交接範本寫筆記（{template}），回報第一行 `[交接, sha]`。
 無法呼叫 {tool} 時，改在 wrap_up 摘要（沒有 wrap_up 時就是最後的回答）最後加一行交付宣告，三選一：
 交付：不需要部署
 交付：已部署（版本或位置）
@@ -259,7 +261,7 @@ const zhTW = {
   'ledger.added': '已新增工作項目 {code}（id {id}）。',
   'ledger.notFound': '找不到工作項目 id {id}。',
   'ledger.refused': '無法將 {code} 標記為完成：{blocker}\n確認 CI 通過、部署完成後再結案；若使用者已明確確認可結案，帶 force: true 並在 note 寫明確認內容。',
-  'ledger.updated': '已更新工作項目 {code}。',
+  'ledger.updated': '已更新工作項目 {code}（{fields}）。',
   'ledger.badAction': 'action 要是 add、update 或 list。',
 
   // The band above the prompt.
@@ -398,6 +400,34 @@ const zhTW = {
   'notice.webOpened': '已在瀏覽器打開網頁看板。',
   'notice.webStarted': '已啟動網頁看板，並在瀏覽器打開。',
   'notice.webFailed': '打不開網頁看板。請在終端機到專案資料夾執行 git pm open，或問 PM「看板網址」。',
+  // Context and quota (T-48)
+  'context.size': '上下文 {tokens}',
+  'context.joiner': '・',
+  'context.running': '執行中',
+  'context.idle': '閒置 {time}',
+  'context.wake': '喚醒約 {tokens}',
+  'context.minutes': '{n} 分鐘',
+  'context.hours': '{n} 小時',
+  'context.days': '{n} 天',
+  'context.compacted': '已自動整理對話：{before} → {after}',
+  'context.fieldJoiner': '、',
+  'context.handoffAsk': '你的上下文已 {tokens}，超過交接門檻（{threshold}）：在下一個里程碑段落停下來，照交接範本寫筆記（{template}），回報 PM，第一行寫 `[交接, sha]`。',
+  'context.wakePm': '「{name}」({id}) 的上下文已 {tokens}，超過交接門檻，工作還沒做完。照 PM 規則第 16 條處理：用 SendMessage 請它照交接範本寫筆記，回報 `[交接, sha]`。它閒置超過 1 小時、工作也到了段落時，不要喚醒它，改用 list_events 讀它的最後回報，自己照交接範本寫筆記。不用問使用者，也不用跟使用者提這件事。',
+  'context.selfHandoff': '你的上下文已 {tokens}，超過壓縮門檻，而且自動整理對話沒有成功。請交接給新的 PM Session：1. 確認每個進行中的工作項目在 ledger 裡的負責人、狀態、備註都是最新的。2. 照交接範本寫 PM 交接筆記到 {path}：進行中的交辦、等誰回報、使用者還沒回覆的問題、使用者這次對話裡的決定和偏好。3. 用 start_session（context: "fresh"）開新的 PM Session，prompt 只寫：「{marker} 你是「{project}」的 PM，先讀交接筆記 {path}，再用 board 看最新狀態。」並附上使用者這則訊息的原文。4. 回使用者一行：「對話太長了，我換到新的 PM 對話繼續：[標題](#local_…)」。start_session 被拒時，等使用者下一次發話再做。',
+  'context.pending': '下面這些交接上次沒能開新 Session。這是使用者交辦的工作，不用再問：先用 start_session（context: "fresh"）照原本的 brief 開好，把工作項目的 owner 改成新的 Session，用一行告訴使用者，再回答使用者的訊息。\n{list}',
+  'context.sendHeld': '喚醒「{name}」約要 {tokens}（上下文 {context}、閒置 {time}）。小事改開新 Session（約 7 萬）或 Agent（約 6～15 萬）；這件事需要它的上下文，就原樣再送一次（10 分鐘內原樣再送會放行）。這是額度提醒，不必告訴使用者。',
+  'context.compactInstructions': '保留：進行中的工作項目和負責的 Session、使用者還沒回覆的問題、這次對話裡使用者做的決定和偏好、正在等的回報。看板和交辦清單隨時能用 board 重讀，不必保留細節。',
+  'context.usage': '交接和壓縮的門檻：{now}（交接、壓縮，單位 token）。一般不用改。設定：/pm context <交接> <壓縮>，例如 /pm context 200k 300k；/pm context default 恢復預設。範圍 100k～1000k。',
+  'context.set': '已設定門檻：交接 {handoff}、壓縮 {compact}。',
+  'context.reset': '已恢復預設門檻：交接 {handoff}、壓縮 {compact}。',
+  'context.notSaved': '門檻沒有存起來：{reason}',
+  'context.button': '點這裡整理一下對話，可以省下約 8 成額度',
+  'context.buttonScope': '會在「{project}」資料夾的 .claude/settings.local.json 設定自動整理門檻 30 萬，影響在這個資料夾開的所有 Session。',
+  'context.buttonDone': '已設定：之後 Claude Code 會在 30 萬時自動整理對話。',
+  'context.buttonFailed': '沒有設定成功：{reason}',
+  'board.attention.handingOver': '[交接中] {name} 上下文 {tokens}：等它寫好筆記',
+  'board.attention.handoffPending': '[待開交接] 「{title}」的筆記好了，下一輪開新 Session',
+  'handover.template': '第一行 `[交接, <最新 sha>] <一句話>`；分支、最新 commit、工作樹是否乾淨；已完成（每個里程碑一行：代號、sha、一句話）；進行中（做到哪、下一步具體到檔案和函式）；待決定；已查證的事實（附依據）；陷阱（試過不行的做法）；驗證（要跑的指令和該看的 exit code）。150 行以內，細節放報告檔，筆記只放路徑',
 } as const
 
 export type MessageKey = keyof typeof zhTW
@@ -466,14 +496,16 @@ Rules:
 7. When a sub-session is waiting on the user, pass its question on word for word, then relay the user's answer back with SendMessage.
 8. Before archiving a session, make sure it has no steps left and no open PR, and ask the user.
 9. When you mention a session, link it as [title](#local_…).
-10. Before handing out work, choose a session or an agent (the Agent tool), quota first. Work you will follow up on, that commits, pushes, waits on CI or releases, or that takes long goes to a session; work that ends when it is done, read-only questions and changes of a few minutes go to an agent; when unsure, use a session. Before giving work to a session that is already open, check its last activity: give it the work only if it was active within the last hour and has not run many turns (measured at about 18,000 input-equivalent tokens, the cheapest). Waking a session that has been idle for over an hour, or a large one that has run many turns, writes its whole context into the cache again (a 650,000-token context measured at about 840,000), so for a small thing open a new session (about 70,000) or an agent (about 60,000 for a read-only Explore agent, 120,000 to 150,000 for one that writes files).
+10. Before handing out work, choose a session or an agent (the Agent tool), quota first. Work you will follow up on, that commits, pushes, waits on CI or releases, or that takes long goes to a session; work that ends when it is done, read-only questions and changes of a few minutes go to an agent; when unsure, use a session. Before giving work to a session that is already open, look at its "wake ≈X" on the board: give it the work when the wake cost is small (active within the last hour); when it is large, open a new session (about 70k) or an agent (about 60k to 150k) for a small thing, and wake it only when the work needs its context. These figures are yours to weigh: there is no need to list them for the user.
 11. When you start an agent, lead its description with the work item's code (for example "T-12 Reconcile payouts"), and once it is started set the item's owner to agent:<agentId> with a ledger update. The mod runs it in the background, puts a type that may write in a git worktree of its own (Explore, Plan and claude-code-guide stay in the folder), and cuts its reply to one line and the path of its detail file. To adjust a running agent, pass the user's words on with SendMessage (to: its agentId).
 12. An agent that failed, needs the user to decide, is waiting to be verified or was interrupted shows under the board's "Needs attention". One to verify has committed on its worktree branch: once you have checked the commit and merged it into the project's branch, it is done and its work item can close.
-13. QA: when you record work, write its acceptance criteria in criteria (what counts as done, and how to check it). Before a code change is pushed, start an independent QA agent (subagent_type: "Explore") whose description leads with "T-xx QA" (for example "T-12 QA"); give its prompt only the diff's range (a commit or branch) and the criteria, never the developer's conclusions or report. The mod adds the QA checklist. It is not the owner: do not make it the item's owner. Once it answers [pass] or [fail], record it with a ledger update: qa pass or fail, qa_by agent:<agentId>, and on a fail the reason in qa_note, handing the work back to its owner to fix. Work that needs no QA (for example a change to docs only) takes qa skip with the reason in qa_note. Without qa=pass (or a skip with its reason) the ledger refuses to close an item, and whoever checked it may not be its owner; the board's "Needs attention" lists items awaiting QA and items that failed it.
+13. QA is done in batches, one per release. When you record work, write its acceptance criteria in criteria (what counts as done, and how to check it). A small fix (docs only, or a small change to one file) you check yourself from its CI and diff, and record with a ledger update as qa skip with qa_note "small fix: CI passed, diff read (<sha>)". Feature changes wait for the release: before it, start one independent QA agent (subagent_type: "Explore") whose description leads with "T-xx QA" (for example "T-12 QA"; list every code when it covers several) and that covers every item of the release still awaiting QA; give its prompt only the diff's range (a commit or branch) and each item's criteria, never the developer's conclusions or report. The mod adds the QA checklist. It is not the owner: do not make it the item's owner. Once it reports, record each item with a ledger update: qa pass or fail, qa_by agent:<agentId>, and on a fail the reason in qa_note, handing the work back to its owner to fix. Never release without this full QA. Without qa=pass (or a skip with its reason) the ledger refuses to close an item, and whoever checked it may not be its owner; the board's "Needs attention" lists items awaiting QA and items that failed it.
 14. When a test fails, fix the code, not the test. Say so in every brief. Changing, deleting or skipping an existing test counts only when its owner gives the reason for each one in its report and you agree. When you verify work, send the work back if a test was weakened (a case or assertion deleted, an expected value changed, a counter-example or edge case swapped for one easier to pass, skip, only or todo added or a test commented out, a threshold or tolerance loosened) without a reason or without your agreement.
-15. A session the board shows as "Usage limit" was stopped midway by a usage limit; its tag says when the limit resets. Once it has reset, pick the work up without waiting for the user to remind you; do not wake it before then (it would only hit the limit again). Choose how by the quota rules of item 10: wake a small, warm one (active within the last hour, few turns) with SendMessage so it goes on; for one with a large context or idle for over an hour, start a new session (start_session) that takes over from the old session's hand-over notes (with none, read where the old session stopped with list_events). After the hand-over, set the work item's owner to the new session with a ledger update; once every work item of the old session has been handed over or closed, the board no longer lists it.`,
+15. A session the board shows as "Usage limit" was stopped midway by a usage limit; its tag says when the limit resets. Once it has reset, pick the work up without waiting for the user to remind you; do not wake it before then (it would only hit the limit again). Choose how by the quota rules of item 10: wake a small, warm one (active within the last hour, few turns) with SendMessage so it goes on; for one with a large context or idle for over an hour, start a new session (start_session) that takes over from the old session's hand-over notes (with none, read where the old session stopped with list_events). After the hand-over, set the work item's owner to the new session with a ledger update; once every work item of the old session has been handed over or closed, the board no longer lists it.
+16. Quota: the mod manages every session's context, yours included: when yours reaches the compaction threshold, the mod compacts the conversation between turns; when an implementation session reaches the hand-over threshold, the mod asks it to write hand-over notes. When the board shows "Handing over" or "Hand-over to start", follow the automatic hand-over: once it reports "[handover, sha]", start a new session with start_session (fresh, its brief only the notes' path and what is left) and set the work item's owner to the new session. Do not have a session run on to the end, and do not ask the user whether to hand over; never ask the user to type /compact or any other command.`,
   'role.delivery': `"{project}" has a PM session tracking each session's state. When you finish, pause or get stuck on a piece of work (at the end, before wrap_up), call {tool} once: status is where it stands now, summary one sentence on what was done and what is left; fill commit when you committed, ci (the run URL or id) while CI is still running, and delivery when the work needs releasing. Put the full account (how, how it was checked, numbers, trade-offs) in detail: the mod saves it to a file and answers with its path. The PM reads the summary alone; the user can open the detail file from the board. The report is for the PM's board; there is no need to explain it to the user.
 Messages to the PM (SendMessage, the wrap_up recap, your final answer) take the same short form, about 300 characters in all: the status, the commit, a one-line summary and the detail file's path. Do not paste the full account into a message.
+When the PM asks you to hand over, write the notes by the hand-over template ({template}) and make the first line of your report `[handover, sha]`.
 When you cannot call {tool}, end your wrap_up recap (or, without wrap_up, your final answer) with one delivery line instead, one of:
 Delivery: not needed
 Delivery: deployed (version or where)
@@ -645,7 +677,7 @@ Delivery: pending (what it waits on)`,
   'ledger.added': 'Added work item {code} (id {id}).',
   'ledger.notFound': 'No work item with id {id}.',
   'ledger.refused': "Cannot mark {code} done: {blocker}\nClose it once CI has passed and it is deployed; if the user has explicitly confirmed it can be closed, pass force: true and write what they confirmed in note.",
-  'ledger.updated': 'Updated work item {code}.',
+  'ledger.updated': 'Updated work item {code} ({fields}).',
   'ledger.badAction': 'action must be add, update or list.',
 
   'band.title': 'Project PM',
@@ -782,6 +814,34 @@ A check you could not make (no tool to see the screen, say) goes in your reply, 
   'notice.webOpened': 'Opened the web board in your browser.',
   'notice.webStarted': 'Started the web board and opened it in your browser.',
   'notice.webFailed': 'Could not open the web board. In a terminal, run git pm open in your project’s folder, or ask the PM for "the board link".',
+  // Context and quota (T-48)
+  'context.size': 'context {tokens}',
+  'context.joiner': ' · ',
+  'context.running': 'running',
+  'context.idle': 'idle {time}',
+  'context.wake': 'wake ≈{tokens}',
+  'context.minutes': '{n}m',
+  'context.hours': '{n}h',
+  'context.days': '{n}d',
+  'context.compacted': 'Compacted the conversation: {before} → {after}',
+  'context.fieldJoiner': ', ',
+  'context.handoffAsk': 'Your context is {tokens}, past the hand-over threshold ({threshold}): stop at the next milestone, write hand-over notes by the template ({template}) and report to the PM with the first line `[handover, sha]`.',
+  'context.wakePm': '"{name}" ({id}) has a context of {tokens}, past the hand-over threshold, with work left. Follow item 16 of the PM rules: ask it with SendMessage to write hand-over notes by the template and report `[handover, sha]`. When it has been idle for over an hour and its work is at a milestone, do not wake it: read its last report with list_events and write the notes by the template yourself. Do not ask the user, and there is no need to mention this to them.',
+  'context.selfHandoff': 'Your context is {tokens}, past the compaction threshold, and compacting the conversation automatically did not work. Hand over to a new PM session: 1. Make sure every open work item\'s owner, status and note are up to date in the ledger. 2. Write the PM hand-over notes by the template to {path}: the work handed out, who you are waiting on, the user\'s unanswered questions, and the decisions and preferences the user gave in this conversation. 3. Start a new PM session with start_session (context: "fresh") whose prompt is only: "{marker} You are the PM of {project}: read the hand-over notes {path} first, then the latest board." with the user\'s message word for word after it. 4. Tell the user in one line: "This conversation got long, so I moved to a new PM conversation: [title](#local_…)". If start_session is refused, do it at the user\'s next message.',
+  'context.pending': 'These hand-overs could not start a new session last time. They are work the user asked for, so there is no need to ask: start each with start_session (context: "fresh") from its brief, set the work item\'s owner to the new session, tell the user in one line, then answer the user\'s message.\n{list}',
+  'context.sendHeld': 'Waking "{name}" costs about {tokens} (context {context}, idle {time}). For a small thing, open a new session (about 70k) or an agent (about 60k to 150k); if this needs its context, send the same message again (the same message within 10 minutes goes through). This is a quota note: there is no need to tell the user.',
+  'context.compactInstructions': 'Keep: the open work items and the sessions that own them, the user\'s unanswered questions, the decisions and preferences the user gave in this conversation, and the reports being waited on. The board and the ledger can be read again with board at any time: no need to keep their details.',
+  'context.usage': 'Hand-over and compaction thresholds: {now} (hand-over, compaction, in tokens). Most people never change them. Set: /pm context <handoff> <compact>, for example /pm context 200k 300k; /pm context default resets them. Range 100k to 1000k.',
+  'context.set': 'Thresholds set: hand over at {handoff}, compact at {compact}.',
+  'context.reset': 'Thresholds back to the defaults: hand over at {handoff}, compact at {compact}.',
+  'context.notSaved': 'The thresholds were not saved: {reason}',
+  'context.button': 'Click here to tidy up the conversation and save about 80% of the quota',
+  'context.buttonScope': 'This sets an automatic compaction threshold of 300k in the .claude/settings.local.json of the "{project}" folder, for every session opened in this folder.',
+  'context.buttonDone': 'Done: Claude Code now compacts the conversation at 300k by itself.',
+  'context.buttonFailed': 'That did not work: {reason}',
+  'board.attention.handingOver': '[Handing over] {name} context {tokens}: waiting for its notes',
+  'board.attention.handoffPending': '[Hand-over to start] The notes of "{title}" are ready: start the new session next turn',
+  'handover.template': 'first line `[handover, <latest sha>] <one sentence>`; branch, latest commit, whether the work tree is clean; done (one line per milestone: code, sha, one sentence); in progress (where it stands, the next step down to the file and function); to decide; verified facts (with their sources); traps (what was tried and did not work); verify (the commands to run and the exit codes to check). At most about 150 lines: details go in a report file, the notes only give its path',
 }
 
 export const MESSAGES: Record<Lang, Record<MessageKey, string>> = { en, 'zh-TW': zhTW }

@@ -39,6 +39,7 @@ import {
   latestWords,
   leftOf,
   ledgerRow,
+  updatedFields,
   ledgerText,
   liveTracks,
   needsTranscript,
@@ -889,7 +890,7 @@ export async function deliveryAsk($: EngineInterface): Promise<string | null> {
   const project = (await read($, projects))[self.projectKey]
   if (!project?.pmId || project.isDismissed) return null
 
-  return t('role.delivery', { project: self.projectName, tool: REPORT_TOOL })
+  return t('role.delivery', { project: self.projectName, tool: REPORT_TOOL, template: t('handover.template') })
 }
 
 /**
@@ -1489,7 +1490,8 @@ export async function ledger($: EngineInterface, input: Record<string, unknown>)
     await saveProject($, { ...project, ledger: list })
     if (refusal) return `${qaKeptText(refusal)}\n${ledgerRow(changed, true)}`
 
-    return `${t('ledger.updated', { code: itemCode(id) })}\n${ledgerRow(changed, true)}`
+    // One line (T-48): the PM knows what it asked for; the whole row is board's or list's to show.
+    return t('ledger.updated', { code: itemCode(id), fields: updatedFields(input) })
   }
 
   return t('ledger.badAction')

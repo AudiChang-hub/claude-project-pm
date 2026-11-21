@@ -64,6 +64,21 @@ export type Track = {
    * turn's end; absent in a track an older mod wrote. The error's words are in the transcript, not in `lastAnswer`.
    */
   endedInError?: boolean
+  /** The context its last main-loop turn read (turn.complete's usage), and when: what waking it rewrites (T-48). */
+  context?: { tokens: number; at: number }
+  /** The size the last compaction left (any trigger: the PM's, /compact, Claude Code's idle compaction), and when. */
+  compactedTo?: number
+  compactedAt?: number
+  /** The PM's last compaction as its card shows it: before, and the context of the first turn after it. */
+  compacted?: { before: number; after: number; at: number; isMeasured?: boolean }
+  /** The context at which compacting the PM failed every way: not tried again before RETRY_AFTER more. */
+  compactFailedAt?: number
+  /** The PM was told to hand itself over (compaction failed): when, at what context, and the new PM once it started. */
+  selfHandoff?: { at: number; tokens: number; to?: string }
+  /** The sessions the PM was woken to ask for hand-over notes, and when (once each). */
+  handoffAsked?: Record<string, number>
+  /** Hand-overs the app would not start in the turn they came up in: started at the user's next message. */
+  pendingHandoffs?: { title: string; prompt: string; at: number }[]
 }
 
 /** Where a session's work stands, as it says itself. */
@@ -230,6 +245,8 @@ declare module 'claude-code' {
       webOpening: boolean
       /** The core is not installed: the pane shows how to install it (T-45). */
       webHelp: boolean
+      /** The desktop app's live context of running sessions (get_usage), by session id (T-48). */
+      liveContext: Record<string, { tokens: number; at: number }>
     }
   }
 }

@@ -37,6 +37,7 @@ import {
   itemCode,
   latestWords,
   ledgerRow,
+  updatedFields,
   ledgerText,
   quoteOf,
   reportOf,
@@ -252,7 +253,8 @@ async function ledgerUpdate(ctx: Ctx, ref: ProjectRef, input: Record<string, unk
   const changed = done!.result
   if (refusal) return { text: `${qaKeptText(refusal)}\n${ledgerRow(changed, true)}`, structured: { refused: refusal, item: itemJson(changed), revision: done!.project.revision } }
 
-  return { text: `${t('ledger.updated', { code: itemCode(id) })}\n${ledgerRow(changed, true)}`, structured: { item: itemJson(changed), revision: done!.project.revision } }
+  // One line (T-48), the mod's own words (hooks/actions.ts): the PM knows what it asked for.
+  return { text: t('ledger.updated', { code: itemCode(id), fields: updatedFields(input) }), structured: { id, rev: changed.rev, revision: done!.project.revision } }
 }
 
 export function itemJson(item: CoreItem) {

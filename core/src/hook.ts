@@ -121,7 +121,7 @@ async function promptSubmit(id: string, ref: ProjectRef, input: HookInput, env: 
     .catch(() => null)
   if (alert) parts.push(alertText(alert))
   const isPm = project.pmId === id
-  if (!isPm && !project.isDismissed) parts.push(t('role.delivery', { project: ref.name, tool: REPORT_TOOL }), ct('hook.actorHint', { actor: id }))
+  if (!isPm && !project.isDismissed) parts.push(t('role.delivery', { project: ref.name, tool: REPORT_TOOL, template: t('handover.template') }), ct('hook.actorHint', { actor: id }))
   const found = await readGuidelines(ref, env, run)
   if (found && 'text' in found) {
     parts.push(t('guidelines.section', { file: found.file, project: ref.name }))

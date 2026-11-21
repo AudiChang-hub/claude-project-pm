@@ -1094,6 +1094,14 @@ export function ledgerRow(item: LedgerItem, isWhole = false): string {
 /** An owner session's statuses that mean its work is handed over, so its QA is due. */
 const DELIVERED: readonly Status[] = ['done', 'unreleased', 'ci']
 
+/** The fields a ledger update named, as its one-line reply lists them (T-48): owner, qa, … in the input's own words. */
+export function updatedFields(input: Record<string, unknown>): string {
+  const names = ['text', 'owner', 'status', 'note', 'criteria'].filter(k => input[k] !== undefined)
+  if (['qa', 'qa_by', 'qa_note'].some(k => input[k] !== undefined)) names.push('qa')
+
+  return names.join(t('context.fieldJoiner')) || '-'
+}
+
 export function isDeliveredStatus(status: Status): boolean {
   return DELIVERED.includes(status)
 }
