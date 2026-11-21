@@ -3,6 +3,7 @@ import { hookMain } from './hook'
 import { McpSession, serveStdio } from './mcp'
 import { ct, initLang } from './messages'
 import { newCtx } from './context'
+import type { Ctx, ToolResult } from './context'
 import { boardTool } from './tools'
 import { VERSION } from './version'
 
@@ -16,14 +17,23 @@ export const COMMANDS: Record<string, Command> = {
     return 0
   },
   board: async args => {
-    const ctx = newCtx({ actor: 'cli', tool: 'cli' })
-    const out = await boardTool(ctx, { scope: args.includes('--all') ? 'all' : 'project', include_done: args.includes('--done') })
-    const said = args.includes('--json') ? JSON.stringify(out.structured, null, 2) : out.text
-    ;(out.isError ? process.stderr : process.stdout).write(`${said}\n`)
+    const out = await boardCommand(newCtx({ actor: 'cli', tool: 'cli' }), args)
+    ;(out.isError ? process.stderr : process.stdout).write(`${out.text}\n`)
 
     return out.isError ? 1 : 0
   },
   hook: async args => hookMain(args[0] ?? 'claude-code', args[1] ?? ''),
+}
+
+/**
+ * What `project-pm board` prints: in a terminal, the board as people read it (sessions by name, T-46); with --json,
+ * the JSON the web board reads, ids included, for programs.
+ */
+export async function boardCommand(ctx: Ctx, args: string[]): Promise<{ text: string; isError: boolean }> {
+  const isJson = args.includes('--json')
+  const out: ToolResult = await boardTool(ctx, { scope: args.includes('--all') ? 'all' : 'project', include_done: args.includes('--done') }, !isJson)
+
+  return { text: isJson ? JSON.stringify(out.structured, null, 2) : out.text, isError: out.isError === true }
 }
 
 export async function main(argv: string[]): Promise<number> {

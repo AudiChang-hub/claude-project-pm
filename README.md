@@ -61,7 +61,7 @@ Step by step, and what to do when Windows or macOS warns you (those steps are no
 | Development guidelines | ✅ | ✅ |
 | CI template² | ✅ | ✅ |
 
-¹ Tested with Claude Code 2.1.326. The board is the web board and `project-pm board`. Partial: CI status (git is checked), sessions seen only through hooks, and no automatic agent set-up.
+¹ Tested with Claude Code 2.1.326. The board is the web board and `git pm board`. Partial: CI status (git is checked), sessions seen only through hooks, and no automatic agent set-up.
 ² GitHub Actions, run in your repository on every push and pull request.
 
 Updated with every release.
@@ -106,6 +106,15 @@ Every status, how delivery is judged, development guidelines and what the mod ke
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/web-board-dark.png">
   <img src="docs/images/web-board-light.png" alt="The CLI's web board in a browser, demo data: 6 of 12 work items done; Needs attention lists waiting on you, CI failed, unfinished, not released and awaiting QA; each session's status beside it." width="100%">
 </picture>
+
+<details>
+<summary><b>See it in the CLI</b> (demo data)</summary>
+<br>
+In a terminal, the PM reads the board and tells you what needs you:
+<img src="docs/images/cli-chat.png" alt="Claude Code in a terminal, demo data: asked whether anything is slipping, the PM calls the project-pm board tool and answers: two things wait on you, three are being handled, 6 of 12 work items done." width="100%">
+<code>git pm board</code> prints the same board, sessions by name:
+<img src="docs/images/cli-board.png" alt="git pm board in a terminal, demo data: the project's status line, Needs attention (waiting on you, CI failed, stopped, not released, awaiting QA) and the open work items with their owners." width="100%">
+</details>
 
 ## Requirements
 

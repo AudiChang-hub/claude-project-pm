@@ -1422,7 +1422,8 @@ export function boardText(input: BoardInput): string {
   for (const item of shown) {
     const note = item.note ? t('board.itemNote', { note: clip(item.note, ITEM_NOTE) }) : ''
     const shownQa = qaOf(item)
-    const qa = shownQa ? t('board.itemQa', { qa: qaText(item, shownQa) }) : ''
+    // Who checked it: by name for people, by id for the model (whoOf).
+    const qa = shownQa ? t('board.itemQa', { qa: qaText(item, shownQa, false, whoOf(input)) }) : ''
     const criteria = item.criteria ? t('board.itemCriteria', { criteria: clip(item.criteria, ITEM_NOTE) }) : ''
     lines.push(t('board.item', { code: itemCode(item.id), id: item.id, status: item.status, text: clip(item.text, ITEM_TEXT), owner: ownerText(item.owner), qa, criteria, note }))
   }
@@ -1445,7 +1446,8 @@ export function boardText(input: BoardInput): string {
     if (!input.isIncludingDone && !isActive(r.status) && !isCaveat && !r.one.hasOpenPr && !isOwner) continue
     listed += 1
     const flags = [r.one.hasOpenPr ? t('board.flag.pr') : '', r.one.isPinned ? t('board.flag.pinned') : ''].filter(Boolean).join(t('list.joiner'))
-    lines.push(`### [${statusText(r.status, r.limit, 'tag')}] ${sessionName(r.one, r.track)} (${r.one.id})`)
+    const heading = `### [${statusText(r.status, r.limit, 'tag')}] ${sessionName(r.one, r.track)}`
+    lines.push(input.isForPeople ? heading : `${heading} (${r.one.id})`)
     lines.push(t('board.lastActive', { ago: ago(r.one.lastActivityAt, now), flags: flags ? t('board.flags', { flags }) : '' }))
     if (r.track) {
       if (r.track.plan.length) {

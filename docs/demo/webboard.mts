@@ -16,7 +16,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const work = join(tmpdir(), 'project-pm-webboard')
 const fakeHome = join(work, 'home')
@@ -27,6 +27,11 @@ process.env.USERPROFILE = fakeHome
 process.env.HOME = fakeHome
 
 const { serve, boardAddress } = await import('../../core/src/http')
+const { newCtx } = await import('../../core/src/context')
+const { boardOf } = await import('../../core/src/tools')
+const { projectRefOf } = await import('../../core/src/project')
+const { loadProject } = await import('../../core/src/store')
+const { ledgerText } = await import('../../hooks/sessions')
 const { setLang } = await import('../../hooks/messages')
 const { keyFile, projectKey } = await import('../../hooks/sessions')
 
@@ -264,6 +269,59 @@ async function capture(url: string, shot: Shot) {
 
 // ── The shots ──
 
+/**
+ * What the CLI prints for the board scene (T-46): `project-pm board` (boardTool, after it found the project) and
+ * `ledger` `list` (ledgerOn), called on the same functions with the same data, so the terminal shots show the core's
+ * own words.
+ */
+async function cliText(env: NodeJS.ProcessEnv): Promise<{ model: string; people: string; ledger: string }> {
+  const ctx = newCtx({ actor: 'cli', tool: 'cli', env, run })
+  const ref = projectRefOf(PATH)
+  const { text, peopleText } = await boardOf(ctx, ref, false)
+  const project = await loadProject(ref, env)
+
+  return { model: text, people: peopleText, ledger: ledgerText(project.ledger, false) }
+}
+
+/** docs/demo/terminal.html filled with the core's output (`scene`: the PM in Claude Code, or `git pm board`), captured. */
+async function captureTerminal(scene: 'chat' | 'board', lang: Lang, said: { model: string; people: string }, out: string) {
+  const p = await page()
+  await p.send('Emulation.setDeviceMetricsOverride', { width: 1120, height: 900, deviceScaleFactor: 2, mobile: false })
+  await p.send('Page.navigate', { url: pathToFileURL(join(root, 'docs/demo/terminal.html')).href })
+  const evaluate = async (expression: string) => (await p.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })).result.value
+  for (let i = 0; i < 100; i++) {
+    if (await evaluate(`typeof window.render === 'function' && document.readyState === 'complete'`)) break
+    await sleep(100)
+  }
+  await evaluate(`(window.render(${JSON.stringify({ lang, scene, model: said.model, people: said.people })}), document.fonts.ready.then(() => true))`)
+  await sleep(400)
+  const height = await evaluate('document.documentElement.scrollHeight')
+  await p.send('Emulation.setDeviceMetricsOverride', { width: 1120, height, deviceScaleFactor: 2, mobile: false })
+  await sleep(300)
+  const box = await evaluate(`(() => { const r = document.querySelector('.frame').getBoundingClientRect(); return { x: r.x, y: r.y + scrollY, width: r.width, height: r.height } })()`)
+  const { data } = await p.send('Page.captureScreenshot', { format: 'png', clip: { ...box, scale: 1 }, captureBeyondViewport: true })
+  await writeFile(join(images, out), Buffer.from(data, 'base64'))
+  p.close()
+  console.log(`wrote docs/images/${out}`)
+}
+
+// `--cli-text` (and `--zh`): the board scene's CLI output, printed; for checking the terminal shots against it.
+if (process.argv.includes('--cli-text')) {
+  const lang: Lang = process.argv.includes('--zh') ? 'zh-TW' : 'en'
+  setLang(lang)
+  await rm(work, { recursive: true, force: true })
+  await mkdir(fakeHome, { recursive: true })
+  const home = join(work, `cli-${lang}`)
+  await seed(home, lang, 'board', Date.now())
+  const said = await cliText({ ...process.env, PROJECT_PM_HOME: home, PROJECT_PM_LANG: lang })
+  console.log(said.people)
+  console.log('\n=== the board tool, for the model ===\n')
+  console.log(said.model)
+  console.log('\n=== ledger list ===\n')
+  console.log(said.ledger)
+  process.exit(0)
+}
+
 // `--serve` (and `--zh`): the board scene, served until stopped, its address printed; for looking at it in a browser.
 if (process.argv.includes('--serve')) {
   const lang: Lang = process.argv.includes('--zh') ? 'zh-TW' : 'en'
@@ -317,6 +375,14 @@ try {
       const url = boardAddress(served.info)
       for (const shot of wanted) await capture(url, shot)
       await served.close()
+    }
+    // The CLI (T-46): the PM answering in Claude Code from the board tool, and `git pm board` in a terminal.
+    const terminal = ([['chat', `cli-chat${suffix}.png`], ['board', `cli-board${suffix}.png`]] as const).filter(([, out]) => !only.length || only.includes(out))
+    if (terminal.length) {
+      const home = join(work, `cli-${lang}`)
+      await seed(home, lang, 'board', Date.now())
+      const said = await cliText({ ...process.env, PROJECT_PM_HOME: home, PROJECT_PM_LANG: lang })
+      for (const [scene, out] of terminal) await captureTerminal(scene, lang, said, out)
     }
   }
 } finally {

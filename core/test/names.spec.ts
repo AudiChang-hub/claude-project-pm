@@ -12,7 +12,8 @@ import { sessionName, shortId } from '../../hooks/sessions'
 import { resolveProject } from '../src/project'
 import type { ProjectRef } from '../src/project'
 import { changeActor } from '../src/store'
-import { boardOf, ledgerTool, pmTool, reportTool } from '../src/tools'
+import { boardCommand } from '../src/cli'
+import { boardOf, boardTool, ledgerTool, pmTool, reportTool } from '../src/tools'
 import type { World } from './helpers'
 import { LANGS, NOW, world } from './helpers'
 
@@ -78,6 +79,18 @@ for (const lang of LANGS) {
       // The model's board: the names, and each id beside it.
       assert.ok(text.includes(DEV), text)
       assert.ok(text.includes('Retire v1 coupon fields'), text)
+    })
+
+    test('T-46: `project-pm board` in a terminal names sessions for people; --json and the MCP tool keep the ids', async () => {
+      const printed = await boardCommand(w.ctx(PM), [])
+      assert.equal(printed.isError, false)
+      assert.ok(!/claude-code:[0-9a-f-]{20,}/.test(printed.text), printed.text)
+      assert.ok(printed.text.includes('Retire v1 coupon fields'), printed.text)
+      assert.ok(printed.text.includes('ffffffff'), printed.text)
+      const asJson = await boardCommand(w.ctx(PM), ['--json'])
+      assert.ok(asJson.text.includes(DEV), asJson.text)
+      const forModel = await boardTool(w.ctx(PM), {})
+      assert.ok(forModel.text.includes(DEV), forModel.text)
     })
   })
 }

@@ -10,6 +10,7 @@ session, `~/.claude/project-pm/` or `~/.project-pm/`.
 | `board.html?lang=…&theme=light` · `&theme=dark` | `board-light.png`, `board-dark.png` and their `-zh-TW` versions | *See the board*, chosen by GitHub's light or dark theme (`<picture>`) |
 | `board.html?lang=…&theme=light&view=states` | `how-states.png` · `how-states-zh-TW.png` | The status table in docs/how-it-works*.md |
 | `webboard.mts` (the real web board) | `web-board-light.png`, `web-board-dark.png` and their `-zh-TW` versions; `how-qa*.png`, `how-guidelines*.png` | The CLI part of each README; docs/how-it-works*.md |
+| `webboard.mts` with `terminal.html` (the core's real output) | `cli-chat.png`, `cli-board.png` and their `-zh-TW` versions | *See it in the CLI* in each README |
 
 - `overview.html` is the v1.0.0 one-page overview: the two ways in (the desktop app through the mod,
   the CLI through the core's MCP server and hooks) on one shared core, the v0.8.0 sessions-and-agents
@@ -26,6 +27,13 @@ session, `~/.claude/project-pm/` or `~/.project-pm/`.
 - `hero.html` is a schematic Claude Code desktop window: the person asks the PM whether anything is
   slipping, and the PM answers from what the board pane beside it (`board.html` in an iframe) shows.
   Keep its answer in step with `board.html`'s fixture.
+- `terminal.html` is a schematic terminal (T-46), dark in both of GitHub's themes. `webboard.mts` fills it
+  with the core's own output for the board scene: `cli-chat` shows the first lines of what the board tool
+  answers the model, and `cli-board` what `project-pm board` prints for people (`git pm board`, the alias
+  init adds), down to its work items. Only the question and the PM's answer are written in the page; keep
+  the answer in step with the board scene's data. `node --import tsx ../docs/demo/webboard.mts --cli-text`
+  (and `--zh`) prints that output to check against. The shots are scaled to 1600 px wide and reduced like
+  the others.
 - `webboard.mts` takes its pictures of the core's own web board: it writes made-up data into a
   temporary `PROJECT_PM_HOME` (and a temporary home folder), starts `serve()` from
   `core/src/http.ts` on it, and captures the page with headless Edge or Chrome over the DevTools

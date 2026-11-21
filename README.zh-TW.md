@@ -61,7 +61,7 @@ v0.9.x（QA 關卡、額度優先派工）：[CHANGELOG](CHANGELOG.md)
 | 開發準則 | ✅ | ✅ |
 | CI 範本² | ✅ | ✅ |
 
-¹ 在 Claude Code 2.1.326 實測。看板是網頁看板和 `project-pm board`。部分支援的地方：CI 狀態（git 有檢查）、只看得到裝了 hook 的 Session、不會自動設定 Agent。
+¹ 在 Claude Code 2.1.326 實測。看板是網頁看板和 `git pm board`。部分支援的地方：CI 狀態（git 有檢查）、只看得到裝了 hook 的 Session、不會自動設定 Agent。
 ² GitHub Actions，在你的 repo 每次 push 和 pull request 時執行。
 
 這張表每次推版都會更新。
@@ -106,6 +106,15 @@ v0.9.x（QA 關卡、額度優先派工）：[CHANGELOG](CHANGELOG.md)
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/web-board-dark-zh-TW.png">
   <img src="docs/images/web-board-light-zh-TW.png" alt="CLI 的網頁看板（示範資料）：12 項完成 6 項；「需要處理」列出待回覆、CI 失敗、未完成、待發布和待 QA。" width="100%">
 </picture>
+
+<details>
+<summary><b>在 CLI 裡的樣子</b>（示範資料）</summary>
+<br>
+在終端機裡，PM 讀取看板，告訴你哪些在等你：
+<img src="docs/images/cli-chat-zh-TW.png" alt="終端機裡的 Claude Code（示範資料）：問有沒有漏掉的工作，PM 呼叫 project-pm 的 board 工具後回答：兩件在等你、三件有人在處理、12 項工作完成 6 項。" width="100%">
+<code>git pm board</code> 印出同一份看板，Session 以名稱顯示：
+<img src="docs/images/cli-board-zh-TW.png" alt="終端機裡的 git pm board（示範資料）：專案狀態、需要處理（待回覆、CI 失敗、中斷、待發布、待 QA）和進行中的工作項目與負責人。" width="100%">
+</details>
 
 ## 需求
 

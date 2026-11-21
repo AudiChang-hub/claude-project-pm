@@ -463,39 +463,43 @@ export type PaneJson = {
 /** A work item's QA by the pane's theme colors (hooks/view.tsx QA_COLOR). */
 const QA_LOOK: Record<QaShown, string | null> = { pass: 'success', fail: 'error', awaiting: 'warning', skipped: null }
 
-export async function boardTool(ctx: Ctx, input: Record<string, unknown>): Promise<ToolResult> {
-  if (input.scope === 'all') return boardOfAll(ctx, input.include_done === true)
+/**
+ * The board tool. `isForPeople`: the words as people read them, each session by name and never by its raw id (T-43;
+ * `project-pm board` in a terminal, T-46); the model's board keeps the ids, which it assigns owners by.
+ */
+export async function boardTool(ctx: Ctx, input: Record<string, unknown>, isForPeople = false): Promise<ToolResult> {
+  if (input.scope === 'all') return boardOfAll(ctx, input.include_done === true, isForPeople)
   const ref = await projectOf(ctx, input)
   if (!ref) return notGit(ctx, input)
   try {
-    const { text, json } = await boardOf(ctx, ref, input.include_done === true)
+    const { text, peopleText, json } = await boardOf(ctx, ref, input.include_done === true)
 
-    return { text, structured: json as unknown as Record<string, unknown> }
+    return { text: isForPeople ? peopleText : text, structured: json as unknown as Record<string, unknown> }
   } catch (err) {
     return failed(err)
   }
 }
 
 /** Every project the core keeps, one board after another. */
-async function boardOfAll(ctx: Ctx, isIncludingDone: boolean): Promise<ToolResult> {
+async function boardOfAll(ctx: Ctx, isIncludingDone: boolean, isForPeople: boolean): Promise<ToolResult> {
   try {
     const dir = join(paths(ctx.env).home, 'projects')
     const names = (await readdir(dir).catch(() => [] as string[])).filter(name => name.endsWith('.json'))
-    const boards: { text: string; json: BoardJson }[] = []
+    const boards: { text: string; peopleText: string; json: BoardJson }[] = []
     for (const name of names) {
       const file = await readJsonFile<CoreProject>(join(dir, name)).catch(() => null)
       if (!file?.path) continue
       boards.push(await boardOf(ctx, projectRefOf(file.path), isIncludingDone))
     }
 
-    return { text: boards.length ? boards.map(b => b.text).join('\n\n---\n\n') : t('board.none'), structured: { projects: boards.map(b => b.json) } }
+    return { text: boards.length ? boards.map(b => (isForPeople ? b.peopleText : b.text)).join('\n\n---\n\n') : t('board.none'), structured: { projects: boards.map(b => b.json) } }
   } catch (err) {
     return failed(err)
   }
 }
 
 /** The board of one project: the mod's board text, and the same as JSON for the web board and other programs. */
-export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolean): Promise<{ text: string; json: BoardJson; project: CoreProject }> {
+export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolean): Promise<{ text: string; peopleText: string; json: BoardJson; project: CoreProject }> {
   const project = await loadProject(ref, ctx.env)
   const owners = project.ledger.filter(i => i.status === 'open' && i.owner).map(i => i.owner!)
   let found
@@ -569,8 +573,11 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
   for (const problem of problems) attend(ct('board.pushNotChecked', { when: localMinute(problem.at), reason: problem.reason }))
   // The guidelines file changed without the person agreeing (guard.ts: only noticed, never put back), for a week.
   for (const alert of await guidelinesAlerts(ref, ctx.env, now)) attend(alertText(alert, localMinute(alert.at)), alertText(alert, localMinute(alert.at), who))
-  if (sessionsError) text += `\n\n${ct('board.noSessionsRead', { error: sessionsError })}`
-  if (isCheckingCi) text += `\n\n${ct('board.ciChecking')}`
+  const notes = [...(sessionsError ? [ct('board.noSessionsRead', { error: sessionsError })] : []), ...(isCheckingCi ? [ct('board.ciChecking')] : [])]
+  for (const note of notes) {
+    text += `\n\n${note}`
+    forPeople += `\n\n${note}`
+  }
   const url = await boardUrl(ctx, ref)
   const actorById = new Map(found.actors.map(a => [a.id, a]))
   const statusById = new Map<string, Status>()
@@ -712,7 +719,7 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     pushProblems: problems,
   }
 
-  return { text, json, project }
+  return { text, peopleText: forPeople, json, project }
 }
 
 /** A moment as the person's clock shows it, to the minute: 2026-11-19 20:05. */

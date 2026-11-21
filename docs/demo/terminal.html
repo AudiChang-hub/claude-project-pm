@@ -1,0 +1,139 @@
+<!doctype html>
+<!--
+  The README's Claude Code CLI pictures (T-46): a schematic terminal, not a copy of any terminal app's look.
+  webboard.mts fills it with the core's own output for the made-up "acme-storefront" project and captures it:
+  render({ lang, scene, model, people }) where `model` is the board the board tool answers the model with and
+  `people` is what `project-pm board` prints in a terminal. Every line of tool output and of the printed board is the
+  core's own; only the person's question and the PM's answer are written here (they report what the board says).
+  scene=chat: Claude Code in a terminal, the PM reading the board and answering.
+  scene=board: `git pm board` (the alias init adds for `project-pm board`) printing the board, down to its work items.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project PM Terminal Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+TC:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #1b1a17; --bar: #23221f; --ink: #e9e6dd; --ink-2: #c4c0b5; --ink-3: #8f8b80;
+    --line: rgba(233, 230, 221, 0.12); --claude: #e08a68; --success: #5fcf8a; --warning: #f0b14a; --error: #f27d7d;
+    --link: #8cb6ff; --you: #2a2925;
+    --mono: "JetBrains Mono", "Noto Sans TC", "Microsoft JhengHei", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: transparent; color: var(--ink); -webkit-font-smoothing: antialiased; }
+  .frame { padding: 2px; width: 1104px; }
+  .window { width: 1100px; background: var(--bg); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .bar { height: 40px; display: flex; align-items: center; column-gap: 14px; padding: 0 16px; background: var(--bar); border-bottom: 1px solid var(--line); font: 500 12px/1 var(--mono); color: var(--ink-3); }
+  .lights { display: flex; column-gap: 7px; }
+  .lights i { width: 11px; height: 11px; border-radius: 50%; background: var(--line); display: block; }
+  .screen { padding: 20px 24px 24px; font: 400 13.5px/1.62 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .dim { color: var(--ink-3); }
+  .soft { color: var(--ink-2); }
+  .prompt { color: var(--success); }
+  .cmd { color: var(--ink); font-weight: 600; }
+  .head { color: var(--ink); font-weight: 600; }
+  .welcome { display: inline-block; border: 1px solid var(--claude); border-radius: 8px; padding: 8px 16px; margin-bottom: 18px; white-space: pre; }
+  .welcome b { color: var(--claude); font-weight: 600; }
+  .you { display: block; background: var(--you); border-radius: 6px; padding: 8px 12px; margin-bottom: 16px; }
+  .you b { color: var(--ink-3); font-weight: 400; }
+  .call { display: block; margin-bottom: 16px; }
+  .dot { color: var(--success); }
+  /* A tool's output under its call: wrapped lines keep the indent, the first line hangs on its ⎿. */
+  .out { display: block; padding-left: 5ch; }
+  .out.first { text-indent: -3ch; }
+  .reply { display: block; }
+  .reply .dot { color: var(--ink); }
+  .tag-warning { color: var(--warning); }
+  .tag-error { color: var(--error); }
+  .tag-claude { color: var(--claude); }
+  .tag-ok { color: var(--success); }
+  .code { color: var(--link); }
+  .composer { margin-top: 18px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px 0; color: var(--ink-3); white-space: pre; }
+</style>
+</head>
+<body>
+<div class="frame"><div class="window"><div class="bar"><div class="lights"><i></i><i></i><i></i></div><span id="title"></span></div><div class="screen" id="board"></div></div></div>
+<script>
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+// A board line's status tag in the color the pane gives that status (hooks/sessions.ts STATUS).
+const TAGS = [
+  [/^(- \[(?:Waiting on you|待回覆)\])/, 'warning'], [/^(- \[(?:CI failed[^\]]*|CI 失敗[^\]]*)\])/, 'error'],
+  [/^(- \[(?:Stopped[^\]]*|中斷[^\]]*|Not released[^\]]*|待發布[^\]]*|Awaiting QA|待 QA)\])/, 'claude'],
+]
+const tinted = line => {
+  if (/^#{1,3} /.test(line)) return `<span class="head">${esc(line)}</span>`
+  for (const [re, tone] of TAGS) {
+    const m = re.exec(line)
+    if (m) return `<span class="tag-${tone}">${esc(m[1])}</span>${esc(line.slice(m[1].length))}`
+  }
+  return esc(line)
+}
+
+const COPY = {
+  en: {
+    you: 'Is anything slipping? What still needs me?',
+    more: n => `… +${n} lines (ctrl+o to expand)`,
+    reply: `Two things are waiting on you:
+  • <b>T-07</b> Retire the v1 coupon fields asks: drop the <span class="code">coupon_v1</span> columns in this release, or keep them read-only until 0.9?
+  • <b>T-11</b> Holiday banner is merged locally as <span class="code">a3f9c21</span> but not pushed. Say go and it deploys.
+
+Not done yet, and being handled:
+  • <b>T-06</b> Tax rounding: CI run 18240211 failed; I'm sending the fix back to that session.
+  • <b>T-08</b> Search ranking stopped with 4 steps left. I've asked it to carry on.
+  • <b>T-12</b> Order email typo is delivered (<span class="code">5e2b9c1</span>); it stays open until a T-12 QA agent passes it.
+
+6 of 12 work items are done. Nothing closes before its QA passes.`,
+    composer: '>  ',
+  },
+  'zh-TW': {
+    you: '有沒有漏掉的工作？哪些在等我？',
+    more: n => `… +${n} lines (ctrl+o to expand)`,
+    reply: `有兩件在等你：
+  • <b>T-07</b> 停用 v1 優惠券欄位在問：這次發布就刪掉 <span class="code">coupon_v1</span> 欄位，還是保留唯讀到 0.9 版？
+  • <b>T-11</b> 首頁節慶橫幅已在本機合併為 <span class="code">a3f9c21</span>，還沒 push。你說可以就部署。
+
+還沒完成，有人在處理：
+  • <b>T-06</b> 結帳稅額：CI run 18240211 失敗，我請那個 Session 修正後重跑。
+  • <b>T-08</b> 搜尋排序停在半途，還有 4 個步驟。我已經請它接著做。
+  • <b>T-12</b> 通知信錯字已交付（<span class="code">5e2b9c1</span>），要等「T-12 QA」Agent 驗收通過才結案。
+
+12 項工作完成 6 項。QA 沒通過的工作，一項都不會結案。`,
+    composer: '>  ',
+  },
+}
+
+window.render = ({ lang, scene, model, people }) => {
+  const copy = COPY[lang]
+  document.documentElement.lang = lang
+  const screen = document.getElementById('board')
+  if (scene === 'chat') {
+    document.getElementById('title').textContent = 'claude — ~/code/acme-storefront'
+    // Claude Code shows the first lines of a tool's answer and folds the rest.
+    const lines = model.split('\n')
+    const shown = lines.slice(0, 3)
+    screen.innerHTML =
+      `<span class="welcome"><b>✻</b> Claude Code\n<span class="dim">  cwd: ~/code/acme-storefront</span></span>\n` +
+      `<span class="you"><b>&gt; </b>${esc(copy.you)}</span>` +
+      `<span class="call"><span class="dot">●</span> <b>project-pm - board</b> <span class="dim">(MCP)</span>` +
+      shown.map((line, i) => `<span class="out${i === 0 ? " first" : ""}">${i === 0 ? '<span class="dim">⎿  </span>' : ''}<span class="soft">${esc(line)}</span></span>`).join('') +
+      `<span class="out dim">${esc(copy.more(lines.length - shown.length))}</span></span>` +
+      `<span class="reply"><span class="dot">●</span> ${copy.reply.replace(/\n/g, '\n  ')}</span>` +
+      `<div class="composer">${esc(copy.composer)}</div>`
+  } else {
+    document.getElementById('title').textContent = 'Terminal — ~/code/acme-storefront'
+    // Down to the work items: the rest (agents, every session) runs on below the window.
+    const lines = people.split('\n')
+    const end = lines.findIndex((line, i) => i > 0 && /^## /.test(line) && lines.slice(0, i).some(l => /^## (Work items|工作項目)/.test(l)))
+    const kept = (end > 0 ? lines.slice(0, end) : lines).join('\n').replace(/\n+$/, '')
+    screen.innerHTML =
+      `<span class="prompt">~/code/acme-storefront $</span> <span class="cmd">git pm board</span>\n` + kept.split('\n').map(tinted).join('\n')
+  }
+  screen.hidden = false
+}
+</script>
+</body>
+</html>
