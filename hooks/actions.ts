@@ -1149,10 +1149,13 @@ export async function checkAgents($: EngineInterface) {
     }
   }
   // The person's word on its work items, closed after it ended, settles it either way.
-  const items = Object.values(await read($, projects)).flatMap(file => file.ledger)
+  const loaded = await read($, projects)
+  const items = Object.values(loaded).flatMap(file => file.ledger)
+  const key = (await read($, me))?.projectKey
+  const own = key ? (loaded[key]?.ledger ?? []) : []
   for (const one of list) {
     if (isSettledAgent(changes[one.id]?.state ?? one.state)) continue
-    const settled = settledAgentState(one, items)
+    const settled = settledAgentState(one, items, own)
     if (settled) changes[one.id] = { state: settled }
   }
   if (Object.keys(changes).length) await changeAgents($, all => all.map(a => (changes[a.id] ? { ...a, ...changes[a.id] } : a)))

@@ -123,16 +123,30 @@ export function shortNotices(text: string, known: Readonly<Record<string, AgentR
 
 /**
  * What the person's closing of an ended agent's work items settles it as: once every item it owns is closed (none
- * open) after it ended, done when any is done, dropped when all were dropped. Null while it runs, while one is open,
- * for one that owns none, and when the items were closed before it ended (its own end says more then).
+ * open) after it ended, done when any is done, dropped when all were dropped. One that owns none (a QA agent) goes by
+ * its own work item (`item`, looked up in `own`: the PM's project's ledger, where its code means that item). Null while
+ * it runs, while one is open, for one that owns none and names no item, and when the items were closed before it ended
+ * (its own end says more then).
  */
-export function settledAgentState(one: AgentRecord, ledger: LedgerItem[]): AgentState | null {
+export function settledAgentState(one: AgentRecord, ledger: LedgerItem[], own: LedgerItem[] = ledger): AgentState | null {
   if (one.state === 'running' || one.endedAt === undefined) return null
   const owned = ledger.filter(item => isSameId(item.owner, `agent:${one.id}`))
-  if (owned.length === 0 || owned.some(item => item.status === 'open')) return null
-  if (Math.max(...owned.map(item => item.updatedAt)) < one.endedAt) return null
+  // One that owns nothing (a QA agent: qa_by may not be the owner) settles by its own work item, in the PM's project.
+  const settling = owned.length ? owned : own.filter(item => one.item !== null && item.id === one.item)
+  if (settling.length === 0 || settling.some(item => item.status === 'open')) return null
+  if (Math.max(...settling.map(item => item.updatedAt)) < one.endedAt) return null
 
-  return owned.some(item => item.status === 'done') ? 'done' : 'dropped'
+  return settling.some(item => item.status === 'done') ? 'done' : 'dropped'
+}
+
+/** The agents as the person's closing of their work items settles them (settledAgentState), for a board that reads them. */
+export function settledAgents(agents: AgentRecord[], ledger: LedgerItem[]): AgentRecord[] {
+  return agents.map(one => {
+    if (isSettledAgent(one.state)) return one
+    const state = settledAgentState(one, ledger)
+
+    return state ? { ...one, state } : one
+  })
 }
 
 /** States an agent's work ends in: it needs nothing more, and folds away after a while. */

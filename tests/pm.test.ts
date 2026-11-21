@@ -2476,6 +2476,26 @@ test("the person's closing settles an ended agent only when it came after the en
   expect([isSettledAgent('done'), isSettledAgent('dropped'), isSettledAgent('verify'), isSettledAgent('failed')]).toEqual([true, true, false, false])
 })
 
+test('an ended agent that owns nothing (a QA agent) settles by its own work item, closed after it ended (T-49)', () => {
+  // "T-37 QA (7th)": failed, never an owner (qa_by may not be the owner); T-37 closed after it.
+  const qa = { id: 'q7', description: 'T-37 QA（第七次）', item: 37, type: 'Explore', isolated: false, state: 'failed', startedAt: 100, endedAt: 200 } as const
+  const item = (status: string, updatedAt: number, id = 37) => ({ id, text: 'x', owner: 'local_dev', status, createdAt: 50, updatedAt }) as never
+  expect(settledAgentState(qa, [item('done', 300)])).toBe('done')
+  expect(settledAgentState(qa, [item('dropped', 300)])).toBe('dropped')
+  for (const state of ['lost', 'decide', 'verify'] as const) expect(settledAgentState({ ...qa, state }, [item('done', 300)])).toBe('done')
+  // Still open: still listed.
+  expect(settledAgentState(qa, [item('open', 300)])).toBe(null)
+  // Closed before it ended: its own end says more.
+  expect(settledAgentState(qa, [item('done', 150)])).toBe(null)
+  // Another item, or none named.
+  expect(settledAgentState(qa, [item('done', 300, 36)])).toBe(null)
+  expect(settledAgentState({ ...qa, item: null }, [item('done', 300)])).toBe(null)
+  expect(settledAgentState({ ...qa, state: 'running', endedAt: undefined }, [item('done', 300)])).toBe(null)
+  // Its item is the PM's own project's: another project's T-37 says nothing of it.
+  expect(settledAgentState(qa, [item('done', 300)], [item('open', 300)])).toBe(null)
+  expect(settledAgentState(qa, [item('open', 300)], [item('done', 300)])).toBe('done')
+})
+
 // ── QA: the verdict a work item needs before it closes (docs/design/qa.md) ──
 
 /** What the QA tests read, in each language. */

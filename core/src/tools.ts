@@ -8,7 +8,7 @@ import { join } from 'node:path'
 
 import { t } from '../../hooks/messages'
 import type { MessageKey } from '../../hooks/messages'
-import { agentName } from '../../hooks/agents'
+import { agentName, settledAgents } from '../../hooks/agents'
 import { isAgentId, isSameId, openBreakdown, qaKeptText, qaShown, qaText, qaUpdate } from '../../hooks/qa'
 import type { OpenBreakdown, QaShown } from '../../hooks/qa'
 import {
@@ -536,7 +536,8 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
       if (pushed && !push[s.id]) push[s.id] = pushed
     }
   }
-  const agents = found.agents
+  // The person's closing of their work items settles ended agents, as the mod's checkAgents does (T-49).
+  const agents = settledAgents(found.agents, project.ledger)
   const input: BoardInput = {
     project: { name: ref.name, path: ref.path },
     sessions: found.sessions,

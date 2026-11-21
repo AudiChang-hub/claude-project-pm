@@ -124,6 +124,26 @@ for (const lang of LANGS) {
       assert.equal(ask.summary, t('pane.question', { text: 'Drop the coupon_v1 columns in this release, or keep them read-only until 0.9?' }))
     })
 
+    test('an ended QA agent folds away once its own work item is closed after it ended (T-49)', async () => {
+      const file = join(legacy, 'sessions', 'local_pm.json')
+      const qa = { id: 'q7', description: 'T-01 QA (7th)', item: 1, type: 'Explore', isolated: false, state: 'failed', result: '[fail] no repro test', startedAt: NOW - 7_200_000, endedAt: NOW - 7_000_000 }
+      write(file, { ...track('local_pm', w.repo, { title: 'acme-shop · PM' }), agents: [qa] })
+      const projectFile = join(legacy, 'projects', `${keyFile(projectKey(ref.path))}.json`)
+      const project = (status: string, updatedAt: number) =>
+        write(projectFile, { key: ref.key, name: ref.name, path: ref.path, pmId: 'local_pm', isDismissed: false, nextId: 2, ledger: [{ id: 1, text: 'Fix the typo in order emails', owner: 'local_word', status, note: '', createdAt: NOW - 9_000_000, updatedAt }] })
+      const failed = t('board.attention.agentFailed', { name: 'T-01 QA (7th)', line: '[fail] no repro test' })
+      const listed = async () => (await boardOf(w.ctx('local_pm'), ref, false)).text.includes(failed)
+      project('open', NOW - 3_600_000)
+      assert.equal(await listed(), true)
+      // Closed before it ended: its own end says more.
+      project('done', NOW - 8_000_000)
+      assert.equal(await listed(), true)
+      project('done', NOW - 3_600_000)
+      assert.equal(await listed(), false)
+      project('dropped', NOW - 3_600_000)
+      assert.equal(await listed(), false)
+    })
+
     test('a round older than the desktop app\'s refresh counts nobody as running', async () => {
       const file = join(legacy, 'rounds', 'local_pm.json')
       const old = new Date(Date.now() - ROUND_FRESH_MS - 60_000)
