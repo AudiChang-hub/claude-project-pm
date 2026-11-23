@@ -1,8 +1,9 @@
 /** The commands beyond the MCP server, the board and the hooks: serve and open (the web board), init and uninstall, and the git checks. */
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
+import { createInterface } from 'node:readline'
 
-import { COMMANDS } from './cli'
+import { COMMANDS, DOUBLE_CLICK } from './cli'
 import { run, systemProgram } from './host'
 import { boardAddress, runningServer, serve } from './http'
 import type { InstallEnv } from './install'
@@ -114,6 +115,64 @@ COMMANDS.init = async args => {
   if (isJson) sayJson({ project: ref.path, changes: out.changes, notes: out.notes, applied: out.applied.length, failed: out.failed })
 
   return out.failed.length ? 1 : 0
+}
+
+/** The console window a double-click opens: a line written, and Enter pressed (true) or stdin ended (false). */
+export type ClickConsole = { write: (text: string) => void; enter: () => Promise<boolean> }
+
+/**
+ * A double-click on the program (T-52): Windows closes its console window as soon as the program ends, so it waits.
+ * Not set up: what init would change (init's own list), then Enter to set up (init --yes) or the window closed to
+ * cancel. Set up already (this project, or outside a project any): the board (open). Outside a git project with
+ * nothing set up: init's own words for that, and how to go on. Each ends waiting for Enter, so the words stay.
+ */
+export async function doubleClick(cwd: string, ie: InstallEnv, console: ClickConsole, open: () => Promise<number> = () => COMMANDS.open!([])): Promise<number> {
+  const ref = await resolveProject(cwd)
+  const { entries } = await readLog(ie.env)
+  let code: number
+  if (ref ? entries.some(e => e.project === ref.key) : entries.length > 0) {
+    console.write(ct('click.setUp'))
+    code = await open()
+  } else if (!ref) {
+    console.write(ct('error.notGit', { path: cwd }))
+    console.write(ct('click.notGit'))
+    code = 1
+  } else {
+    // init's list as a dry run prints it, but its last line (run init --yes): Enter stands for that here.
+    const dryRun = ct('init.dryRun')
+    await init(ref, ie, { yes: false, ci: false }, text => text !== dryRun && console.write(text))
+    console.write(ct('click.ask'))
+    if (!(await console.enter())) return 1
+    // The list is on screen already: of the run, only its last words (done, or what did not work).
+    const said: string[] = []
+    const out = await init(ref, ie, { yes: true, ci: false }, text => said.push(text))
+    console.write(said.at(-1) ?? '')
+    code = out.failed.length ? 1 : 0
+  }
+  console.write(ct('click.close'))
+  await console.enter()
+
+  return code
+}
+
+DOUBLE_CLICK.run = async () => {
+  const lines = createInterface({ input: process.stdin })
+  const waiting: ((isPressed: boolean) => void)[] = []
+  let isClosed = false
+  lines.on('line', () => waiting.shift()?.(true))
+  lines.on('close', () => {
+    isClosed = true
+    for (const done of waiting.splice(0)) done(false)
+  })
+  const console: ClickConsole = {
+    write: say,
+    enter: () => (isClosed ? Promise.resolve(false) : new Promise(done => waiting.push(done))),
+  }
+  try {
+    return await doubleClick(process.cwd(), installEnv(), console)
+  } finally {
+    lines.close()
+  }
 }
 
 COMMANDS.uninstall = async args => {

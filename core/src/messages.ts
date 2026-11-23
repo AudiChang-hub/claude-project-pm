@@ -53,6 +53,11 @@ const zhTW = {
   --version                   版本`,
   'cli.unknown': '不認得的指令：{command}',
   'cli.skipNeedsReason': '請寫理由，例如：git pm skip "只改說明文字"',
+  // A double-click on the program (T-52): its console window waits for Enter before it closes.
+  'click.ask': '\n按 Enter 開始設定，關掉視窗取消',
+  'click.close': '\n按 Enter 關閉',
+  'click.setUp': 'Project PM 已經設定好，正在打開看板…',
+  'click.notGit': '要設定 Project PM，請把這個程式放進專案的資料夾（git repo）裡再按兩下；或在 Claude Code 桌面版的看板按「設定」。',
   'push.blocked': `✋ 這次 push 先擋下來了（Project PM）
 
 還沒驗收的改動：
@@ -241,6 +246,10 @@ const en: Record<CoreKey, string> = {
   --version                   The version`,
   'cli.unknown': 'Unknown command: {command}',
   'cli.skipNeedsReason': 'Give a reason, for example: git pm skip "docs only"',
+  'click.ask': '\nPress Enter to set up, or close this window to cancel',
+  'click.close': '\nPress Enter to close',
+  'click.setUp': 'Project PM is already set up. Opening the board…',
+  'click.notGit': 'To set up Project PM, put this program in your project\'s folder (its git repo) and double-click it there, or press Set up on the board in the Claude Code desktop app.',
   'push.blocked': `✋ This push is on hold (Project PM)
 
 Changes nobody has checked yet:

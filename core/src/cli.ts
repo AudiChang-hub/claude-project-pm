@@ -9,6 +9,9 @@ import { VERSION } from './version'
 
 export type Command = (args: string[]) => Promise<number>
 
+/** What a double-click on the program runs (commands.ts sets it, T-52). */
+export const DOUBLE_CLICK: { run?: () => Promise<number> } = {}
+
 /** Commands added by later parts of the core (serve, init, the git checks) register here. */
 export const COMMANDS: Record<string, Command> = {
   mcp: async () => {
@@ -36,7 +39,8 @@ export async function boardCommand(ctx: Ctx, args: string[]): Promise<{ text: st
   return { text: isJson ? JSON.stringify(out.structured, null, 2) : out.text, isError: out.isError === true }
 }
 
-export async function main(argv: string[]): Promise<number> {
+/** `isTerminal`: stdin is a terminal, as in the console window a double-click on the program opens (T-52). */
+export async function main(argv: string[], isTerminal = process.stdin.isTTY === true): Promise<number> {
   initLang()
   const [command, ...args] = argv
   if (command === '--version' || command === '-v' || command === 'version') {
@@ -44,6 +48,7 @@ export async function main(argv: string[]): Promise<number> {
 
     return 0
   }
+  if (!command && isTerminal && DOUBLE_CLICK.run) return DOUBLE_CLICK.run()
   if (!command || command === 'help' || command === '--help' || command === '-h') {
     process.stdout.write(`${ct('cli.usage')}\n`)
 
