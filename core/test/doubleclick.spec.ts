@@ -6,19 +6,26 @@
  */
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
 import { main } from '../src/cli'
 import type { ClickConsole } from '../src/commands'
 import { doubleClick } from '../src/commands'
 import type { InstallEnv } from '../src/install'
-import { readLog } from '../src/install'
+import { binPath, readLog } from '../src/install'
+import type { Lang } from '../../hooks/messages'
 import { ct } from '../src/messages'
 import { resolveProject } from '../src/project'
 import type { World } from './helpers'
 import { LANGS, fakeClaude, hostWith, serverCommand, world } from './helpers'
+
+/** In each language, a word from the board's Set up and one from the project folder's way, in click.notGit. */
+const NOT_GIT_WAYS: Record<Lang, { board: string; folder: string }> = {
+  'zh-TW': { board: '「設定」', folder: '資料夾' },
+  en: { board: 'Set up', folder: 'folder' },
+}
 
 /** The console window: what was written, and Enter pressed (true) or the window closed (false), in turn. */
 function consoleWith(...presses: boolean[]): ClickConsole & { said: string[]; asked: number } {
@@ -133,6 +140,52 @@ for (const lang of LANGS) {
       const board = opened()
       assert.equal(await doubleClick(folder, ie, consoleWith(true), board.open), 0)
       assert.deepEqual(board.calls, [1])
+    })
+
+    test('outside a git project: names Set up on the desktop board first, the project folder only after it', () => {
+      const text = ct('click.notGit')
+      const ways = NOT_GIT_WAYS[lang]
+      assert.ok(text.includes(ways.board), text)
+      assert.ok(text.includes(ways.folder), text)
+      assert.ok(text.indexOf(ways.board) < text.indexOf(ways.folder), text)
+    })
+
+    test('set up from a downloaded program: says it is copied to ~/.project-pm/bin, so the download can be deleted', async () => {
+      const exe = join(w.repo, 'project-pm.exe')
+      writeFileSync(exe, 'the program')
+      const c = consoleWith(true, true)
+      assert.equal(await doubleClick(w.repo, { ...ie, self: [exe], exe }, c, opened().open), 0)
+      const copied = ct('click.copied', { folder: dirname(binPath(w.env)) })
+      assert.equal(existsSync(binPath(w.env)), true)
+      // After how it went, before the window waits to close.
+      assert.equal(c.said.at(-2), copied)
+      assert.equal(c.said.at(-3)!.trim().split('\n')[0], ct('init.done', { n: (await readLog(w.env)).entries.length }).trim().split('\n')[0])
+      assert.equal(c.said.at(-1), ct('click.close'))
+    })
+
+    test('the line about deleting the download is not shown when nothing was copied, or setup did not work', async () => {
+      const copiedLine = (said: string[]) => said.filter(line => line === ct('click.copied', { folder: dirname(binPath(w.env)) }))
+      // npm or the source: no program file to copy.
+      const npm = consoleWith(true, true)
+      assert.equal(await doubleClick(w.repo, ie, npm, opened().open), 0)
+      assert.deepEqual(copiedLine(npm.said), [])
+      w.done()
+      w = world(lang)
+      // The program in ~/.project-pm/bin itself: that one must stay.
+      const bin = binPath(w.env)
+      mkdirSync(dirname(bin), { recursive: true })
+      writeFileSync(bin, 'the program')
+      const kept = consoleWith(true, true)
+      assert.equal(await doubleClick(w.repo, { ...ie, env: w.env, home: w.home, run: fakeClaude(w.home, hostWith()), self: [bin], exe: bin }, kept, opened().open), 0)
+      assert.deepEqual(copiedLine(kept.said), [])
+      assert.equal(existsSync(bin), true)
+      w.done()
+      w = world(lang)
+      // The copy failed (the program is gone): setup did not work, so the download is still needed.
+      const gone = join(w.repo, 'project-pm.exe')
+      const failed = consoleWith(true, true)
+      assert.equal(await doubleClick(w.repo, { ...ie, env: w.env, home: w.home, run: fakeClaude(w.home, hostWith()), self: [gone], exe: gone }, failed, opened().open), 1)
+      assert.deepEqual(copiedLine(failed.said), [])
     })
   })
 }

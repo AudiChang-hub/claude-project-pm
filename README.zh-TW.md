@@ -44,7 +44,7 @@ v1.1（兩邊同一份交辦清單、更好懂的看板、從面板打開網頁�
 
 保持更新：`claude` → `/plugin` → **Marketplaces** → `claude-project-pm` → **Enable auto-update**。
 
-**Claude Code CLI**（沒有桌面版時）：從 [Releases](https://github.com/AudiChang-hub/claude-project-pm/releases) 下載你電腦用的檔，在專案資料夾裡加上 `init` 執行。沒加 `--yes` 之前不會改任何東西。也可以把檔案放進專案資料夾後按兩下：它會列出會改哪些地方，按 Enter 才設定；設定好之後再按兩下會打開看板。npm 版（`npx`）之後的版本才提供。
+**Claude Code CLI**（沒有桌面版時）：從 [Releases](https://github.com/AudiChang-hub/claude-project-pm/releases) 下載你電腦用的檔，在專案資料夾裡加上 `init` 執行。沒加 `--yes` 之前不會改任何東西。也可以把檔案放進專案資料夾後按兩下：它會列出會改哪些地方，按 Enter 才設定；設定好之後再按兩下會打開看板。設定時程式會複製到 `~/.project-pm/bin`，之後就可以把專案資料夾裡的這個檔案刪掉。npm 版（`npx`）之後的版本才提供。
 
 逐步說明，以及 Windows 或 macOS 跳出警告時怎麼辦（放行步驟還沒實際驗證）：[core/README.zh-TW.md](core/README.zh-TW.md)。
 

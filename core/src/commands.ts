@@ -1,6 +1,7 @@
 /** The commands beyond the MCP server, the board and the hooks: serve and open (the web board), init and uninstall, and the git checks. */
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
+import { dirname, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 
 import { COMMANDS, DOUBLE_CLICK } from './cli'
@@ -117,6 +118,13 @@ COMMANDS.init = async args => {
   return out.failed.length ? 1 : 0
 }
 
+/** Whether two paths name the same file (Windows: in any case). */
+function isSameFile(a: string, b: string): boolean {
+  const norm = (path: string) => (process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path))
+
+  return norm(a) === norm(b)
+}
+
 /** The console window a double-click opens: a line written, and Enter pressed (true) or stdin ended (false). */
 export type ClickConsole = { write: (text: string) => void; enter: () => Promise<boolean> }
 
@@ -124,7 +132,8 @@ export type ClickConsole = { write: (text: string) => void; enter: () => Promise
  * A double-click on the program (T-52): Windows closes its console window as soon as the program ends, so it waits.
  * Not set up: what init would change (init's own list), then Enter to set up (init --yes) or the window closed to
  * cancel. Set up already (this project, or outside a project any): the board (open). Outside a git project with
- * nothing set up: init's own words for that, and how to go on. Each ends waiting for Enter, so the words stay.
+ * nothing set up: init's own words for that, and how to go on. Set up from a downloaded program: it is copied to
+ * ~/.project-pm/bin, so the download can be deleted. Each ends waiting for Enter, so the words stay.
  */
 export async function doubleClick(cwd: string, ie: InstallEnv, console: ClickConsole, open: () => Promise<number> = () => COMMANDS.open!([])): Promise<number> {
   const ref = await resolveProject(cwd)
@@ -148,6 +157,9 @@ export async function doubleClick(cwd: string, ie: InstallEnv, console: ClickCon
     const out = await init(ref, ie, { yes: true, ci: false }, text => said.push(text))
     console.write(said.at(-1) ?? '')
     code = out.failed.length ? 1 : 0
+    // The copy in ~/.project-pm/bin is the one that runs from now on: the downloaded file can go, and is not committed.
+    const copy = out.applied.find(done => done.kind === 'copy')
+    if (!code && copy && ie.exe && !isSameFile(copy.file, ie.exe)) console.write(ct('click.copied', { folder: dirname(copy.file) }))
   }
   console.write(ct('click.close'))
   await console.enter()

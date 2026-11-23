@@ -44,7 +44,7 @@ Then open a new session in your project and make it the PM (the button above the
 
 To keep it updated: `claude` → `/plugin` → **Marketplaces** → `claude-project-pm` → **Enable auto-update**.
 
-**Claude Code CLI** (no desktop app): download the file for your computer from [Releases](https://github.com/AudiChang-hub/claude-project-pm/releases) and run it with `init` in your project's folder. It changes nothing until you add `--yes`. Or put the file in your project's folder and double-click it: it lists what will change, sets up when you press Enter, and opens the board once set up. An npm version (`npx`) comes in a later release.
+**Claude Code CLI** (no desktop app): download the file for your computer from [Releases](https://github.com/AudiChang-hub/claude-project-pm/releases) and run it with `init` in your project's folder. It changes nothing until you add `--yes`. Or put the file in your project's folder and double-click it: it lists what will change, sets up when you press Enter, and opens the board once set up. Setup copies the program to `~/.project-pm/bin`, so you can then delete the file from your project's folder. An npm version (`npx`) comes in a later release.
 
 Step by step, and what to do when Windows or macOS warns you (those steps are not yet checked on a real download): [core/README.md](core/README.md).
 
