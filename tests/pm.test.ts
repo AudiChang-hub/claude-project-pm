@@ -4315,6 +4315,13 @@ for (const lang of ['zh-TW', 'en'] as const) {
     await ui.unmount()
   })
 
+  test(`T-51 (${lang}): curl takes each address as it is, never expanding [] or {} in it`, options, async ($, on) => {
+    const { ui, world: w } = await setupPane($, on, 'fine')
+    expect(curlRuns(w).length).toBe(2)
+    for (const argv of curlRuns(w)) expect(argv).toContain('--globoff')
+    await ui.unmount()
+  })
+
   test(`T-51 (${lang}): two checks at once start one download, not two to the same file`, options, async ($, on) => {
     const { ui, clock, world: w } = await setupPane($, on, 'elsewhere')
     expect(curlRuns(w).length).toBe(1)

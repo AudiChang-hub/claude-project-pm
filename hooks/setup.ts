@@ -130,14 +130,14 @@ async function machineOf($: EngineInterface, platform: string | undefined): Prom
 
 /**
  * Downloads `url` to `file` with curl, one hop at a time: each address must be https on GitHub's hosts, and only a
- * 200 answer is kept, of at most `maxBytes` (curl stops past it, and what arrived is measured again). Null when it
- * arrived; else what went wrong.
+ * 200 answer is kept, of at most `maxBytes` (curl stops past it, and what arrived is measured again). `--globoff`: an
+ * address's [] and {} are taken as they are, never as a set of addresses. Null when it arrived; else what went wrong.
  */
 export async function download($: EngineInterface, curl: string, url: string, file: string, maxBytes: number): Promise<SetupError | null> {
   let at = url
   for (let hop = 0; hop <= MAX_HOPS; hop++) {
     if (!isGithubUrl(at)) return 'download'
-    const argv = [curl, '--proto', '=https', '--tlsv1.2', '--silent', '--show-error', '--max-redirs', '0', '--connect-timeout', '20', '--max-time', String(DOWNLOAD_MS / 1000), '--max-filesize', String(maxBytes), '--create-dirs', '--output', file, '--write-out', '%{http_code} %{redirect_url}', at]
+    const argv = [curl, '--proto', '=https', '--tlsv1.2', '--silent', '--show-error', '--max-redirs', '0', '--connect-timeout', '20', '--max-time', String(DOWNLOAD_MS / 1000), '--max-filesize', String(maxBytes), '--create-dirs', '--output', file, '--write-out', '%{http_code} %{redirect_url}', '--globoff', at]
     const ran = await $.process.run(argv, { timeoutMs: DOWNLOAD_MS + 30_000 }).catch(() => null)
     if (!ran) return 'download'
     if (ran.exitCode !== 0) return curlFailure(ran.exitCode)
