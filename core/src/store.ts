@@ -27,7 +27,7 @@ export class StoreError extends Error {}
 
 export function paths(env: NodeJS.ProcessEnv = process.env) {
   const home = dataHome(env)
-  const legacy = legacyHome()
+  const legacy = legacyHome(env)
 
   return {
     home,

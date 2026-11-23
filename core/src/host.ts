@@ -6,7 +6,7 @@
 import { execFile } from 'node:child_process'
 import { lstatSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, win32 } from 'node:path'
+import { dirname, join, resolve, win32 } from 'node:path'
 
 import { plainLocalPath } from './localpath'
 
@@ -221,9 +221,13 @@ export function dataHome(env: NodeJS.ProcessEnv = process.env): string {
   return env.PROJECT_PM_HOME?.trim() || join(homedir(), '.project-pm')
 }
 
-/** Where the desktop mod (v0.9) keeps its data: ~/.claude/project-pm. The core reads it, and writes projects back (E1). */
-export function legacyHome(): string {
-  return join(homedir(), '.claude', 'project-pm')
+/**
+ * Where the desktop mod (v0.9) keeps its data: ~/.claude/project-pm. The core reads it, and writes projects back (E1).
+ * It is found beside the core's own folder, in the same home: ~/.project-pm by default gives ~/.claude/project-pm, and
+ * a PROJECT_PM_HOME of a demo or a test gives a folder beside that one, never the person's real one (T-53).
+ */
+export function legacyHome(env: NodeJS.ProcessEnv = process.env): string {
+  return join(dirname(resolve(dataHome(env))), '.claude', 'project-pm')
 }
 
 /** A file name for an actor id: `claude-code:1a2b` is not a legal file name on Windows. */
