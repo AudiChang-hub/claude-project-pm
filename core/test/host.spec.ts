@@ -198,11 +198,11 @@ describe('the Claude Code the desktop app bundles (T-50)', () => {
   afterEach(() => rmSync(root, { recursive: true, force: true }))
 
   test('off Windows there is none to find', () => {
-    assert.equal(desktopClaude({ LOCALAPPDATA: 'C:\Users\dev\AppData\Local' }, 'linux'), null)
+    assert.equal(desktopClaude({ LOCALAPPDATA: 'C:\\Users\\dev\\AppData\\Local' }, 'linux'), null)
   })
 
   test('a LOCALAPPDATA that is not a plain path on this machine\'s disks is never looked in', () => {
-    for (const bad of ['\\acme-files\share\AppData', '//acme-files/share', 'AppData\Local', 'C:AppData', '']) {
+    for (const bad of ['\\\\acme-files\\share\\AppData', '//acme-files/share', 'AppData\\Local', 'C:AppData', '']) {
       assert.equal(desktopClaude({ LOCALAPPDATA: bad }, 'win32'), null, bad)
     }
   })
