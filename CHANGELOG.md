@@ -21,6 +21,7 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 ### Fixed
 - `init` trusted the version Claude Code's `installed_plugins.json` keeps for `project-pm@local-mods`, the version the local copy had when first installed (0.7.0 on a real machine) while the copy loaded was 1.1.0, so it left out the MCP server and the hooks (T-50). That entry is now the local copy, counted by its own `plugin.json`.
 - A desktop user has no `claude` on PATH, so `init` said Claude Code was missing and added no MCP server (T-50). It now finds the Claude Code the desktop app ships with, only in the app's own folder (`%LOCALAPPDATA%\Claude-Data\<profile>\claude-code\<version>\<build>\claude.exe`, no link followed; `CLAUDE_CODE_EXECPATH` first when it is one of those), and runs it by its full path; `uninstall` uses the same one.
+- The core now finds the desktop mod's data folder from the home in the env it is given (`USERPROFILE`, else `HOME`), the same way the mod does (T-53). A demo or a test that gives the core a temporary home no longer writes into the person's real `~/.claude/project-pm`. `PROJECT_PM_HOME` and `CLAUDE_CONFIG_DIR` don't move it.
 
 ## [1.1.0] - 2026-11-21
 
