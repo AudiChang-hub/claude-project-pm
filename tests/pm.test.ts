@@ -4314,6 +4314,17 @@ for (const lang of ['zh-TW', 'en'] as const) {
     expect(await ui.find({ key: 'setup:retry' })).toBeDefined()
     await ui.unmount()
   })
+
+  test(`T-51 (${lang}): two checks at once start one download, not two to the same file`, options, async ($, on) => {
+    const { ui, clock, world: w } = await setupPane($, on, 'elsewhere')
+    expect(curlRuns(w).length).toBe(1)
+    // Two at once, before either has said it is getting the program: only one goes on to curl.
+    await Promise.all([ui.press({ key: 'setup:retry' }), ui.press({ key: 'setup:retry' })])
+    for (let i = 0; i < 20 && !(await ui.find({ key: 'setup:retry' })); i++) await clock.advance(100)
+    expect(curlRuns(w).length).toBe(2)
+    expect(w.fetched.filter(url => url === SUMS_URL).length).toBe(2)
+    await ui.unmount()
+  })
 }
 
 test('T-51: a project set up before shows Remove setup, and gets no program', ZH, async ($, on) => {

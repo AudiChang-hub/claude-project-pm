@@ -321,20 +321,32 @@ async function runCore($: EngineInterface, program: string, args: string[], proj
 const busyPhases = new Set<Setup['phase']>(['fetching', 'applying', 'removing'])
 
 /**
+ * A check under way. Set before the first await: the phase in the state says 'fetching' only some awaits later, so two
+ * refreshes (or two presses of 重試) at once would both pass and run two downloads into the same file.
+ */
+let isChecking = false
+
+/**
  * Where setup stands for this project: set up (init's log names it), or not, and then the program is got and init's
  * list read, so the pane can show what 設定 would change. Asked again for another project, or with `isRetry`.
  */
 export async function checkSetup($: EngineInterface, projectPath: string, projectKey: string, isRetry = false): Promise<void> {
-  const now = await read($, setup)
-  if (busyPhases.has(now.phase)) return
-  if (!isRetry && now.project === projectKey && now.phase !== 'unknown') return
-  const log = await $.fs.read(`${await coreHome($)}/install-log.json`).then(text => JSON.parse(text) as unknown, () => null)
-  if (isProjectSetUp(log, projectKey)) {
-    await update($, setup, (): Setup => ({ phase: 'set', project: projectKey, changes: [], notes: [], error: null, failed: [] }))
+  if (isChecking) return
+  isChecking = true
+  try {
+    const now = await read($, setup)
+    if (busyPhases.has(now.phase)) return
+    if (!isRetry && now.project === projectKey && now.phase !== 'unknown') return
+    const log = await $.fs.read(`${await coreHome($)}/install-log.json`).then(text => JSON.parse(text) as unknown, () => null)
+    if (isProjectSetUp(log, projectKey)) {
+      await update($, setup, (): Setup => ({ phase: 'set', project: projectKey, changes: [], notes: [], error: null, failed: [] }))
 
-    return
+      return
+    }
+    await preview($, projectPath, projectKey)
+  } finally {
+    isChecking = false
   }
-  await preview($, projectPath, projectKey)
 }
 
 async function fail($: EngineInterface, projectKey: string, error: SetupError, failed: string[] = []) {
