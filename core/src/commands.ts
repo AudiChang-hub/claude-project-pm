@@ -136,33 +136,51 @@ export type ClickConsole = { write: (text: string) => void; enter: () => Promise
  * ~/.project-pm/bin, so the download can be deleted. Each ends waiting for Enter, so the words stay.
  */
 export async function doubleClick(cwd: string, ie: InstallEnv, console: ClickConsole, open: () => Promise<number> = () => COMMANDS.open!([])): Promise<number> {
-  const ref = await resolveProject(cwd)
-  const { entries } = await readLog(ie.env)
-  let code: number
-  if (ref ? entries.some(e => e.project === ref.key) : entries.length > 0) {
-    console.write(ct('click.setUp'))
-    code = await open()
-  } else if (!ref) {
-    console.write(ct('error.notGit', { path: cwd }))
-    console.write(ct('click.notGit'))
+  let code: number | null
+  try {
+    code = await clickRun(cwd, ie, console, open)
+  } catch (err) {
+    // init can throw (a committed link off this computer's disks, a log it cannot write): plain words, never a stack
+    // trace in a window that closes at once.
+    console.write(ct('click.failed', { reason: err instanceof Error ? err.message : String(err) }))
     code = 1
-  } else {
-    // init's list as a dry run prints it, but its last line (run init --yes): Enter stands for that here.
-    const dryRun = ct('init.dryRun')
-    await init(ref, ie, { yes: false, ci: false }, text => text !== dryRun && console.write(text))
-    console.write(ct('click.ask'))
-    if (!(await console.enter())) return 1
-    // The list is on screen already: of the run, only its last words (done, or what did not work).
-    const said: string[] = []
-    const out = await init(ref, ie, { yes: true, ci: false }, text => said.push(text))
-    console.write(said.at(-1) ?? '')
-    code = out.failed.length ? 1 : 0
-    // The copy in ~/.project-pm/bin is the one that runs from now on: the downloaded file can go, and is not committed.
-    const copy = out.applied.find(done => done.kind === 'copy')
-    if (!code && copy && ie.exe && !isSameFile(copy.file, ie.exe)) console.write(ct('click.copied', { folder: dirname(copy.file) }))
   }
+  // null: the window was closed instead of Enter, so nobody is there to read more.
+  if (code === null) return 1
   console.write(ct('click.close'))
   await console.enter()
+
+  return code
+}
+
+/** What a double-click does, up to the wait before the window closes: its exit code, or null when the window was closed. */
+async function clickRun(cwd: string, ie: InstallEnv, console: ClickConsole, open: () => Promise<number>): Promise<number | null> {
+  const ref = await resolveProject(cwd)
+  const { entries } = await readLog(ie.env)
+  if (ref ? entries.some(e => e.project === ref.key) : entries.length > 0) {
+    console.write(ct('click.setUp'))
+
+    return await open()
+  }
+  if (!ref) {
+    console.write(ct('error.notGit', { path: cwd }))
+    console.write(ct('click.notGit'))
+
+    return 1
+  }
+  // init's list as a dry run prints it, but its last line (run init --yes): Enter stands for that here.
+  const dryRun = ct('init.dryRun')
+  await init(ref, ie, { yes: false, ci: false }, text => text !== dryRun && console.write(text))
+  console.write(ct('click.ask'))
+  if (!(await console.enter())) return null
+  // The list is on screen already: of the run, only its last words (done, or what did not work).
+  const said: string[] = []
+  const out = await init(ref, ie, { yes: true, ci: false }, text => said.push(text))
+  console.write(said.at(-1) ?? '')
+  const code = out.failed.length ? 1 : 0
+  // The copy in ~/.project-pm/bin is the one that runs from now on: the downloaded file can go, and is not committed.
+  const copy = out.applied.find(done => done.kind === 'copy')
+  if (!code && copy && ie.exe && !isSameFile(copy.file, ie.exe)) console.write(ct('click.copied', { folder: dirname(copy.file) }))
 
   return code
 }

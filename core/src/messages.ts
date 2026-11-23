@@ -60,6 +60,7 @@ const zhTW = {
   'click.notGit': '要設定 Project PM，請在 Claude Code 桌面版的看板按「設定」。沒有桌面版的話，可以把這個程式放進專案的資料夾（git repo）裡再按兩下。',
   // Set up from a downloaded program: the copy in ~/.project-pm/bin is the one that runs, so no one commits the download.
   'click.copied': '程式已經複製到 {folder}，這個下載的檔案可以刪掉了（別把它提交進專案）。',
+  'click.failed': '出了問題，沒能做完：{reason}',
   'push.blocked': `✋ 這次 push 先擋下來了（Project PM）
 
 還沒驗收的改動：
@@ -253,6 +254,7 @@ const en: Record<CoreKey, string> = {
   'click.setUp': 'Project PM is already set up. Opening the board…',
   'click.notGit': 'To set up Project PM, press Set up on the board in the Claude Code desktop app. Without the desktop app, put this program in your project\'s folder (its git repo) and double-click it there.',
   'click.copied': 'The program is now copied to {folder}, so you can delete this downloaded file (don\'t commit it to your project).',
+  'click.failed': 'Something went wrong, so this did not finish: {reason}',
   'push.blocked': `✋ This push is on hold (Project PM)
 
 Changes nobody has checked yet:

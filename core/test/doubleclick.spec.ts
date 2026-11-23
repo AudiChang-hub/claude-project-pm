@@ -187,5 +187,37 @@ for (const lang of LANGS) {
       assert.equal(await doubleClick(w.repo, { ...ie, env: w.env, home: w.home, run: fakeClaude(w.home, hostWith()), self: [gone], exe: gone }, failed, opened().open), 1)
       assert.deepEqual(copiedLine(failed.said), [])
     })
+
+    // init can throw (a committed link that leads off this computer's disks, a log that cannot be written): the window
+    // must still say so in plain words and wait for Enter, never close on a stack trace.
+    const failing = (when: (argv: string[]) => boolean): InstallEnv => {
+      const rest = fakeClaude(w.home, hostWith())
+
+      return {
+        ...ie,
+        run: async (argv, cwd, timeoutMs) => {
+          if (when(argv)) throw new Error('the disk said no')
+
+          return rest(argv, cwd, timeoutMs)
+        },
+      }
+    }
+
+    test('init throws while it lists the changes: one plain line, then it waits for Enter to close', async () => {
+      const c = consoleWith(true)
+      assert.equal(await doubleClick(w.repo, failing(argv => argv[0] === 'claude'), c, opened().open), 1)
+      assert.deepEqual(c.said.slice(-2), [ct('click.failed', { reason: 'the disk said no' }), ct('click.close')])
+      assert.equal(c.asked, 1)
+      assert.ok(!c.said.includes(ct('click.ask')))
+    })
+
+    test('init throws while it sets up: one plain line, then it waits for Enter to close', async () => {
+      const c = consoleWith(true, true)
+      assert.equal(await doubleClick(w.repo, failing(argv => argv[0] === 'claude' && argv[1] === 'mcp' && argv[2] === 'list'), c, opened().open), 1)
+      assert.ok(c.said.includes(ct('click.ask')))
+      assert.deepEqual(c.said.slice(-2), [ct('click.failed', { reason: 'the disk said no' }), ct('click.close')])
+      // Enter to set up, then Enter to close: asked once after the failure.
+      assert.equal(c.asked, 2)
+    })
   })
 }
