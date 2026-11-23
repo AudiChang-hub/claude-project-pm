@@ -7,6 +7,11 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-23
+
+### Fixed
+- In dark mode the web board's project picker opened a white list with light text, so every project but the highlighted one was nearly invisible (T-56). The browser draws the open list itself, with each option's background or, where that is transparent, the select's translucent one flattened onto white. Each option now has the theme's own surface and text color, in dark, light and when following the system, the manual switch included; the browser still marks the highlighted option.
+
 ## [1.2.0] - 2026-11-21
 
 ### Added

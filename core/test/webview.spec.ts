@@ -4,7 +4,8 @@
  * PROJECT_PM_BROWSER names); without one the test is skipped and says so. Acme data in a temporary home only.
  */
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
@@ -14,7 +15,7 @@ import { resolveProject } from '../src/project'
 import { ledgerTool, pmTool, reportTool } from '../src/tools'
 import { browserPath, openBrowser } from './browser'
 import type { World } from './helpers'
-import { hostWith, world } from './helpers'
+import { git, hostWith, world } from './helpers'
 
 const HOSTILE = `<img src=x onerror="document.body.setAttribute('data-pwned','img')">`
 const BREAKOUT = `</script><script>document.body.setAttribute('data-pwned','script')</script>`
@@ -91,6 +92,57 @@ describe('the web board in a browser (T-43)', () => {
       await page.close()
       await server.close()
       empty.done()
+    }
+  })
+
+  test('the project picker and its open list read at WCAG AA in dark, light and system themes (T-56)', async t => {
+    const exe = browserPath()
+    if (!exe) return t.skip('no Edge or Chrome here: set PROJECT_PM_BROWSER to run it')
+    // A second project, so the picker is shown.
+    const admin = join(w.root, 'acme-admin')
+    mkdirSync(admin)
+    git(admin, 'init', '-q', '-b', 'main')
+    await pmTool(w.ctx('claude-code:pm2', { cwd: admin }), { action: 'claim' })
+    const ref = (await resolveProject(w.repo))!
+    const url = boardAddress(served.info, ref.key)
+    const ready = `!!document.getElementById('board') && !document.getElementById('board').hidden && document.getElementById('project').options.length === 2`
+    // The open list is the browser's own window, out of the page's reach: Chromium (Chrome, Edge) paints it with each option's
+    // background, or where that is transparent with the select's, flattened onto white. Colors are read back from a
+    // canvas, composited the same way, so any color syntax the browser computes is measured as painted.
+    const measure = (theme: string) => `(() => {
+      const button = document.getElementById('theme')
+      for (let i = 0; i < 3 && (document.documentElement.dataset.theme ?? 'auto') !== '${theme}'; i++) button.click()
+      const select = document.getElementById('project')
+      const pen = Object.assign(document.createElement('canvas'), { width: 1, height: 1 }).getContext('2d', { willReadFrequently: true })
+      const paint = (...layers) => { pen.clearRect(0, 0, 1, 1); for (const c of layers) { pen.fillStyle = c; pen.fillRect(0, 0, 1, 1) } return [...pen.getImageData(0, 0, 1, 1).data].slice(0, 3) }
+      const lum = rgb => { const [r, g, b] = rgb.map(v => (v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4); return 0.2126 * r + 0.7152 * g + 0.0722 * b }
+      const contrast = (a, b) => { const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05) }
+      const s = getComputedStyle(select)
+      const bar = getComputedStyle(select.closest('.top')).backgroundColor
+      return {
+        shown: !select.closest('.picker').hidden,
+        scheme: s.colorScheme,
+        closed: contrast(paint('white', bar, s.color), paint('white', bar, s.backgroundColor)),
+        list: Math.min(...[...select.options].map(o => { const c = getComputedStyle(o); return contrast(paint('white', c.color), paint('white', s.backgroundColor, c.backgroundColor)) })),
+      }
+    })()`
+    const page = await openBrowser(exe)
+    try {
+      for (const [system, theme, looks] of [
+        ['dark', 'auto', 'dark'],
+        ['light', 'auto', 'light'],
+        ['light', 'dark', 'dark'],
+        ['dark', 'light', 'light'],
+      ] as const) {
+        const seen = await page.evaluate<{ shown: boolean; scheme: string; closed: number; list: number }>(url, ready, measure(theme), { scheme: system })
+        const label = `system ${system}, theme ${theme}: ${JSON.stringify(seen)}`
+        assert.equal(seen.shown, true, label)
+        assert.equal(seen.scheme, looks, label)
+        assert.ok(seen.closed >= 4.5, label)
+        assert.ok(seen.list >= 4.5, label)
+      }
+    } finally {
+      await page.close()
     }
   })
 

@@ -210,6 +210,13 @@ ol {
 .picker select {
   max-width: 44vw;
 }
+/* The open list is the browser's own window: it paints each option's background or, where that is transparent, the
+   select's, flattened onto white. The translucent --btn so left dark mode's light text on a near-white list (T-56).
+   Each option gets the surface it sits on, opaque, in the page's theme; the browser still marks the highlighted one. */
+.picker option {
+  background-color: var(--surface);
+  color: var(--ink);
+}
 .picker select:hover,
 .theme:hover,
 .retry:hover {
