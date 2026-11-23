@@ -16,8 +16,6 @@ export const webOpening = atom({ plugin: 'project-pm', key: 'webOpening' } as co
 export const webHelp = atom({ plugin: 'project-pm', key: 'webHelp' } as const, false)
 const setup = atom({ plugin: 'project-pm', key: 'setup' } as const, { phase: 'unknown', project: '', changes: [], notes: [], error: null, failed: [] } as Setup)
 
-/** Where the core's program is downloaded from. */
-export const RELEASES_URL = 'https://github.com/AudiChang-hub/claude-project-pm/releases'
 /** How long the core's `open` may take: it starts the server and waits up to 5 s for it. */
 const OPEN_TIMEOUT_MS = 20_000
 
