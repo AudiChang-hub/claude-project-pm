@@ -256,6 +256,10 @@ export type Setup = {
   failed: string[]
   /** The person hid the card for this session. */
   isHidden?: boolean
+  /** While curl downloads the program: its version, and its size as the release lists it (null: not known). */
+  download?: { version: string; bytes: number | null }
+  /** Once ready: the checked program's version and size. */
+  checked?: { version: string; bytes: number | null }
 }
 
 declare module 'claude-code' {

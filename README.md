@@ -126,6 +126,7 @@ In a terminal, the PM reads the board and tells you what needs you:
 
 - The Claude Code desktop app (mod, tested with 2.1.317), or Claude Code's CLI (core, tested with 2.1.326).
 - One-click setup downloads with your system's own `curl` (in Windows 10 and 11, macOS and most Linux).
+- It uses the OS `curl` because a mod's API can't write binary files. It asks GitHub for `SHA256SUMS` through Claude Code first, so your organization's network rules still apply, and it runs the program only after its SHA256 matches.
 - Optional: the [GitHub CLI](https://cli.github.com/), signed in, so the PM can check CI.
 - Agents that change files need a git repository. In the desktop app they run inside the PM's process, so restarting Claude Code interrupts them; the board marks them *interrupted*.
 

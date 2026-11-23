@@ -35,7 +35,7 @@ const INIT_MS = 3 * 60_000
 /** How much of the program one read takes: `$.fs.read`'s most. */
 const CHUNK = 4 * 1024 * 1024
 /** The most a download may bring: the program (about 100 MB today), and SHA256SUMS (a few hundred bytes). */
-export const MAX_PROGRAM_BYTES = 300 * 1024 * 1024
+export const MAX_PROGRAM_BYTES = 200 * 1024 * 1024
 export const MAX_SUMS_BYTES = 64 * 1024
 
 /** Whether `url` is https on one of GitHub's own hosts: no user part, no other port, nothing a shell would read. */
@@ -154,16 +154,47 @@ export async function download($: EngineInterface, curl: string, url: string, fi
   return 'download'
 }
 
+/** What a refusal of `$.http.fetch` means: the host's network policy refused it, or the network is not there. */
+export function fetchFailure(error: unknown): SetupError {
+  return /polic|refus|denied|forbidden|not allowed|blocked/i.test(error instanceof Error ? error.message : String(error)) ? 'blocked' : 'offline'
+}
+
 /**
- * Whether the host's own network rules (the organization's web-fetch policy, which `$.http.fetch` is under and curl is
- * not) let the mod reach the release: the same address asked through `$.http.fetch`. A refusal there while curl gets
- * through is the policy's, and the download keeps to it (SetupError 'blocked').
+ * The release's SHA256SUMS, through the host's own `$.http.fetch`, before curl runs at all: the organization's web-fetch
+ * policy is over `$.http.fetch` and not over curl, so when the host refuses the release, or cannot reach it, the mod
+ * runs no curl (SetupError 'blocked' or 'offline'). A redirect is followed only to GitHub's hosts, one hop at a time.
  */
-async function isReachableByHost($: EngineInterface, url: string): Promise<boolean> {
-  return $.http.fetch(url).then(
-    () => true,
-    () => false,
-  )
+export async function sumsByHost($: EngineInterface, url: string): Promise<string | SetupError> {
+  let at = url
+  for (let hop = 0; hop <= MAX_HOPS; hop++) {
+    if (!isGithubUrl(at)) return 'download'
+    let got: Awaited<ReturnType<EngineInterface['http']['fetch']>>
+    try {
+      got = await $.http.fetch(at)
+    } catch (error) {
+      return fetchFailure(error)
+    }
+    if (got.ok) return got.text.length <= MAX_SUMS_BYTES ? got.text : 'download'
+    if (got.status === 403) return 'blocked'
+    const next = got.headers.location ?? ''
+    if (!/^30[12378]$/.test(String(got.status)) || !next) return 'download'
+    at = next
+  }
+
+  return 'download'
+}
+
+/** The size the release lists for `asset`, through `$.http.fetch` (GitHub's API), or null when it does not say. */
+async function releaseSizeOf($: EngineInterface, version: string, asset: string): Promise<number | null> {
+  try {
+    const got = await $.http.fetch(`https://api.github.com/repos/${REPO}/releases/tags/v${version}`, { headers: { accept: 'application/vnd.github+json' } })
+    const assets = got.ok ? (JSON.parse(got.text) as { assets?: unknown }).assets : null
+    const one = Array.isArray(assets) ? (assets as { name?: unknown; size?: unknown }[]).find(a => a?.name === asset) : null
+
+    return typeof one?.size === 'number' && one.size > 0 ? one.size : null
+  } catch {
+    return null
+  }
 }
 
 /** The SHA-256 of `file`, read in ranges (`$.fs.read` hands over 4 MiB at most). */
@@ -190,6 +221,21 @@ async function isStillChecked($: EngineInterface, file: string): Promise<boolean
   const now = await $.fs.stat(file).catch(() => null)
 
   return !!now && now.kind === 'file' && now.size === one.size && now.mtimeMs === one.mtimeMs
+}
+
+/**
+ * Whether `file` still has the SHA-256 it was checked with, read afresh (about 3 s for the program) right before it
+ * changes anything. When it does not, it is never run, is forgotten as checked, and (the mod's own download) is emptied.
+ */
+async function isStillTheSame($: EngineInterface, file: string, places: Places): Promise<boolean> {
+  const checked = ((await $.store.get(CHECKED_KEY).catch(() => undefined)) ?? {}) as Checked
+  const sha = checked[file]?.sha
+  if (sha && (await sha256Of($, file).catch(() => '')) === sha) return true
+  const { [file]: _, ...rest } = checked
+  await $.store.set(CHECKED_KEY, rest).catch(() => undefined)
+  if (file === places.downloaded) await $.fs.write(file, '').catch(() => undefined)
+
+  return false
 }
 
 async function markChecked($: EngineInterface, file: string, sha: string) {
@@ -226,17 +272,14 @@ async function placesOf($: EngineInterface): Promise<Places | SetupError> {
  * The program to run, checked: the installed one when it is there, else the downloaded one, downloaded now when it is
  * not there yet. Each is run only once its SHA-256 matches the release's SHA256SUMS.
  */
-async function programOf($: EngineInterface, places: Places): Promise<string | SetupError> {
+async function programOf($: EngineInterface, places: Places, onDownload: (bytes: number | null) => Promise<void> = async () => undefined): Promise<string | SetupError> {
   for (const file of [places.installed, places.downloaded]) if (await isStillChecked($, file)) return file
   if (!places.curl) return 'download'
   const base = `https://github.com/${REPO}/releases/download/v${places.version}`
-  const sumsFile = `${places.downloaded.replace(/[^/]+$/, '')}SHA256SUMS`
-  const isAllowed = await isReachableByHost($, `${base}/SHA256SUMS`)
-  const failed = await download($, places.curl, `${base}/SHA256SUMS`, sumsFile, MAX_SUMS_BYTES)
-  if (failed) return failed
-  // The network works (curl got through) but the host refused the address: its policy, which the download keeps to.
-  if (!isAllowed) return 'blocked'
-  const expected = sumFor(await $.fs.read(sumsFile).catch(() => ''), places.asset)
+  // The host is asked first: when it refuses the release or cannot reach it, no curl runs.
+  const sums = await sumsByHost($, `${base}/SHA256SUMS`)
+  if (sums === 'offline' || sums === 'blocked' || sums === 'download') return sums
+  const expected = sumFor(sums, places.asset)
   if (!expected) return 'download'
   // The installed program (init copied it from a download of its own) is taken when it matches; else ours.
   if ((await $.fs.exists(places.installed)) && (await sha256Of($, places.installed).catch(() => '')) === expected) {
@@ -244,6 +287,10 @@ async function programOf($: EngineInterface, places: Places): Promise<string | S
 
     return places.installed
   }
+  // Said at once ("about 100 MB"), then with the size the release lists, once GitHub has said it.
+  await onDownload(null)
+  const size = await releaseSizeOf($, places.version, places.asset)
+  if (size) await onDownload(size)
   const got = await download($, places.curl, `${base}/${places.asset}`, places.downloaded, MAX_PROGRAM_BYTES)
   if (got) {
     // Whatever part of it came is never run (it is not checked), and is emptied.
@@ -299,13 +346,19 @@ async function preview($: EngineInterface, projectPath: string, projectKey: stri
   await update($, setup, (): Setup => ({ phase: 'fetching', project: projectKey, changes: [], notes: [], error: null, failed: [] }))
   const places = await placesOf($)
   if (typeof places === 'string') return fail($, projectKey, places)
-  const program = await programOf($, places)
+  // While curl downloads, the card says so: from where, about how big, and with what.
+  const onDownload = async (bytes: number | null) => {
+    await update($, setup, (s): Setup => ({ ...s, download: { version: places.version, bytes } }))
+  }
+  const program = await programOf($, places, onDownload)
   if (program !== places.installed && program !== places.downloaded) return fail($, projectKey, program as SetupError)
   const ran = await runCore($, program, ['init', '--json'], projectPath)
   const out = ran ? jsonOf(ran.stdout) : null
   if (!out) return fail($, projectKey, 'init')
   if (out.error === 'notGit') return fail($, projectKey, 'notGit')
-  await update($, setup, (): Setup => ({ phase: 'ready', project: projectKey, changes: texts(out.changes), notes: texts(out.notes), error: null, failed: [] }))
+  const bytes = (await $.fs.stat(program).catch(() => null))?.size ?? null
+  const checked = { version: places.version, bytes }
+  await update($, setup, (): Setup => ({ phase: 'ready', project: projectKey, changes: texts(out.changes), notes: texts(out.notes), error: null, failed: [], checked }))
 }
 
 /** 設定: runs `init --yes`. The core's MCP server joins sessions started after it; this one keeps the mod's own tools. */
@@ -317,6 +370,8 @@ export async function applySetup($: EngineInterface, projectPath: string, projec
   if (typeof places === 'string') return fail($, projectKey, places)
   const program = await programOf($, places)
   if (program !== places.installed && program !== places.downloaded) return fail($, projectKey, program as SetupError)
+  // Checked once more right before it changes anything: a file changed since its check is never run.
+  if (!(await isStillTheSame($, program, places))) return fail($, projectKey, 'checksum')
   markSetUpHere()
   const ran = await runCore($, program, ['init', '--yes', '--json'], projectPath)
   const out = ran ? jsonOf(ran.stdout) : null

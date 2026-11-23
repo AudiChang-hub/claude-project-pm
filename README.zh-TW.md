@@ -126,6 +126,7 @@ v1.1（兩邊同一份交辦清單、更好懂的看板、從面板打開網頁�
 
 - Claude Code 桌面版（Mod，已在 2.1.317 測試），或 Claude Code 的 CLI（核心，已在 2.1.326 測試）。
 - 一鍵設定用系統內建的 `curl` 下載（Windows 10 和 11、macOS、大部分的 Linux 都有）。
+- 用系統的 `curl` 是因為 Mod 的 API 不能寫二進位檔。它會先透過 Claude Code 向 GitHub 取 `SHA256SUMS`，所以公司的網路規定一樣有效；SHA256 核對相符後才會執行程式。
 - 選用：已登入的 [GitHub CLI](https://cli.github.com/)，讓 PM 能查 CI。
 - 會改檔案的 Agent 需要 git repo。在桌面版，Agent 跑在 PM 的程序裡，重開 Claude Code 會中斷它們，看板會標成「已中斷」。
 

@@ -13,7 +13,7 @@ import type { Project, Status } from './sessions'
 import { archive, claim, dismissBand, getMine, refresh, startPmSession } from './actions'
 import { t } from './messages'
 import { openWebBoard } from './webboard'
-import { NO_SETUP, applySetup, checkSetup, removeSetup } from './setup'
+import { NO_SETUP, REPO, applySetup, checkSetup, removeSetup } from './setup'
 import { compactedLine, contextLine } from './context'
 import { needsButton, setAutoCompact, undoAutoCompact } from './quota'
 
@@ -665,6 +665,8 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   }
 
   // ── One-click setup (T-51) ──
+  /** A size in MB, as the card says it: about 100 when the release does not say. */
+  const megabytes = (bytes: number | null) => (bytes ? Math.max(1, Math.round(bytes / (1024 * 1024))) : 100)
 
   /**
    * The card that sets this project up: one sentence, init's own list of changes, and 設定; a plain message and 再試一次
@@ -727,11 +729,16 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
           </Text>
         ) : phase === 'fetching' ? (
           <Text size="footnote" dimColor wrap="wrap">
-            {t('setup.fetching')}
+            {setupNow.download ? t('setup.downloading', { version: setupNow.download.version, mb: megabytes(setupNow.download.bytes) }) : t('setup.fetching')}
           </Text>
         ) : (
           <Text size="footnote" wrap="wrap">
             {t('setup.intro')}
+          </Text>
+        )}
+        {(phase === 'ready' || phase === 'applying') && setupNow.checked && (
+          <Text key="setup-checked" size="caption" dimColor wrap="wrap">
+            {t('setup.checked', { version: setupNow.checked.version, mb: megabytes(setupNow.checked.bytes) })}
           </Text>
         )}
         {(phase === 'ready' || phase === 'applying') &&
@@ -743,6 +750,11 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
         {(phase === 'ready' || phase === 'applying') && setupNow.notes.length > 0 && (
           <Text key="setup-notes" size="caption" dimColor wrap="wrap">
             {[t('setup.notes'), ...setupNow.notes].join('\n')}
+          </Text>
+        )}
+        {isFailed && (setupNow.error === 'offline' || setupNow.error === 'blocked') && (
+          <Text key="setup-manual" size="caption" dimColor wrap="wrap">
+            {t('setup.manual', { url: `https://github.com/${REPO}/releases` })}
           </Text>
         )}
         {isFailed &&

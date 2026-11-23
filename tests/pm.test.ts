@@ -11,7 +11,7 @@ import { MESSAGES, getLang, placeholders, resolveLang, setLang, t } from '../hoo
 import type { Lang, MessageKey } from '../hooks/messages'
 import { installOf, isReplaced } from '../hooks/update'
 import { boardAddressOf, coreProgramOf, isPlainProgram } from '../hooks/webboard'
-import { MAX_PROGRAM_BYTES, MAX_SUMS_BYTES, assetFor, curlFailure, isGithubUrl, isProjectSetUp, jsonOf, sumFor } from '../hooks/setup'
+import { MAX_PROGRAM_BYTES, assetFor, curlFailure, isGithubUrl, isProjectSetUp, jsonOf, sumFor } from '../hooks/setup'
 import { Sha256, fromBase64 } from '../hooks/sha256'
 import { contextLine, contextOf, effectiveTokens, handoverMarker, idleText, parseThresholds, shouldCompact, thresholdsOf, tokensText, wakeCost, withAutoCompact, withoutAutoCompact } from '../hooks/context'
 
@@ -4035,6 +4035,7 @@ test('T-48: /pm context shows, sets and resets the thresholds', ZH, async ($, on
 const SUMS_URL = 'https://github.com/AudiChang-hub/claude-project-pm/releases/download/v1.2.0/SHA256SUMS'
 const ASSET_URL = 'https://github.com/AudiChang-hub/claude-project-pm/releases/download/v1.2.0/project-pm-windows-x64.exe'
 const CDN_URL = 'https://release-assets.githubusercontent.com/github-production-release-asset/acme?sig=demo'
+const RELEASE_API_URL = 'https://api.github.com/repos/AudiChang-hub/claude-project-pm/releases/tags/v1.2.0'
 const CURL = 'C:\\Windows\\System32\\curl.exe'
 const PLUGIN_DATA = 'C:\\home\\.claude\\plugins\\data\\project-pm'
 const DOWNLOADED = 'C:/home/.claude/plugins/data/project-pm/core/project-pm-1.2.0.exe'
@@ -4091,7 +4092,7 @@ type SetupWorld = { ran: (readonly string[])[]; files: Files; logs: string[]; fe
  * download goes (fine, offline, a file that does not match, a redirect off GitHub, the host's policy refusing GitHub
  * while curl gets through, a file over the size cap).
  */
-async function setupPane($: Parameters<TestBody>[0], on: On, net: 'fine' | 'offline' | 'tampered' | 'elsewhere' | 'blocked' | 'huge') {
+async function setupPane($: Parameters<TestBody>[0], on: On, net: 'fine' | 'offline' | 'tampered' | 'elsewhere' | 'blocked' | 'huge', sizeAnswered?: Promise<void>) {
   const files: Files = new Map()
   files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
   files.set('C:/Windows/System32/curl.exe', 'MZ')
@@ -4111,11 +4112,20 @@ async function setupPane($: Parameters<TestBody>[0], on: On, net: 'fine' | 'offl
     return { value: undefined }
   })
   const fetched: string[] = []
-  on('http.fetch', ($, e) => {
+  on('http.fetch', async ($, e) => {
     fetched.push(e.url)
-    if (net === 'blocked') throw new Error('refused by the web fetch policy')
+    // A hook that throws is skipped, so the host's refusal and a network that is not there are each a deny.
+    if (net === 'blocked') return { deny: 'refused by the web fetch policy' }
+    if (net === 'offline') return { deny: 'getaddrinfo ENOTFOUND github.com' }
+    if (e.url === SUMS_URL) return { value: { status: 200, ok: true, headers: {}, text: sums } }
+    if (e.url === RELEASE_API_URL) {
+      // GitHub takes a while to say the size: the card says "about 100 MB" meanwhile.
+      await sizeAnswered
 
-    return { value: { status: 200, ok: true, headers: {}, text: '' } }
+      return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ tag_name: 'v1.2.0', assets: [{ name: 'project-pm-windows-x64.exe', size: 94 * 1024 * 1024 }] }) } }
+    }
+
+    return { value: { status: 404, ok: false, headers: {}, text: '' } }
   })
   on('session.info', () => ({ value: { platform: 'windows' as const, isHosted: false, transcriptPath: '' } }))
   on('process.hookEnv', () => ({ value: { CLAUDE_PLUGIN_DATA: PLUGIN_DATA } }))
@@ -4142,8 +4152,7 @@ async function setupPane($: Parameters<TestBody>[0], on: On, net: 'fine' | 'offl
       if (net === 'offline') return { exitCode: 6, stdout: '' }
       const url = argv.at(-1)!
       const out = argv[argv.indexOf('--output') + 1]!.replace(/\\/g, '/')
-      if (url === SUMS_URL) files.set(out, sums)
-      else if (url === ASSET_URL) return { exitCode: 0, stdout: `302 ${net === 'elsewhere' ? 'https://downloads.acme.example/pm.exe' : CDN_URL}` }
+      if (url === ASSET_URL) return { exitCode: 0, stdout: `302 ${net === 'elsewhere' ? 'https://downloads.acme.example/pm.exe' : CDN_URL}` }
       else if (url === CDN_URL && net === 'huge') {
         // curl stops past --max-filesize (exit 63), part of it written.
         files.set(out, PROGRAM.slice(0, 10))
@@ -4191,8 +4200,8 @@ const curlRuns = (w: SetupWorld) => w.ran.filter(argv => argv[0] === CURL)
 for (const lang of ['zh-TW', 'en'] as const) {
   const words =
     lang === 'en'
-      ? { intro: /^Project PM isn’t set up for this project yet/, button: 'Set up', done: /^All set\./, offline: /^Can’t reach GitHub/, checksum: /^The downloaded file doesn’t match/, download: /^The download didn’t finish/, blocked: /^This computer’s network rules don’t allow/, removed: /^Setup removed/, retry: 'Try again' }
-      : { intro: /^這個專案還沒設定 Project PM/, button: '設定', done: /^設定好了/, offline: /^連不上 GitHub/, checksum: /^下載的檔案和發布時的不一樣/, download: /^下載沒有完成/, blocked: /^這台電腦的網路規定不允許/, removed: /^已移除設定/, retry: '重試' }
+      ? { downloading: 'Downloading the core v1.2.0 from GitHub (about 100 MB, using the system’s curl)', checked: 'Downloaded and checked SHA256 (1 MB, v1.2.0, GitHub, system curl)', manual: 'Or download Project PM’s program from https://github.com/AudiChang-hub/claude-project-pm/releases and double-click it to set up.', intro: /^Project PM isn’t set up for this project yet/, button: 'Set up', done: /^All set\./, offline: /^Can’t reach GitHub/, checksum: /^The downloaded file doesn’t match/, download: /^The download didn’t finish/, blocked: /^This computer’s network rules don’t allow/, removed: /^Setup removed/, retry: 'Try again' }
+      : { downloading: '正在從 GitHub 下載核心 v1.2.0（約 100 MB，使用系統 curl）', checked: '已下載並核對 SHA256（1 MB，v1.2.0，GitHub，系統 curl）', manual: '也可以到 https://github.com/AudiChang-hub/claude-project-pm/releases 下載 Project PM 的程式，按兩下執行來設定。', intro: /^這個專案還沒設定 Project PM/, button: '設定', done: /^設定好了/, offline: /^連不上 GitHub/, checksum: /^下載的檔案和發布時的不一樣/, download: /^下載沒有完成/, blocked: /^這台電腦的網路規定不允許/, removed: /^已移除設定/, retry: '重試' }
   const options = { options: { language: lang } } as const
 
   test(`T-51 (${lang}): not set up, the pane gets the program, checks it, shows the init list and Set up; one press sets it up, and Remove setup undoes it`, options, async ($, on) => {
@@ -4203,21 +4212,24 @@ for (const lang of ['zh-TW', 'en'] as const) {
     expect(await ui.find({ type: 'Text', text: /SKILL\.md$/ })).toBeDefined()
     // Nothing changed yet: init ran only without --yes, and every curl hop was https on GitHub, redirects off.
     expect(w.ran.some(argv => argv.includes('--yes'))).toBe(false)
-    expect(curlRuns(w).map(argv => argv.at(-1))).toEqual([SUMS_URL, ASSET_URL, CDN_URL])
+    expect(curlRuns(w).map(argv => argv.at(-1))).toEqual([ASSET_URL, CDN_URL])
     for (const argv of curlRuns(w)) expect(argv.slice(1, 9)).toEqual(['--proto', '=https', '--tlsv1.2', '--silent', '--show-error', '--max-redirs', '0', '--connect-timeout'])
-    // A size cap on every hop: SHA256SUMS small, the program at most 300 MB.
-    expect(curlRuns(w).map(argv => argv[argv.indexOf('--max-filesize') + 1])).toEqual([String(MAX_SUMS_BYTES), String(MAX_PROGRAM_BYTES), String(MAX_PROGRAM_BYTES)])
+    // A size cap on every hop: the program at most 200 MB.
+    expect(MAX_PROGRAM_BYTES).toBe(200 * 1024 * 1024)
+    expect(curlRuns(w).map(argv => argv[argv.indexOf('--max-filesize') + 1])).toEqual([String(MAX_PROGRAM_BYTES), String(MAX_PROGRAM_BYTES)])
     // The mod's data folder may not be there yet on a first run: curl makes it.
     for (const argv of curlRuns(w)) expect(argv).toContain('--create-dirs')
-    // The host's own network rules were asked about the release first.
-    expect(w.fetched).toEqual([SUMS_URL])
+    // The host's own network rules were asked first: SHA256SUMS came through `$.http.fetch`, then the program's size.
+    expect(w.fetched).toEqual([SUMS_URL, RELEASE_API_URL])
+    // Above the list: what was downloaded and checked, from where and with what.
+    expect(await ui.find({ type: 'Text', text: words.checked })).toBeDefined()
     expect((await ui.find({ key: 'setup:apply' }))?.props.label).toBe(words.button)
 
     await ui.press({ key: 'setup:apply' })
     expect(w.ran.filter(argv => argv[0] === DOWNLOADED && argv.includes('--yes'))).toEqual([[DOWNLOADED, 'init', '--yes', '--json']])
     expect(await ui.find({ type: 'Text', text: words.done })).toBeDefined()
     // Checked once: the program is not downloaded again for the next step.
-    expect(curlRuns(w).length).toBe(3)
+    expect(curlRuns(w).length).toBe(2)
 
     await ui.press({ key: 'setup:remove' })
     await ui.press({ key: 'setup:remove-yes' })
@@ -4234,6 +4246,9 @@ for (const lang of ['zh-TW', 'en'] as const) {
     expect(await ui.find({ key: 'setup:apply' })).toBeUndefined()
     expect((await ui.find({ key: 'setup:retry' }))?.props.label).toBe(words.retry)
     expect(w.ran.some(argv => argv[0] === DOWNLOADED)).toBe(false)
+    // The host could not reach GitHub, so curl was never run; the Releases page is named as the way by hand.
+    expect(curlRuns(w)).toEqual([])
+    expect(await ui.find({ type: 'Text', text: words.manual })).toBeDefined()
     await ui.unmount()
   })
 
@@ -4241,9 +4256,10 @@ for (const lang of ['zh-TW', 'en'] as const) {
     const { ui, world: w } = await setupPane($, on, 'blocked')
     expect(await ui.find({ type: 'Text', text: words.blocked })).toBeDefined()
     expect(await ui.find({ key: 'setup:retry' })).toBeDefined()
-    // Only SHA256SUMS came (it told the network works); the program was neither downloaded nor run.
-    expect(curlRuns(w).map(argv => argv.at(-1))).toEqual([SUMS_URL])
+    // The host refused SHA256SUMS, so no curl ran at all: the program was neither downloaded nor run.
+    expect(curlRuns(w)).toEqual([])
     expect(w.ran.some(argv => argv[0] === DOWNLOADED)).toBe(false)
+    expect(await ui.find({ type: 'Text', text: words.manual })).toBeDefined()
     await ui.unmount()
   })
 
@@ -4268,8 +4284,34 @@ for (const lang of ['zh-TW', 'en'] as const) {
   test(`T-51 (${lang}): a redirect off the GitHub hosts stops the download`, options, async ($, on) => {
     const { ui, world: w } = await setupPane($, on, 'elsewhere')
     expect(await ui.find({ type: 'Text', text: words.download })).toBeDefined()
-    expect(curlRuns(w).map(argv => argv.at(-1))).toEqual([SUMS_URL, ASSET_URL])
+    expect(curlRuns(w).map(argv => argv.at(-1))).toEqual([ASSET_URL])
     expect(w.ran.some(argv => argv[0] === DOWNLOADED)).toBe(false)
+    await ui.unmount()
+  })
+
+  test(`T-51 (${lang}): while curl downloads, the card says from where, about how big and with what`, options, async ($, on) => {
+    let answer = () => {}
+    const { ui, clock, world: w } = await setupPane($, on, 'fine', new Promise<void>(done => (answer = done)))
+    // GitHub has not said the size yet: about 100 MB, and nothing downloaded so far.
+    expect(await ui.find({ type: 'Text', text: words.downloading })).toBeDefined()
+    expect(curlRuns(w)).toEqual([])
+    answer()
+    for (let i = 0; i < 20 && !(await ui.find({ key: 'setup:apply' })); i++) await clock.advance(100)
+    expect(await ui.find({ type: 'Text', text: words.downloading })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: words.checked })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test(`T-51 (${lang}): a program changed after its check is checked again before Set up runs it, and is never run`, options, async ($, on) => {
+    const { ui, world: w } = await setupPane($, on, 'fine')
+    expect(await ui.find({ key: 'setup:apply' })).toBeDefined()
+    // The same size and time, other bytes: only reading it again tells.
+    w.files.set(DOWNLOADED, `X${PROGRAM.slice(1)}`)
+    await ui.press({ key: 'setup:apply' })
+    expect(w.ran.some(argv => argv[0] === DOWNLOADED && argv.includes('--yes'))).toBe(false)
+    expect(await ui.find({ type: 'Text', text: words.checksum })).toBeDefined()
+    expect(w.files.get(DOWNLOADED)).toBe('')
+    expect(await ui.find({ key: 'setup:retry' })).toBeDefined()
     await ui.unmount()
   })
 }
