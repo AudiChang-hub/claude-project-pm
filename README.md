@@ -40,7 +40,7 @@ v1.1 (one ledger for both apps, a clearer board, the web board from the pane) an
 
 Or **+** next to the prompt box → **Plugins** → **Add marketplace** → `AudiChang-hub/claude-project-pm` → **Add plugin**.
 
-Then open a new session in your project and make it the PM (the button above the prompt box, or `/pm`). At the top of the board, press **Set up** (設定). That's all: the board lists what will change first, and **Remove setup** (移除設定) undoes it. If you're offline, or the download fails, the board says so and offers **Try again**.
+Then open a new session in your project and make it the PM (the button above the prompt box, or `/pm`). At the top of the board, press **Set up** (設定). That's all: the board lists what will change first, and **Remove setup** (移除設定) undoes it. If you're offline, or the download fails, the board says so and offers **Try again**. Opening the board in a project that isn't set up starts the core's download (about 100 MB) on its own; nothing changes until you press **Set up**.
 
 To keep it updated: `claude` → `/plugin` → **Marketplaces** → `claude-project-pm` → **Enable auto-update**.
 
