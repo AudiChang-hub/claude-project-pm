@@ -459,7 +459,7 @@ PM 請你交接時，照交接範本寫筆記（{template}），回報第一行 
   'setup.error.remove': '移除沒有完成。請再試一次。',
   'setup.downloading': '正在從 GitHub 下載核心 v{version}（約 {mb} MB，使用系統 curl）',
   'setup.checked': '已下載並核對 SHA256（{mb} MB，v{version}，GitHub，系統 curl）',
-  'setup.manual': '也可以到 {url} 下載 Project PM 的程式，按兩下執行來設定。',
+  'setup.manual': '也可以到 {url} 下載 Project PM 的程式，放進專案資料夾後按兩下來設定。',
 } as const
 
 export type MessageKey = keyof typeof zhTW
@@ -905,7 +905,7 @@ A check you could not make (no tool to see the screen, say) goes in your reply, 
   'setup.error.remove': 'Removing setup didn’t finish. Please try again.',
   'setup.downloading': 'Downloading the core v{version} from GitHub (about {mb} MB, using the system’s curl)',
   'setup.checked': 'Downloaded and checked SHA256 ({mb} MB, v{version}, GitHub, system curl)',
-  'setup.manual': 'Or download Project PM’s program from {url} and double-click it to set up.',
+  'setup.manual': 'Or download Project PM’s program from {url}, put it in your project’s folder and double-click it to set up.',
 }
 
 export const MESSAGES: Record<Lang, Record<MessageKey, string>> = { en, 'zh-TW': zhTW }
