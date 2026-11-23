@@ -4130,17 +4130,18 @@ async function setupPane($: Parameters<TestBody>[0], on: On, net: 'fine' | 'offl
   on('session.info', () => ({ value: { platform: 'windows' as const, isHosted: false, transcriptPath: '' } }))
   on('process.hookEnv', () => ({ value: { CLAUDE_PLUGIN_DATA: PLUGIN_DATA } }))
   on('mcp.connect', () => ({ value: { isConnected: false as const, reason: 'failed' as never, message: 'not listed' } }))
-  // The mod's own manifest, and a file's bytes, which the world's disk does not answer; and a file's size.
+  // The mod's own manifest, and a file's bytes, which the world's disk does not answer; and a file's size. Looked up by
+  // `norm`, as the world's disk is: on Linux the host puts the working folder before these Windows paths.
   const read = (e: { path: string; as?: string; offset?: number; length?: number }) => {
     if (/\.claude-plugin\/plugin\.json$/.test(e.path.replace(/\\/g, '/'))) return '{"name":"project-pm","version":"1.2.0"}'
     if (e.as !== 'bytes') return undefined
-    const text = files.get(e.path.replace(/\\/g, '/'))
+    const text = files.get(norm(e.path))
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
 
     return { base64: btoa(text.slice(e.offset ?? 0, (e.offset ?? 0) + (e.length ?? text.length))) }
   }
   on('fs.stat', ($, e) => {
-    const text = files.get(e.path.replace(/\\/g, '/'))
+    const text = files.get(norm(e.path))
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
 
     return { value: { kind: 'file' as const, size: text.length, mtimeMs: 1, isLink: false } }
