@@ -4315,6 +4315,20 @@ for (const lang of ['zh-TW', 'en'] as const) {
     await ui.unmount()
   })
 
+  test(`T-51 (${lang}): a program changed after its check is checked again before Remove setup runs it, and is never run`, options, async ($, on) => {
+    const { ui, world: w } = await setupPane($, on, 'fine')
+    await ui.press({ key: 'setup:apply' })
+    expect(await ui.find({ type: 'Text', text: words.done })).toBeDefined()
+    // The same size and time, other bytes: only reading it again tells.
+    w.files.set(DOWNLOADED, `X${PROGRAM.slice(1)}`)
+    await ui.press({ key: 'setup:remove' })
+    await ui.press({ key: 'setup:remove-yes' })
+    expect(w.ran.some(argv => argv[0] === DOWNLOADED && argv[1] === 'uninstall')).toBe(false)
+    expect(await ui.find({ type: 'Text', text: words.checksum })).toBeDefined()
+    expect(w.files.get(DOWNLOADED)).toBe('')
+    await ui.unmount()
+  })
+
   test(`T-51 (${lang}): curl takes each address as it is, never expanding [] or {} in it`, options, async ($, on) => {
     const { ui, world: w } = await setupPane($, on, 'fine')
     expect(curlRuns(w).length).toBe(2)

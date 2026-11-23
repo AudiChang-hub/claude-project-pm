@@ -405,6 +405,8 @@ export async function removeSetup($: EngineInterface, projectPath: string, proje
   // The downloaded copy when it is checked (Windows does not let a running program delete itself), else as setup gets one.
   const program = (await isStillChecked($, places.downloaded)) ? places.downloaded : await programOf($, places)
   if (program !== places.installed && program !== places.downloaded) return fail($, projectKey, program as SetupError)
+  // As before 設定: checked once more right before it changes anything, and never run when it changed since its check.
+  if (!(await isStillTheSame($, program, places))) return fail($, projectKey, 'checksum')
   const ran = await runCore($, program, ['uninstall', '--yes', '--json'], projectPath)
   const out = ran ? jsonOf(ran.stdout) : null
   forgetCore()
