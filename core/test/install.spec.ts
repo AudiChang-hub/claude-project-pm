@@ -236,7 +236,7 @@ for (const lang of LANGS) {
 
     test('without claude on PATH, the Claude Code the desktop app bundles adds the MCP server (T-50)', { skip: process.platform === 'win32' ? false : 'the desktop app folder is a Windows one' }, async () => {
       const local = join(w.home, 'AppData', 'Local')
-      const bundled = join(local, 'Claude-Data', 'claude_acme01', 'claude-code', '2.1.328', '23e64dd91c09', 'claude.exe')
+      const bundled = join(local, 'Claude-Data', 'claude_acme01', 'claude-code', '2.1.9', 'a1b2c3d4e5f6', 'claude.exe')
       write(bundled, '')
       const asClaude = fakeClaude(w.home, hostWith())
       const run: InstallEnv['run'] = (argv, cwd, timeoutMs) => (argv[0] === 'claude' ? Promise.resolve(null) : argv[0] === bundled ? asClaude(['claude', ...argv.slice(1)], cwd, timeoutMs) : asClaude(argv, cwd, timeoutMs))
