@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
     env:
       # The Claude Code version the plugin is tested with; neither command needs a login or an API key.
-      CLAUDE_CODE_VERSION: 2.1.317
+      CLAUDE_CODE_VERSION: 2.1.328
       # Whether the BLOCKED_TERMS secret is set: a step's `if` cannot read secrets, only this.
       HAS_BLOCKED_TERMS: ${{ secrets.BLOCKED_TERMS != '' }}
     steps:

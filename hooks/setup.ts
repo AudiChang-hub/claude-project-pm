@@ -249,7 +249,9 @@ type Places = { version: string; asset: string; installed: string; downloaded: s
 
 async function placesOf($: EngineInterface): Promise<Places | SetupError> {
   const version = await modVersion($)
-  const info = await $.session.info().catch(() => null)
+  // Called inside `then`: a Claude Code without `$.session.info` (2.1.317) throws before `.catch`, and is then an
+  // unknown platform (the manual route) instead of a failed check.
+  const info = await Promise.resolve().then(() => $.session.info()).catch(() => null)
   const platform = info?.platform
   if (!version || info?.isHosted) return 'platform'
   const asset = assetFor(platform, await machineOf($, platform))
