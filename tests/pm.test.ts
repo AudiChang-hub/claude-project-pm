@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isDeliveredAgent, isDeliveredStatus, isPushedContent, keyFile, keyStateOf, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, limitOf, statusOf, undeliveredOf, usageLimitOf } from '../hooks/sessions'
+import { QUOTE, applyPlan, betterCi, boardText, caveatOf, closeTimeOf, closedAt, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isDeliveredAgent, isDeliveredStatus, isPushedContent, keyFile, keyStateOf, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, limitOf, statusOf, undeliveredOf, usageLimitOf } from '../hooks/sessions'
 import type { Status } from '../hooks/sessions'
 import { closesBoard } from '../hooks/actions'
 import { isQaDescription, openBreakdown, qaAttention, qaBlocker, qaBrief, qaShown, qaUpdate } from '../hooks/qa'
@@ -3694,6 +3694,164 @@ for (const lang of ['zh-TW', 'en'] as const) {
     // The old pane counted an unassigned item with a failed verdict twice, and left the on-track ones out.
     expect(await ui.find({ type: 'Text', text: lang === 'zh-TW' ? '　·　2 項未指派' : '　·　2 unassigned' })).toBeUndefined()
     await ui.unmount()
+  })
+}
+
+// ── T-59: work already closed is not waiting on you, on the pane and the board alike ──
+
+test('when a session counts as closed: by close times, never by edits, and never on a hand-over alone (T-59 QA)', () => {
+  const item = (id: number, extra: object) => ({ id, text: `項目 ${id}`, owner: 'local_a', status: 'done', note: '', createdAt: NOW - 9_000_000, updatedAt: NOW - 60_000, closedAt: NOW - 600_000, ...extra })
+  const asked = (summary: string) => track('local_a', { report: { status: 'waiting_user', summary }, reportAt: NOW - 1_200_000 }) as never
+  // The close's own time, not the latest edit.
+  expect(closedAt('local_a', asked('要保留嗎？'), [item(1, {})] as never)).toBe(NOW - 600_000)
+  // Closed before closings kept their time: unknown.
+  expect(closedAt('local_a', asked('要保留嗎？'), [item(1, { closedAt: undefined })] as never)).toBeUndefined()
+  // A code its own project's ledger lacks: unknown.
+  expect(closedAt('local_a', asked('T-01 好了，接著做 T-61 嗎？'), [item(1, {})] as never)).toBeUndefined()
+  // Handed over from it, closed since, and nothing else ties to it: unknown.
+  expect(closedAt('local_a', asked('要保留嗎？'), [item(2, { owner: 'agent:z8', formerOwners: ['local_a'] })] as never)).toBeUndefined()
+  // Named by its report too: closed.
+  expect(closedAt('local_a', asked('T-02 要保留嗎？'), [item(2, { owner: 'agent:z8', formerOwners: ['local_a'] })] as never)).toBe(NOW - 600_000)
+  // Reopened, or closed again: the close time follows.
+  const was = { status: 'done' as const, closedAt: NOW - 600_000 }
+  expect(closeTimeOf(was, 'done', NOW)).toBe(NOW - 600_000)
+  expect(closeTimeOf(was, 'dropped', NOW)).toBe(NOW)
+  expect(closeTimeOf(was, 'open', NOW)).toBeUndefined()
+  expect(closeTimeOf({ status: 'open' }, 'done', NOW)).toBe(NOW)
+})
+
+for (const lang of ['zh-TW', 'en'] as const) {
+  test(`a session whose work items were closed after its last report leaves the figures, on the pane and the board alike (${lang})`, { options: { language: lang } }, async ($, on) => {
+    const files: Files = new Map()
+    const item = (id: number, owner: string, status: string, updatedAt: number) => ({ id, text: `項目 ${id}`, owner, status, note: '', createdAt: NOW - 7_200_000, updatedAt, ...(status === 'open' ? {} : { closedAt: updatedAt }) })
+    // local_ask asked, then its item was closed (by another session, an agent or the person); local_open still asks about an open one.
+    const ledger = [item(1, 'local_ask', 'done', NOW - 60_000), item(2, 'local_open', 'open', NOW - 3_600_000)]
+    files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger, nextId: 3 }))
+    files.set(`${DIR}/sessions/local_ask.json`, JSON.stringify(track('local_ask', { report: { status: 'waiting_user', summary: 'T-01：舊欄位要保留唯讀還是刪掉？' }, reportAt: NOW - 600_000 })))
+    files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { ask: '列表頁要不要加匯出？' })))
+    const clock = mock.clock(on, { now: NOW })
+    world(on, 'local_pm', files)
+    await $.session.start(START)
+    await clock.advance(1000)
+    const text = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+    const asking = lang === 'zh-TW' ? /｜待回覆 1｜/ : /\| Waiting on you 1 \|/
+    expect(text).toMatch(asking)
+    // The board's own words: t() here speaks the test module's language, not the plugin's option.
+    const [from, to] = lang === 'zh-TW' ? ['## 需要處理', '## 工作項目'] : ['## Needs attention', '## Work items']
+    const attention = text.slice(text.indexOf(from), text.indexOf(to))
+    expect(attention).not.toContain('移除舊版優惠欄位')
+    expect(attention).toContain('商品列表頁')
+    const ui = await $.ui.mount({
+      plugin: 'project-pm',
+      surface: 'desktop',
+      component: 'Pane',
+      requestId: 'project-pm',
+      props: { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 80 } },
+    } as never)
+    // Folded with the ended sessions on the pane, as the board leaves it out of its figures.
+    expect(await ui.find({ key: 'card:local_ask' })).toBeUndefined()
+    expect(await ui.find({ key: 'card:local_open' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test(`a session that owns open work in another project still waits on you, on the pane and the board alike (T-59 QA, ${lang})`, { options: { language: lang } }, async ($, on) => {
+    const files: Files = new Map()
+    // Its item here was closed after it asked; it still owns an open one in the weather app's project.
+    const here = { id: 1, text: '項目 1', owner: 'local_ask', status: 'done', note: '', createdAt: NOW - 7_200_000, updatedAt: NOW - 60_000, closedAt: NOW - 60_000 }
+    files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [here], nextId: 2 }))
+    const weather = SESSIONS.find(one => one.sessionId === 'local_other')!.cwd
+    const there = { id: 3, text: '共用價格函式', owner: 'local_ask', status: 'open', note: '', createdAt: NOW - 7_200_000, updatedAt: NOW - 3_600_000 }
+    files.set(`${DIR}/projects/${keyFile(projectKey(weather))}.json`, JSON.stringify({ key: projectKey(weather), name: 'Weather app', path: weather, pmId: null, isDismissed: false, ledger: [there], nextId: 4 }))
+    files.set(`${DIR}/sessions/local_ask.json`, JSON.stringify(track('local_ask', { report: { status: 'waiting_user', summary: '共用價格函式要無條件進位還是捨去？' }, reportAt: NOW - 600_000 })))
+    const clock = mock.clock(on, { now: NOW })
+    world(on, 'local_pm', files)
+    await $.session.start(START)
+    await clock.advance(1000)
+    const text = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+    expect(text).toMatch(lang === 'zh-TW' ? /｜待回覆 1｜/ : /\| Waiting on you 1 \|/)
+    const ui = await $.ui.mount({
+      plugin: 'project-pm',
+      surface: 'desktop',
+      component: 'Pane',
+      requestId: 'project-pm',
+      props: { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 80 } },
+    } as never)
+    expect(await ui.find({ key: 'card:local_ask' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test(`the ledger keeps when an item was closed: set on done or dropped, kept through edits, gone on reopening (T-59 QA, ${lang})`, { options: { language: lang } }, async ($, on) => {
+    const files: Files = new Map()
+    files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+    const clock = mock.clock(on, { now: NOW })
+    world(on, 'local_pm', files)
+    await $.session.start(START)
+    await clock.advance(1000)
+    const ledger = (input: object) => $.tool.call({ tool: 'mcp__project-pm__ledger', ...input } as never)
+    const closedAt = () => (JSON.parse(files.get(PROJECT_FILE)!) as { ledger: { id: number; closedAt?: number }[] }).ledger.find(i => i.id === 1)?.closedAt
+    await ledger({ action: 'add', text: '列表頁加匯出 CSV' })
+    expect(closedAt()).toBeUndefined()
+    await ledger({ action: 'update', id: 1, status: 'done', qa: 'pass', qa_by: 'user' })
+    const first = closedAt()
+    expect(typeof first).toBe('number')
+    await clock.advance(60_000)
+    await ledger({ action: 'update', id: 1, note: '之後補的備註' })
+    expect(closedAt()).toBe(first)
+    await ledger({ action: 'update', id: 1, status: 'dropped' })
+    expect(closedAt()).toBeGreaterThan(first!)
+    await ledger({ action: 'update', id: 1, status: 'open' })
+    expect(closedAt()).toBeUndefined()
+  })
+
+  test(`a hand-over whose new session was started, or whose work items are done, is not one to start (${lang})`, () => {
+    const was = getLang()
+    setLang(lang)
+    try {
+      const handoff = (title: string) => ({ title, prompt: `交接：筆記在 C:/notes/${title}.md，照筆記繼續。`, at: NOW - 7_200_000 })
+      const pm = { ...track('local_pm', { title: 'PM' }), pendingHandoffs: [handoff('優惠清理第二輪'), handoff('T-08 搜尋篩選第二輪'), handoff('T-09 發票第二輪'), handoff('價格規則第二輪')] }
+      const session = (id: string, title: string, minutesAgo: number) => ({ id, title, cwd: PROJECT, isRunning: false, lastActivityAt: new Date(NOW - minutesAgo * 60_000).toISOString(), isPinned: false, hasOpenPr: false })
+      // Started since (an hour ago, after the hand-over); one of the same title that has done nothing since does not count.
+      const started = session('local_coupon2', '優惠清理第二輪', 60)
+      const before = session('local_rules_old', '價格規則第二輪', 300)
+      const item = (id: number, status: string, updatedAt: number) => ({ id, text: `項目 ${id}`, owner: 'agent:z8', status, note: '', createdAt: NOW - 9_000_000, updatedAt, ...(status === 'open' ? {} : { closedAt: updatedAt }) })
+      const text = boardText({
+        project: { name: 'Acme 商店後台', path: PROJECT },
+        sessions: [started, before],
+        tracks: { local_pm: pm as never },
+        words: {},
+        ledger: [item(8, 'done', NOW - 3_600_000), item(9, 'open', NOW - 3_600_000)] as never,
+        now: NOW,
+        isIncludingDone: false,
+        pmId: 'local_pm',
+      })
+      const pending = (title: string) => t('board.attention.handoffPending', { title })
+      expect(text).not.toContain(pending('優惠清理第二輪'))
+      expect(text).not.toContain(pending('T-08 搜尋篩選第二輪'))
+      expect(text).toContain(pending('T-09 發票第二輪'))
+      expect(text).toContain(pending('價格規則第二輪'))
+    } finally {
+      setLang(was)
+    }
+  })
+
+  test(`a hand-over is not started by the session it comes from, nor done by an item closed before it and edited since (T-59 QA, ${lang})`, () => {
+    const was = getLang()
+    setLang(lang)
+    try {
+      const at = NOW - 7_200_000
+      // The brief names the session it comes from, which kept working on its notes after the hand-over was held.
+      const own = { title: '報表搬家第二輪', prompt: `${handoverMarker('local_reports')} 交接：筆記在 C:/notes/reports.md。`, at }
+      // T-10 was closed before the hand-over, its note edited after it.
+      const edited = { title: 'T-10 匯出格式第二輪', prompt: '交接：筆記在 C:/notes/export.md。', at }
+      const pm = { ...track('local_pm', { title: 'PM' }), pendingHandoffs: [own, edited] }
+      const from = { id: 'local_reports', title: '報表搬家第二輪', cwd: PROJECT, isRunning: false, lastActivityAt: new Date(NOW - 30 * 60_000).toISOString(), isPinned: false, hasOpenPr: false }
+      const item = { id: 10, text: '項目 10', owner: 'agent:z8', status: 'done', note: '後來補的備註', createdAt: NOW - 9_000_000, updatedAt: NOW - 60_000, closedAt: at - 60_000 }
+      const text = boardText({ project: { name: 'Acme 商店後台', path: PROJECT }, sessions: [from], tracks: { local_pm: pm as never }, words: {}, ledger: [item] as never, now: NOW, isIncludingDone: false, pmId: 'local_pm' })
+      expect(text).toContain(t('board.attention.handoffPending', { title: '報表搬家第二輪' }))
+      expect(text).toContain(t('board.attention.handoffPending', { title: 'T-10 匯出格式第二輪' }))
+    } finally {
+      setLang(was)
+    }
   })
 }
 

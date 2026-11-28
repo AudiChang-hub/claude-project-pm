@@ -72,7 +72,7 @@ export function isOfProject(actor: Actor, ref: ProjectRef): boolean {
 }
 
 /** The PM's last round, as the mod writes it (hooks/actions.ts saveRound). */
-type Round = { sessions?: { list?: unknown }; lastWords?: unknown; ciChecks?: unknown; pushChecks?: unknown }
+type Round = { sessions?: { list?: unknown; fetchedAt?: unknown }; lastWords?: unknown; ciChecks?: unknown; pushChecks?: unknown }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
@@ -100,7 +100,14 @@ function byDesktopId<T>(value: unknown): Record<string, T> {
   return Object.fromEntries(Object.entries(value).filter(([id, one]) => DESKTOP_ID.test(id) && isRecord(one))) as Record<string, T>
 }
 
-export type DesktopRound = { list: Session[]; words: Record<string, LastWord>; ci: Record<string, CiCheck>; push: Record<string, PushCheck>; isFresh: boolean }
+/**
+ * `listedAt`: when the desktop app's list was taken (the round's fetchedAt, else its file's time less ROUND_MARGIN_MS):
+ * a desktop session that did nothing after it and is not in the list is one the app no longer lists (archived, T-59).
+ */
+export type DesktopRound = { list: Session[]; words: Record<string, LastWord>; ci: Record<string, CiCheck>; push: Record<string, PushCheck>; isFresh: boolean; listedAt: number }
+
+/** How long before its file's time a round without its fetchedAt may have taken its list: the round's own work after. */
+export const ROUND_MARGIN_MS = 5 * 60_000
 
 /**
  * The desktop app's session list as a desktop PM's mod last saw it, with each session's last words and what git and
@@ -123,13 +130,18 @@ export async function desktopRound(pmId: string | null | undefined, now: number,
   const isFresh = now - at <= ROUND_FRESH_MS
   const list = (round.sessions.list as unknown[]).map(sessionIn).filter((one): one is Session => !!one).map(one => (isFresh ? one : { ...one, isRunning: false }))
 
-  return { list, words: byDesktopId(round.lastWords), ci: byDesktopId(round.ciChecks), push: byDesktopId(round.pushChecks), isFresh }
+  const fetchedAt = round.sessions.fetchedAt
+  const listedAt = typeof fetchedAt === 'number' && fetchedAt > 0 ? Math.min(fetchedAt, at) : at - ROUND_MARGIN_MS
+
+  return { list, words: byDesktopId(round.lastWords), ci: byDesktopId(round.ciChecks), push: byDesktopId(round.pushChecks), isFresh, listedAt }
 }
 
 export type ProjectSessions = {
   sessions: Session[]
   /** Every actor of any project, and the desktop sessions that own open items: an owner elsewhere is still there. */
   everyone: Session[]
+  /** Desktop sessions the core holds a report of that the app no longer lists (archived, T-59): counted nowhere. */
+  archived: Session[]
   tracks: Record<string, Track>
   actors: Actor[]
   errors: string[]
@@ -165,17 +177,24 @@ export async function projectSessions(ref: ProjectRef, owners: string[], env: No
     if (track) tracks[one.id] = track
     else delete tracks[one.id]
   }
+  const archived: Session[] = []
   for (const actor of actors) {
     if (everyone.some(s => s.id === actor.id)) continue
     const one = sessionOf(actor)
+    if (round && isUnlisted(actor.id, activeAt(actor), round, pmId)) {
+      archived.push(one)
+      continue
+    }
     everyone.push(one)
     if (isOfProject(actor, ref)) mine.push(one)
   }
   for (const id of wanted) {
-    if (!id || everyone.some(s => s.id === id)) continue
+    if (!id || everyone.some(s => s.id === id) || archived.some(s => s.id === id)) continue
     // A desktop session (local_…) no list holds: its track is in the mod's folder; the desktop app alone knows if it still runs.
     const track = withReport(await loadLegacyTrack(id, env), actorById.get(id))
     if (!track || !hasReport(track)) continue
+    // Not in the app's list, and nothing since it was taken: archived, an owner gone as the pane has it (T-59).
+    if (round && isUnlisted(id, Math.max(track.turnAt, track.planAt, track.reportAt ?? 0), round, pmId)) continue
     tracks[id] = track
     everyone.push({ id, title: track.title || id, cwd: track.cwd, isRunning: false, lastActivityAt: new Date(Math.max(track.turnAt, track.planAt, track.reportAt ?? 0)).toISOString(), isPinned: false, hasOpenPr: false })
   }
@@ -184,5 +203,21 @@ export async function projectSessions(ref: ProjectRef, owners: string[], env: No
   if (pmId && pmTrack) tracks[pmId] = pmTrack
   const agents = [...(pmTrack?.agents ?? []), ...(pmId ? (actorById.get(pmId)?.agents ?? []) : [])].filter((a, i, all) => all.findIndex(b => b.id === a.id) === i)
 
-  return { sessions: mine, everyone, tracks, actors, errors, words: round?.words ?? {}, ci: round?.ci ?? {}, push: round?.push ?? {}, agents }
+  return { sessions: mine, everyone, archived, tracks, actors, errors, words: round?.words ?? {}, ci: round?.ci ?? {}, push: round?.push ?? {}, agents }
+}
+
+/** How many sessions the mod asks the desktop app for (hooks/actions.ts refresh, list_sessions' limit). */
+export const LIST_LIMIT = 100
+
+/**
+ * Whether the desktop app no longer lists a desktop session (T-59): its id is a desktop one, the round's list leaves it
+ * out, and it did nothing after the list was taken. One active since may be newer than the list: it still counts. So
+ * does the PM, which the list never holds; every session when the list came back empty; and, when the list is full
+ * (the newest LIST_LIMIT), one no newer than its oldest, which may only be past the limit.
+ */
+function isUnlisted(id: string, lastActive: number, round: DesktopRound, pmId: string | null): boolean {
+  if (!DESKTOP_ID.test(id) || id === pmId || round.list.length === 0 || round.list.some(s => s.id === id)) return false
+  if (round.list.length >= LIST_LIMIT && lastActive <= Math.min(...round.list.map(s => Date.parse(s.lastActivityAt) || 0))) return false
+
+  return lastActive <= round.listedAt
 }

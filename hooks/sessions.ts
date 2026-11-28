@@ -5,7 +5,7 @@ import type { AgentRecord, AgentState, BackgroundTask, CiCheck, KeyState, LastWo
 import { agentName, isSettledAgent } from './agents'
 import { MESSAGES, t } from './messages'
 import { isAgentId, isSameId, openBreakdown, qaAttention, qaShown, qaText } from './qa'
-import { DEFAULT_THRESHOLDS, compactedLine, contextLine, contextOf, effectiveTokens, hasWorkLeft, needsHandoff, tokensText } from './context'
+import { DEFAULT_THRESHOLDS, compactedLine, contextLine, contextOf, effectiveTokens, handoverFromOf, hasWorkLeft, needsHandoff, tokensText } from './context'
 import type { ContextMark, Thresholds } from './context'
 
 export type Status = 'running' | 'asking' | 'failed' | 'limit' | 'open' | 'unreleased' | 'ci' | 'waiting' | 'done' | 'stale'
@@ -383,6 +383,37 @@ export function settledAt(id: string, ledger: LedgerItem[]): number | undefined 
   if (owned.length === 0 || owned.some(item => item.status !== 'done')) return undefined
 
   return Math.max(...owned.map(item => item.updatedAt))
+}
+
+/** The work items a text names by code (T-12, t-7), each once: a report's summary, a hand-over's title. */
+export function itemCodesIn(text: string): number[] {
+  return [...new Set([...text.matchAll(/\bT-(\d+)\b/gi)].map(m => Number(m[1])))]
+}
+
+/** An item's `closedAt` once its status becomes `status` at `now`: set when it closes, kept while it stays closed, gone when open. */
+export function closeTimeOf(was: Pick<LedgerItem, 'status' | 'closedAt'>, status: LedgerItem['status'], now: number): number | undefined {
+  if (status === 'open') return undefined
+
+  return status === was.status ? was.closedAt : now
+}
+
+/**
+ * When the work a session was on was all closed (T-59): the latest `closedAt` of the items tied to it, every one done
+ * or dropped. Tied: the items it owns, in any project's ledger (`ledger`), and those its last report names (T-12),
+ * looked up in `named`, its own project's ledger (codes are per project); the items handed over from it count too, but
+ * never tie it alone. Undefined, so the session still shows, when it is unsure: nothing ties to it, any tied item is
+ * open or was closed before closings kept their time, or its report names a code its own ledger lacks.
+ */
+export function closedAt(id: string, track: Track | undefined, ledger: readonly LedgerItem[], named: readonly LedgerItem[] = ledger): number | undefined {
+  const codes = track?.report ? itemCodesIn(`${track.report.summary} ${track.report.next ?? ''}`) : []
+  // Not registered yet, or another project's: what it waits on may be open.
+  if (codes.some(code => !named.some(item => item.id === code))) return undefined
+  const tied = [...ledger.filter(item => isSameId(item.owner, id)), ...named.filter(item => codes.includes(item.id))]
+  if (tied.length === 0) return undefined
+  const items = [...tied, ...ledger.filter(item => (item.formerOwners ?? []).some(former => isSameId(former, id)))]
+  if (items.some(item => item.status === 'open' || item.closedAt === undefined)) return undefined
+
+  return Math.max(...items.map(item => item.closedAt!))
 }
 
 /** The words statusOf reads for CI: the track's latest turn, else the transcript's last word. */
@@ -1037,6 +1068,7 @@ export function statusOf(
   push?: PushCheck,
   settled?: number,
   isHandedOver = false,
+  closed?: number,
 ): Status {
   if (one.isRunning) return 'running'
   // Stopped by a usage limit mid-turn: whatever its task list or words say, the turn did not end where it meant to.
@@ -1045,13 +1077,18 @@ export function statusOf(
   const minutes = (now - (Date.parse(one.lastActivityAt) || 0)) / 60000
   // The person closed its work (settledAt) after its last report or turn: what its words leave is theirs to judge, and
   // they judged it. Running, asking, CI and background work still show: they are what is happening, not a reading.
-  const isSettled = settled !== undefined && settled >= Math.max(track?.reportAt ?? 0, track?.turnAt ?? 0, Date.parse(word?.activity ?? '') || 0)
+  const spokeAt = Math.max(track?.reportAt ?? 0, track?.turnAt ?? 0, Date.parse(word?.activity ?? '') || 0)
+  // Every work item it was on was closed after it last spoke (closedAt, T-59): its question, its stop midway, its steps
+  // left and its undelivered words were answered by that close. CI, background work and running still show. Strictly
+  // after: a close in the very moment of its report (one that attached a commit) does not answer it.
+  const isClosed = closed !== undefined && closed > spokeAt
+  const isSettled = isClosed || (settled !== undefined && settled >= spokeAt)
   if (track) {
     // The session's own report says where it stands; facts (git, GitHub) still check what it reported below.
-    const reported = track.report?.status
+    const reported = isClosed ? undefined : track.report?.status
     if (reported === 'waiting_user') return 'asking'
     if (reported === 'in_progress' || reported === 'blocked') return backgroundOf(track, now).length > 0 ? 'waiting' : 'open'
-    if (track.ask || (!track.report && /[?？]\s*$/.test(track.lastAnswer))) return 'asking'
+    if (!isClosed && (track.ask || (!track.report && /[?？]\s*$/.test(track.lastAnswer)))) return 'asking'
     // CI that has not finished is never done, however long ago the session stopped.
     const pending = ciStatus(latestWords(track), ci)
     if (pending) return pending
@@ -1067,7 +1104,7 @@ export function statusOf(
     // Not committed, pushed or released, however ticked its task list (wrap_up ticks every step).
     if (isUndelivered(latestWords(track), push) && !isSettled) return 'unreleased'
   } else {
-    if (word?.isAsking) return 'asking'
+    if (word?.isAsking && !isClosed) return 'asking'
     const pending = word ? ciStatus(word.said, ci) : null
     if (pending) return pending
     if (word?.isWaiting && minutes < WAITING_MINUTES) return 'waiting'
@@ -1250,6 +1287,16 @@ export type BoardInput = {
   sessions: Session[]
   /** Every listed (unarchived) session, of any project: an owner elsewhere is still there. */
   everyone?: Session[]
+  /**
+   * Sessions the desktop app no longer lists (archived) that the core still holds a report of (T-59): never counted or
+   * listed, only read to tell a hand-over already started.
+   */
+  archived?: Session[]
+  /**
+   * Every project's work items, by project key (T-59): what a session owns is read across all of them, as the pane
+   * reads it, and the codes its report names in its own project's. Absent, `ledger` alone.
+   */
+  ledgers?: Record<string, LedgerItem[]>
   tracks: Record<string, Track>
   words: Record<string, LastWord>
   ci?: Record<string, CiCheck>
@@ -1280,9 +1327,36 @@ export function quotaAttention(input: BoardInput, rows: { one: Session; track: T
     lines.push(t('board.attention.handingOver', { name: nameOf(one, track), tokens: tokensText(effectiveTokens(mark, track)) }))
   }
   const pm = input.pmId ? input.tracks[input.pmId] : undefined
-  for (const one of pm?.pendingHandoffs ?? []) lines.push(t('board.attention.handoffPending', { title: one.title }))
+  for (const one of pm?.pendingHandoffs ?? []) if (!isHandoffSettled(one, input)) lines.push(t('board.attention.handoffPending', { title: one.title }))
 
   return lines
+}
+
+/**
+ * Whether a hand-over the PM still holds as one to start no longer is (T-59): a session of its title, other than the
+ * PM, did something after it was held (the new session was started, perhaps archived since); or the work items its
+ * title and brief name (T-12) are all done or dropped, the last of them after it was held. Otherwise, as when nothing
+ * says either, it still waits to start.
+ */
+export function isHandoffSettled(one: { title: string; prompt: string; at: number }, input: BoardInput): boolean {
+  const title = one.title.trim()
+  const sessions = [...(input.everyone ?? input.sessions), ...input.sessions, ...(input.archived ?? [])]
+  // The session the hand-over comes from, when its brief names it, is not the new one.
+  const from = handoverFromOf(one.prompt)
+  const isStarted = sessions.some(s => {
+    if ((input.pmId && isSameId(s.id, input.pmId)) || (from && isSameId(s.id, from))) return false
+    const track = input.tracks[s.id]
+    const named = [s.title, track?.title].some(name => name?.trim() === title)
+    const activeAt = Math.max(Date.parse(s.lastActivityAt) || 0, track?.turnAt ?? 0, track?.reportAt ?? 0)
+
+    return named && activeAt > one.at
+  })
+  if (isStarted) return true
+  const codes = itemCodesIn(`${one.title} ${one.prompt}`)
+  const items = input.ledger.filter(item => codes.includes(item.id))
+
+  // When each was closed, not last edited: one closed before closings kept their time says nothing.
+  return items.length > 0 && items.every(item => item.status !== 'open' && item.closedAt !== undefined) && Math.max(...items.map(item => item.closedAt!)) > one.at
 }
 
 /** How long a done agent stays on the board before it folds away (include_done shows it). */
@@ -1307,6 +1381,35 @@ export function shownAgents(list: AgentRecord[], now: number, isIncludingDone: b
   return list.filter(a => isIncludingDone || !isSettledAgent(a.state) || now - (a.endedAt ?? a.startedAt) < AGENT_SHOWN_MS)
 }
 
+/**
+ * Each session's status on a board: statusOf with what the ledger says of its work (settledAt, isHandedOff, closedAt),
+ * so the text board, the web board and the pane read every session alike (T-59). The codes its report names are this
+ * project's: looked up only for the board's own sessions.
+ */
+export function boardStatusOf(input: BoardInput, tracks: Record<string, Track>): (one: Session) => Status {
+  const { all, namedOf } = ledgerViewsOf(input)
+
+  return (one: Session) => {
+    const track = tracks[one.id]
+
+    return statusOf(one, track, input.words[one.id], input.now, input.ci?.[one.id], input.push?.[one.id], settledAt(one.id, all), isHandedOff(one.id, all), closedAt(one.id, track, all, namedOf(one)))
+  }
+}
+
+/**
+ * The work items a board reads a session's work in (T-59), as the pane does: every project's for what it owns, and its
+ * own project's (by its folder; else the board's, for the board's own sessions) for the codes its report names.
+ */
+export function ledgerViewsOf(input: BoardInput): { all: LedgerItem[]; namedOf: (one: Session) => LedgerItem[] } {
+  const ledgers = input.ledgers
+  const all = ledgers ? Object.values(ledgers).flat() : input.ledger
+
+  return {
+    all,
+    namedOf: one => ledgers?.[projectKey(one.cwd)] ?? (input.sessions.some(s => isSameId(s.id, one.id)) ? input.ledger : []),
+  }
+}
+
 /** The board as the PM model reads it: what needs attention first, then every session. */
 /**
  * Whether an owner has handed its work over, as the board reads it: a session ended, waiting to release or on CI, or no
@@ -1323,7 +1426,7 @@ export function ownerTextOf(input: BoardInput): (id: string | null) => string {
   const tracks = liveTracks(everyone, input.tracks, input.words)
   const agents = input.agents ?? []
   const inProject = new Set(input.sessions.map(s => s.id))
-  const status = (one: Session) => statusOf(one, tracks[one.id], input.words[one.id], input.now, input.ci?.[one.id], input.push?.[one.id], settledAt(one.id, input.ledger), isHandedOff(one.id, input.ledger))
+  const status = boardStatusOf(input, tracks)
   const idOf = (id: string) => (input.isForPeople ? shortId(id) : id.trim())
 
   return (id: string | null) => {
@@ -1365,7 +1468,7 @@ export function deliveredOf(input: BoardInput): (id: string | null) => boolean {
   const everyone = input.everyone ?? input.sessions
   const tracks = liveTracks(everyone, input.tracks, input.words)
   const agents = input.agents ?? []
-  const status = (one: Session) => statusOf(one, tracks[one.id], input.words[one.id], input.now, input.ci?.[one.id], input.push?.[one.id], settledAt(one.id, input.ledger), isHandedOff(one.id, input.ledger))
+  const status = boardStatusOf(input, tracks)
 
   return (id: string | null) => {
     if (!id) return false
@@ -1387,9 +1490,9 @@ export function boardText(input: BoardInput): string {
   const ci = input.ci ?? {}
   const push = input.push ?? {}
   const settled = (id: string) => settledAt(id, ledger)
-  const handedOff = (id: string) => isHandedOff(id, ledger)
+  const status = boardStatusOf(input, tracks)
   const rows = sessions
-    .map(one => ({ one, track: tracks[one.id], word: words[one.id], status: statusOf(one, tracks[one.id], words[one.id], now, ci[one.id], push[one.id], settled(one.id), handedOff(one.id)) }))
+    .map(one => ({ one, track: tracks[one.id], word: words[one.id], status: status(one) }))
     .map(r => ({ ...r, limit: r.status === 'limit' ? limitOf(r.one, r.track, r.word) : null }))
     .sort((a, b) => STATUS[a.status].rank - STATUS[b.status].rank)
   const lines: string[] = []

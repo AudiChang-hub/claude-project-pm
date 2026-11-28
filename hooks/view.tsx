@@ -6,7 +6,7 @@ import type { ElementConstructor, EngineInterface, RenderInputOf, RenderSurface,
 
 import type { AgentRecord, AgentState, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Setup, Step, Track } from '../types'
 import { agentName } from './agents'
-import { AGENT_STATUS, STATUS, agentTime, ago, cardSummary, caveatOf, clip, kpiOf, groupProjects, isActive, isDeliveredAgent, isDeliveredStatus, isHandedOff, itemCode, limitOf, liveTracks, openSteps, projectKey, sessionName, settledAt, shortId, shownAgents, statusOf, statusText } from './sessions'
+import { AGENT_STATUS, STATUS, agentTime, ago, cardSummary, caveatOf, clip, closedAt, kpiOf, groupProjects, isActive, isDeliveredAgent, isDeliveredStatus, isHandedOff, itemCode, limitOf, liveTracks, openSteps, projectKey, sessionName, settledAt, shortId, shownAgents, statusOf, statusText } from './sessions'
 import { isAgentId, isSameId, openBreakdown, qaShown, qaText } from './qa'
 import type { OpenKind, QaShown } from './qa'
 import type { Project, Status } from './sessions'
@@ -195,7 +195,9 @@ export async function renderPane($: EngineInterface, e: RenderInputOf<'Pane', Re
   // Every project's ledger: an owner may work from another project's folder.
   const allItems = Object.values(files).flatMap(file => file.ledger)
   const settled = (id: string) => settledAt(id, allItems)
-  const statusOfOne = (one: Session) => statusOf(one, all[one.id], words[one.id], now, ci[one.id], push[one.id], settled(one.id), isHandedOff(one.id, allItems))
+  // As the boards read it (boardStatusOf): its report's codes are its own project's items (T-59).
+  const statusOfOne = (one: Session) =>
+    statusOf(one, all[one.id], words[one.id], now, ci[one.id], push[one.id], settled(one.id), isHandedOff(one.id, allItems), closedAt(one.id, all[one.id], allItems, files[projectKey(one.cwd)]?.ledger ?? []))
   /** A status as the pane reads it: a usage limit with when it resets. */
   const labelOf = (one: Session, status: Status) => statusText(status, status === 'limit' ? limitOf(one, all[one.id], words[one.id]) : null, 'label')
   const caveatOfOne = (one: Session) => (settled(one.id) === undefined ? caveatOf(all[one.id], push[one.id]) : null)

@@ -18,9 +18,12 @@ import {
   boardText,
   cardSummary,
   caveatOf,
+  closeTimeOf,
+  closedAt,
   isActive,
   isHandedOff,
   kpiOf,
+  ledgerViewsOf,
   limitOf,
   openSteps,
   settledAt,
@@ -59,7 +62,7 @@ import { authorOf, uuidv7 } from './identity'
 import { ct } from './messages'
 import type { ProjectRef } from './project'
 import { projectRefOf } from './project'
-import { StoreError, changeActor, changeProject, loadProject, paths, readJsonFile, writeAtomic } from './store'
+import { StoreError, changeActor, changeProject, keptProjects, loadProject, paths, readJsonFile, writeAtomic } from './store'
 import type { Actor, CoreItem, CoreProject } from './types'
 
 export const BOARD_TOOL = 'mcp__project-pm__board'
@@ -246,6 +249,10 @@ async function ledgerUpdate(ctx: Ctx, ref: ProjectRef, input: Record<string, unk
       // mid-work that gave it up is not waited on (isHandedOff). Each owner once, the latest to leave last.
       if (now_.owner && !isSameId(now_.owner, owner)) changed.formerOwners = [...(now_.formerOwners ?? []).filter(o => !isSameId(o, now_.owner!)), now_.owner.trim()]
       if (!qa) delete changed.qa
+      // When it closed, kept through later edits; gone on reopening (T-59), as the mod keeps it.
+      const closed = closeTimeOf(now_, changed.status, now)
+      if (closed === undefined) delete changed.closedAt
+      else changed.closedAt = closed
       if (commit && !(changed.commits ?? []).includes(commit)) changed.commits = [...(changed.commits ?? []), commit]
 
       return { project: { ...project, ledger: project.ledger.map(i => (i.id === id ? changed : i)) }, result: changed }
@@ -273,6 +280,7 @@ export function itemJson(item: CoreItem) {
     commits: item.commits ?? [],
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
+    closedAt: item.closedAt ?? null,
     createdBy: item.createdBy ?? null,
     updatedBy: item.updatedBy ?? null,
     rev: item.rev ?? null,
@@ -537,7 +545,7 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     if (found.errors.length) sessionsError = found.errors.join('; ')
   } catch (err) {
     sessionsError = err instanceof Error ? err.message : String(err)
-    found = { sessions: [] as Session[], everyone: [] as Session[], tracks: {} as Record<string, Track>, actors: [] as Actor[], errors: [], words: {}, ci: {}, push: {}, agents: [] }
+    found = { sessions: [] as Session[], everyone: [] as Session[], archived: [] as Session[], tracks: {} as Record<string, Track>, actors: [] as Actor[], errors: [], words: {}, ci: {}, push: {}, agents: [] }
   }
   // The PM is not one of the sessions it follows (the desktop app's list leaves the asking session out too).
   found = { ...found, sessions: found.sessions.filter(s => s.id !== project.pmId) }
@@ -574,11 +582,14 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     project: { name: ref.name, path: ref.path },
     sessions: found.sessions,
     everyone: found.everyone,
+    archived: found.archived,
     tracks: found.tracks,
     words,
     ci,
     push,
     ledger: project.ledger,
+    // Every project's: an owner may work from another project's folder, as the pane reads it (T-59).
+    ledgers: { ...Object.fromEntries((await keptProjects(ctx.env)).map(one => [projectRefOf(one.path).key, one.ledger])), [ref.key]: project.ledger },
     agents: agents.length ? agents : undefined,
     now,
     isIncludingDone,
@@ -612,7 +623,12 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
   const actorById = new Map(found.actors.map(a => [a.id, a]))
   const statusById = new Map<string, Status>()
   // As the board and the pane read it: the person's closing (settledAt) and a handover (isHandedOff) count too.
-  for (const s of found.everyone) statusById.set(s.id, statusOf(s, hasReport(found.tracks[s.id]) ? found.tracks[s.id] : undefined, words[s.id], now, ci[s.id], push[s.id], settledAt(s.id, project.ledger), isHandedOff(s.id, project.ledger)))
+  // Every project's work items for what a session owns, its own project's for the codes it names (boardStatusOf, T-59).
+  const { all: everyItem, namedOf } = ledgerViewsOf(input)
+  for (const s of found.everyone) {
+    const track = hasReport(found.tracks[s.id]) ? found.tracks[s.id] : undefined
+    statusById.set(s.id, statusOf(s, track, words[s.id], now, ci[s.id], push[s.id], settledAt(s.id, everyItem), isHandedOff(s.id, everyItem), closedAt(s.id, track, everyItem, namedOf(s))))
+  }
   // Each item's QA as the text board reads it (deliveredOf), so the web board's counts and the board's words agree (T-42).
   const isDelivered = deliveredOf(input)
   const openItems = project.ledger.filter(i => i.status === 'open')
