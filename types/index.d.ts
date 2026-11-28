@@ -206,6 +206,11 @@ export type LedgerItem = {
   qa?: QaRecord
   /** The sessions or agents it was handed over from, oldest first: a session stopped mid-work that gave it up is not waited on. */
   formerOwners?: string[]
+  /**
+   * When it was last closed (done or dropped), ms; absent while it is open, and on items closed before T-59 kept the
+   * time. Edits to a closed item move `updatedAt`, never this.
+   */
+  closedAt?: number
 }
 
 /** One QA verdict on a work item: who checked it (never its owner), when, and why it failed or was skipped. */

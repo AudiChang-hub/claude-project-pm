@@ -180,7 +180,7 @@ export async function projectSessions(ref: ProjectRef, owners: string[], env: No
   for (const actor of actors) {
     if (everyone.some(s => s.id === actor.id)) continue
     const one = sessionOf(actor)
-    if (round && isUnlisted(actor.id, activeAt(actor), round)) {
+    if (round && isUnlisted(actor.id, activeAt(actor), round, pmId)) {
       archived.push(one)
       continue
     }
@@ -193,7 +193,7 @@ export async function projectSessions(ref: ProjectRef, owners: string[], env: No
     const track = withReport(await loadLegacyTrack(id, env), actorById.get(id))
     if (!track || !hasReport(track)) continue
     // Not in the app's list, and nothing since it was taken: archived, an owner gone as the pane has it (T-59).
-    if (round && isUnlisted(id, Math.max(track.turnAt, track.planAt, track.reportAt ?? 0), round)) continue
+    if (round && isUnlisted(id, Math.max(track.turnAt, track.planAt, track.reportAt ?? 0), round, pmId)) continue
     tracks[id] = track
     everyone.push({ id, title: track.title || id, cwd: track.cwd, isRunning: false, lastActivityAt: new Date(Math.max(track.turnAt, track.planAt, track.reportAt ?? 0)).toISOString(), isPinned: false, hasOpenPr: false })
   }
@@ -205,10 +205,18 @@ export async function projectSessions(ref: ProjectRef, owners: string[], env: No
   return { sessions: mine, everyone, archived, tracks, actors, errors, words: round?.words ?? {}, ci: round?.ci ?? {}, push: round?.push ?? {}, agents }
 }
 
+/** How many sessions the mod asks the desktop app for (hooks/actions.ts refresh, list_sessions' limit). */
+export const LIST_LIMIT = 100
+
 /**
  * Whether the desktop app no longer lists a desktop session (T-59): its id is a desktop one, the round's list leaves it
- * out, and it did nothing after the list was taken. One active since may be newer than the list: it still counts.
+ * out, and it did nothing after the list was taken. One active since may be newer than the list: it still counts. So
+ * does the PM, which the list never holds; every session when the list came back empty; and, when the list is full
+ * (the newest LIST_LIMIT), one no newer than its oldest, which may only be past the limit.
  */
-function isUnlisted(id: string, lastActive: number, round: DesktopRound): boolean {
-  return DESKTOP_ID.test(id) && !round.list.some(s => s.id === id) && lastActive <= round.listedAt
+function isUnlisted(id: string, lastActive: number, round: DesktopRound, pmId: string | null): boolean {
+  if (!DESKTOP_ID.test(id) || id === pmId || round.list.length === 0 || round.list.some(s => s.id === id)) return false
+  if (round.list.length >= LIST_LIMIT && lastActive <= Math.min(...round.list.map(s => Date.parse(s.lastActivityAt) || 0))) return false
+
+  return lastActive <= round.listedAt
 }

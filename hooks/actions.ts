@@ -46,6 +46,7 @@ import {
   needsTranscript,
   quoteOf,
   settledAt,
+  closeTimeOf,
   closedAt,
   openSteps,
   ownCommitOf,
@@ -1411,6 +1412,8 @@ export async function board($: EngineInterface, input: Record<string, unknown>):
         ci,
         push,
         ledger: files[p.key]?.ledger ?? [],
+        // Every project's: an owner may work from another project's folder, as the pane reads it (T-59).
+        ledgers: Object.fromEntries(Object.entries(files).map(([key, file]) => [key, file.ledger])),
         // Only the PM's own project's board holds its agents; any other cannot tell an agent owner's state.
         agents: self?.isPm && p.key === self.projectKey ? agentRecords() : undefined,
         now,
@@ -1547,6 +1550,10 @@ export async function ledger($: EngineInterface, input: Record<string, unknown>)
     if (item.owner && !isSameId(item.owner, owner)) changed.formerOwners = [...(item.formerOwners ?? []).filter(o => !isSameId(o, item.owner!)), item.owner.trim()]
     // A verdict for another owner, or from before a reopen, goes.
     if (!qa) delete changed.qa
+    // When it closed, kept through later edits; gone on reopening (T-59).
+    const closed = closeTimeOf(item, changed.status, now)
+    if (closed === undefined) delete changed.closedAt
+    else changed.closedAt = closed
     const list = project.ledger.map(i => (i.id === id ? changed : i))
     await saveProject($, { ...project, ledger: list })
     if (refusal) return `${qaKeptText(refusal)}\n${ledgerRow(changed, true)}`

@@ -17,9 +17,9 @@ import { actorFile } from '../src/host'
 import { connectionActor } from '../src/identity'
 import { McpSession } from '../src/mcp'
 import type { ProjectRef } from '../src/project'
-import { resolveProject } from '../src/project'
+import { projectRefOf, resolveProject } from '../src/project'
 import { changeActor, loadProject, paths } from '../src/store'
-import { boardOf, ledgerTool } from '../src/tools'
+import { boardOf, ledgerTool, reportTool } from '../src/tools'
 import type { World } from './helpers'
 import { LANGS, NOW, hostWith, world } from './helpers'
 
@@ -181,7 +181,17 @@ for (const lang of LANGS) {
     }
     const projectFile = () => join(legacy, 'projects', `${keyFile(projectKey(ref.path))}.json`)
     const ledgerOf = (ledger: unknown[], nextId = 20) => write(projectFile(), { key: ref.key, name: ref.name, path: ref.path, pmId: 'local_pm', isDismissed: false, nextId, ledger })
-    const item = (id: number, owner: string | null, status: string, updatedAt: number, text = `Item ${id}`) => ({ id, text, owner, status, note: '', createdAt: NOW - 9_000_000, updatedAt })
+    /** A work item, closed (done or dropped) at `updatedAt` unless `closedAt` says otherwise (null: closed before T-59 kept the time). */
+    const item = (id: number, owner: string | null, status: string, updatedAt: number, text = `Item ${id}`, closedAt: number | null = updatedAt) => ({
+      id,
+      text,
+      owner,
+      status,
+      note: '',
+      createdAt: NOW - 9_000_000,
+      updatedAt,
+      ...(status !== 'open' && closedAt !== null ? { closedAt } : {}),
+    })
     /** The PM's round with this list instead, its last words and checks kept. */
     const roundOf = (sessions: Session[]) => {
       const file = join(legacy, 'rounds', 'local_pm.json')
@@ -266,6 +276,85 @@ for (const lang of LANGS) {
         for (const title of ['T-09 invoices, round 2', 'Price rules, round 2']) assert.ok(board.includes(pending(title)), `${title} not in\n${board}`)
       }
       assert.deepEqual(json.attention.filter(line => line.text === pending('T-09 invoices, round 2') || line.text === pending('Price rules, round 2')).length, 2)
+    })
+
+    test('a question asked after the close stays, however the closed item was edited since; a code the ledger lacks, or open work in another project, keeps it (T-59 QA)', async () => {
+      const ids = ['local_p0', 'local_p1', 'local_p2', 'local_p3', 'local_p4', 'local_p6']
+      roundOf([...list, ...ids.map(id => listed(id, `Probe ${id}`, 20))])
+      // P1: asked, then its item was closed: not waiting on you.
+      await reported('local_p1', 'Probe local_p1', 'waiting_user', 'Keep the old banner or drop it?', NOW - 30 * 60_000)
+      // P0: its item was closed before closings kept their time: nothing says when, so it still shows.
+      await reported('local_p0', 'Probe local_p0', 'waiting_user', 'Keep the old footer or drop it?', NOW - 30 * 60_000)
+      // P2: asked 20 minutes ago; its item was closed an hour ago and its note edited 5 minutes ago.
+      await reported('local_p2', 'Probe local_p2', 'waiting_user', 'The refund page needs a new rule: cap or no cap?', NOW - 20 * 60_000)
+      // P3: names T-13 (closed since) and T-61, which this project's ledger does not hold.
+      await reported('local_p3', 'Probe local_p3', 'waiting_user', 'T-13 is done. Shall I start T-61 next?', NOW - 30 * 60_000)
+      // P4: its item here was closed since, but it owns an open one in another project.
+      await reported('local_p4', 'Probe local_p4', 'waiting_user', 'Shared price helper: round up or down?', NOW - 30 * 60_000)
+      const weather = projectRefOf(join(w.root, 'weather-app'))
+      write(join(legacy, 'projects', `${keyFile(weather.key)}.json`), { key: weather.key, name: weather.name, path: weather.path, pmId: null, isDismissed: false, nextId: 4, ledger: [item(3, 'local_p4', 'open', NOW - 3_600_000)] })
+      ledgerOf([
+        item(1, 'local_word', 'open', NOW - 3_600_000),
+        item(15, 'local_p1', 'done', NOW - 5 * 60_000),
+        item(16, 'local_p0', 'done', NOW - 5 * 60_000, 'Item 16', null),
+        { ...item(11, 'local_p2', 'done', NOW - 5 * 60_000, 'Item 11', NOW - 60 * 60_000), note: 'Edited after the close.' },
+        item(13, 'agent:z8', 'done', NOW - 5 * 60_000),
+        item(14, 'local_p4', 'done', NOW - 5 * 60_000),
+        item(12, 'local_p6', 'done', NOW - 60 * 60_000),
+      ])
+      // P6: reports a new question through the core with a commit of its done item: the item's update is the report's own time.
+      const sha = w.commit('banner.txt', 'new banner', 'Swap the banner')
+      await reportTool(w.ctx('local_p6'), { status: 'waiting_user', summary: 'The banner is swapped; keep the old one as a fallback?', commit: sha, item: 12, title: 'Probe local_p6' })
+      assert.ok((await loadProject(ref, w.env)).ledger.find(i => i.id === 12)!.updatedAt >= NOW, 'the report attached its commit to T-12')
+      const { text, peopleText, json } = await boardOf(w.ctx('local_pm'), ref, false)
+      const byId = Object.fromEntries(json.actors.map(a => [a.id, a.status]))
+      assert.deepEqual(
+        ids.map(id => [id, byId[id]]),
+        [
+          ['local_p0', 'asking'],
+          ['local_p1', 'done'],
+          ['local_p2', 'asking'],
+          ['local_p3', 'asking'],
+          ['local_p4', 'asking'],
+          ['local_p6', 'asking'],
+        ],
+      )
+      assert.deepEqual(json.pane.kpi, kpiOf(json.actors.map(a => a.status), json.agents as never))
+      for (const board of [text, peopleText]) assert.ok(board.includes(countsOf(json.actors.map(a => a.status))), board)
+    })
+
+    test('the ledger keeps when an item was closed: set on done or dropped, kept through edits, gone on reopening (T-59 QA)', async () => {
+      ledgerOf([item(1, 'local_word', 'open', NOW - 3_600_000), item(17, null, 'open', NOW - 3_600_000)])
+      const ctx = w.ctx('local_pm')
+      const closedAt = async () => (await loadProject(ref, w.env)).ledger.find(i => i.id === 17)!.closedAt
+      await ledgerTool(ctx, { action: 'update', id: 17, status: 'done', qa: 'skip', qa_note: 'docs only', qa_by: 'local_pm' })
+      assert.equal(await closedAt(), NOW)
+      w.advance(60_000)
+      await ledgerTool(w.ctx('local_pm'), { action: 'update', id: 17, note: 'A later note.' })
+      assert.equal(await closedAt(), NOW)
+      await ledgerTool(w.ctx('local_pm'), { action: 'update', id: 17, status: 'dropped' })
+      assert.equal(await closedAt(), NOW + 60_000)
+      await ledgerTool(w.ctx('local_pm'), { action: 'update', id: 17, status: 'open' })
+      assert.equal(await closedAt(), undefined)
+    })
+
+    test('the PM, a list that came back empty, and a session older than a full list are never taken as archived (T-59 QA)', async () => {
+      // The PM has a record of its own in the core; the list never holds it. Its open item still names it.
+      await changeActor('local_pm', () => ({ id: 'local_pm', tool: 'claude-code', title: 'acme-shop · PM', cwd: w.repo, projectKey: ref.key, lastSeenAt: NOW - 3 * 3_600_000 }), w.env)
+      ledgerOf([item(1, 'local_word', 'open', NOW - 3_600_000), item(18, 'local_pm', 'open', NOW - 3_600_000, 'Write the release notes')])
+      const lost = t('board.attention.lost', { code: 'T-18', text: 'Write the release notes', owner: 'local_pm' })
+      assert.ok(!(await boardOf(w.ctx('local_pm'), ref, false)).text.includes(lost))
+      // A list that came back empty says nothing of who was archived.
+      await reported('local_quiet', 'Quiet coupon question', 'waiting_user', 'Keep coupon_v1 read-only, or drop it?', NOW - 3 * 3_600_000)
+      roundOf([])
+      assert.equal((await boardOf(w.ctx('local_pm'), ref, false)).json.actors.find(a => a.id === 'local_quiet')?.status, 'asking')
+      // A full list (the newest 100): one older than its oldest may only be past the limit; one newer and missing is archived.
+      const elsewhere = join(w.root, 'weather-app')
+      roundOf(Array.from({ length: 100 }, (_, i) => ({ ...listed(`local_w${i}`, `Weather ${i}`, i + 1), cwd: elsewhere })))
+      await reported('local_newer_gone', 'Archived search question', 'waiting_user', 'Search by SKU or by name?', NOW - 30 * 60_000)
+      const byId = Object.fromEntries((await boardOf(w.ctx('local_pm'), ref, false)).json.actors.map(a => [a.id, a.status]))
+      assert.equal(byId.local_quiet, 'asking')
+      assert.equal(byId.local_newer_gone, undefined)
     })
 
     test('the hooks stand aside in a desktop session where the mod is installed, and use its id where it is not', async () => {

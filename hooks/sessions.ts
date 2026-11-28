@@ -5,7 +5,7 @@ import type { AgentRecord, AgentState, BackgroundTask, CiCheck, KeyState, LastWo
 import { agentName, isSettledAgent } from './agents'
 import { MESSAGES, t } from './messages'
 import { isAgentId, isSameId, openBreakdown, qaAttention, qaShown, qaText } from './qa'
-import { DEFAULT_THRESHOLDS, compactedLine, contextLine, contextOf, effectiveTokens, hasWorkLeft, needsHandoff, tokensText } from './context'
+import { DEFAULT_THRESHOLDS, compactedLine, contextLine, contextOf, effectiveTokens, handoverFromOf, hasWorkLeft, needsHandoff, tokensText } from './context'
 import type { ContextMark, Thresholds } from './context'
 
 export type Status = 'running' | 'asking' | 'failed' | 'limit' | 'open' | 'unreleased' | 'ci' | 'waiting' | 'done' | 'stale'
@@ -390,21 +390,30 @@ export function itemCodesIn(text: string): number[] {
   return [...new Set([...text.matchAll(/\bT-(\d+)\b/gi)].map(m => Number(m[1])))]
 }
 
+/** An item's `closedAt` once its status becomes `status` at `now`: set when it closes, kept while it stays closed, gone when open. */
+export function closeTimeOf(was: Pick<LedgerItem, 'status' | 'closedAt'>, status: LedgerItem['status'], now: number): number | undefined {
+  if (status === 'open') return undefined
+
+  return status === was.status ? was.closedAt : now
+}
+
 /**
- * When the work a session was on was all closed (T-59): the items it owns, the items handed over from it, and the
- * items its last report names (T-12, looked up in `named`, the ledger of the session's own project: codes are per
- * project) are all done or dropped, none open; the latest close. Undefined while any is open, or when it has none: a
- * session nothing in the ledger ties to is never taken as finished.
+ * When the work a session was on was all closed (T-59): the latest `closedAt` of the items tied to it, every one done
+ * or dropped. Tied: the items it owns, in any project's ledger (`ledger`), and those its last report names (T-12),
+ * looked up in `named`, its own project's ledger (codes are per project); the items handed over from it count too, but
+ * never tie it alone. Undefined, so the session still shows, when it is unsure: nothing ties to it, any tied item is
+ * open or was closed before closings kept their time, or its report names a code its own ledger lacks.
  */
 export function closedAt(id: string, track: Track | undefined, ledger: readonly LedgerItem[], named: readonly LedgerItem[] = ledger): number | undefined {
   const codes = track?.report ? itemCodesIn(`${track.report.summary} ${track.report.next ?? ''}`) : []
-  const items = [
-    ...ledger.filter(item => isSameId(item.owner, id) || (item.formerOwners ?? []).some(former => isSameId(former, id))),
-    ...named.filter(item => codes.includes(item.id)),
-  ]
-  if (items.length === 0 || items.some(item => item.status === 'open')) return undefined
+  // Not registered yet, or another project's: what it waits on may be open.
+  if (codes.some(code => !named.some(item => item.id === code))) return undefined
+  const tied = [...ledger.filter(item => isSameId(item.owner, id)), ...named.filter(item => codes.includes(item.id))]
+  if (tied.length === 0) return undefined
+  const items = [...tied, ...ledger.filter(item => (item.formerOwners ?? []).some(former => isSameId(former, id)))]
+  if (items.some(item => item.status === 'open' || item.closedAt === undefined)) return undefined
 
-  return Math.max(...items.map(item => item.updatedAt))
+  return Math.max(...items.map(item => item.closedAt!))
 }
 
 /** The words statusOf reads for CI: the track's latest turn, else the transcript's last word. */
@@ -1070,8 +1079,9 @@ export function statusOf(
   // they judged it. Running, asking, CI and background work still show: they are what is happening, not a reading.
   const spokeAt = Math.max(track?.reportAt ?? 0, track?.turnAt ?? 0, Date.parse(word?.activity ?? '') || 0)
   // Every work item it was on was closed after it last spoke (closedAt, T-59): its question, its stop midway, its steps
-  // left and its undelivered words were answered by that close. CI, background work and running still show.
-  const isClosed = closed !== undefined && closed >= spokeAt
+  // left and its undelivered words were answered by that close. CI, background work and running still show. Strictly
+  // after: a close in the very moment of its report (one that attached a commit) does not answer it.
+  const isClosed = closed !== undefined && closed > spokeAt
   const isSettled = isClosed || (settled !== undefined && settled >= spokeAt)
   if (track) {
     // The session's own report says where it stands; facts (git, GitHub) still check what it reported below.
@@ -1282,6 +1292,11 @@ export type BoardInput = {
    * listed, only read to tell a hand-over already started.
    */
   archived?: Session[]
+  /**
+   * Every project's work items, by project key (T-59): what a session owns is read across all of them, as the pane
+   * reads it, and the codes its report names in its own project's. Absent, `ledger` alone.
+   */
+  ledgers?: Record<string, LedgerItem[]>
   tracks: Record<string, Track>
   words: Record<string, LastWord>
   ci?: Record<string, CiCheck>
@@ -1326,8 +1341,10 @@ export function quotaAttention(input: BoardInput, rows: { one: Session; track: T
 export function isHandoffSettled(one: { title: string; prompt: string; at: number }, input: BoardInput): boolean {
   const title = one.title.trim()
   const sessions = [...(input.everyone ?? input.sessions), ...input.sessions, ...(input.archived ?? [])]
+  // The session the hand-over comes from, when its brief names it, is not the new one.
+  const from = handoverFromOf(one.prompt)
   const isStarted = sessions.some(s => {
-    if (input.pmId && isSameId(s.id, input.pmId)) return false
+    if ((input.pmId && isSameId(s.id, input.pmId)) || (from && isSameId(s.id, from))) return false
     const track = input.tracks[s.id]
     const named = [s.title, track?.title].some(name => name?.trim() === title)
     const activeAt = Math.max(Date.parse(s.lastActivityAt) || 0, track?.turnAt ?? 0, track?.reportAt ?? 0)
@@ -1338,7 +1355,8 @@ export function isHandoffSettled(one: { title: string; prompt: string; at: numbe
   const codes = itemCodesIn(`${one.title} ${one.prompt}`)
   const items = input.ledger.filter(item => codes.includes(item.id))
 
-  return items.length > 0 && items.every(item => item.status !== 'open') && Math.max(...items.map(item => item.updatedAt)) > one.at
+  // When each was closed, not last edited: one closed before closings kept their time says nothing.
+  return items.length > 0 && items.every(item => item.status !== 'open' && item.closedAt !== undefined) && Math.max(...items.map(item => item.closedAt!)) > one.at
 }
 
 /** How long a done agent stays on the board before it folds away (include_done shows it). */
@@ -1369,13 +1387,26 @@ export function shownAgents(list: AgentRecord[], now: number, isIncludingDone: b
  * project's: looked up only for the board's own sessions.
  */
 export function boardStatusOf(input: BoardInput, tracks: Record<string, Track>): (one: Session) => Status {
-  const { ledger } = input
+  const { all, namedOf } = ledgerViewsOf(input)
 
   return (one: Session) => {
     const track = tracks[one.id]
-    const named = input.sessions.some(s => isSameId(s.id, one.id)) ? ledger : []
 
-    return statusOf(one, track, input.words[one.id], input.now, input.ci?.[one.id], input.push?.[one.id], settledAt(one.id, ledger), isHandedOff(one.id, ledger), closedAt(one.id, track, ledger, named))
+    return statusOf(one, track, input.words[one.id], input.now, input.ci?.[one.id], input.push?.[one.id], settledAt(one.id, all), isHandedOff(one.id, all), closedAt(one.id, track, all, namedOf(one)))
+  }
+}
+
+/**
+ * The work items a board reads a session's work in (T-59), as the pane does: every project's for what it owns, and its
+ * own project's (by its folder; else the board's, for the board's own sessions) for the codes its report names.
+ */
+export function ledgerViewsOf(input: BoardInput): { all: LedgerItem[]; namedOf: (one: Session) => LedgerItem[] } {
+  const ledgers = input.ledgers
+  const all = ledgers ? Object.values(ledgers).flat() : input.ledger
+
+  return {
+    all,
+    namedOf: one => ledgers?.[projectKey(one.cwd)] ?? (input.sessions.some(s => isSameId(s.id, one.id)) ? input.ledger : []),
   }
 }
 

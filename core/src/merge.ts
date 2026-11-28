@@ -7,7 +7,7 @@ import { isSameId } from '../../hooks/qa'
 import type { CoreItem, CoreProject } from './types'
 
 /** The fields of a work item the mod writes, and may clear on purpose (criteria, a verdict): never brought back. */
-const MOD_FIELDS = ['id', 'text', 'owner', 'status', 'note', 'createdAt', 'updatedAt', 'criteria', 'qa', 'formerOwners']
+const MOD_FIELDS = ['id', 'text', 'owner', 'status', 'note', 'createdAt', 'updatedAt', 'criteria', 'qa', 'formerOwners', 'closedAt']
 /** The fields the core writes, and may clear on purpose. */
 const CORE_FIELDS = ['uid', 'createdBy', 'updatedBy', 'rev', 'commits']
 

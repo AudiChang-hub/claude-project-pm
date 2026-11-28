@@ -8,7 +8,7 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 ## [Unreleased]
 
 ### Fixed
-- The board no longer counts archived sessions, or sessions whose work items were all closed after they last spoke, as waiting on you or unfinished, and no longer lists a hand-over to start whose new session was already started or whose work items are done (T-59). The web board, the board tool and the desktop pane now give the same counts.
+- The board no longer counts archived sessions, or sessions whose work items were all closed after they last spoke, as waiting on you or unfinished, and no longer lists a hand-over to start whose new session was already started or whose work items are done (T-59). The ledger now records when each item was closed, and the web board, the board tool and the desktop pane give the same counts.
 
 ## [1.2.2] - 2026-11-28
 

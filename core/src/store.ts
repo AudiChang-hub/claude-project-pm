@@ -12,9 +12,11 @@ import { dirname, join } from 'node:path'
 import { emptyProject } from '../../hooks/sessions'
 import type { Track } from '../../types'
 import { actorFile, dataHome, legacyHome } from './host'
+import { plainLocalPath } from './localpath'
 import { mergeLegacy } from './merge'
 import { ct } from './messages'
 import type { ProjectRef } from './project'
+import { projectRefOf } from './project'
 import type { Actor, CoreProject } from './types'
 
 /** A lock older than this was left by a process that died: it may be taken. */
@@ -146,6 +148,30 @@ export async function loadProject(ref: ProjectRef, env: NodeJS.ProcessEnv = proc
   if (!legacy) return filled(ref, core)
 
   return mergeLegacy(filled(ref, core), filled(ref, legacy), (await mtimeOf(legacyFile)) > (await mtimeOf(coreFile)))
+}
+
+/**
+ * Every project the core keeps: the core's projects and the mod's (a desktop user's ledger may be in the mod's folder
+ * alone, T-47), each read as the board reads it, both merged (loadProject). Read only: nothing is written here.
+ */
+export async function keptProjects(env: NodeJS.ProcessEnv = process.env): Promise<CoreProject[]> {
+  const p = paths(env)
+  const found = new Map<string, string>()
+  for (const dir of [join(p.home, 'projects'), join(p.legacy, 'projects')]) {
+    const names = (await readdir(dir).catch(() => [] as string[])).filter(name => name.endsWith('.json'))
+    for (const name of names) {
+      const one = await readJsonFile<CoreProject>(join(dir, name)).catch(() => null)
+      // A folder on this computer's own disks only, as everywhere a path is taken in.
+      const path = typeof one?.path === 'string' ? plainLocalPath(one.path, one.path) : null
+      if (!path || typeof one?.key !== 'string') continue
+      const ref = projectRefOf(path)
+      if (!found.has(ref.key)) found.set(ref.key, path)
+    }
+  }
+  const kept: CoreProject[] = []
+  for (const path of found.values()) kept.push(await loadProject(projectRefOf(path), env).catch(() => null as never))
+
+  return kept.filter(Boolean)
 }
 
 /** The mod's copy of a project; one that cannot be read is passed over (the mod's file is the mod's to fix). */
