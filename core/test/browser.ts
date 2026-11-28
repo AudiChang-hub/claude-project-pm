@@ -50,6 +50,8 @@ async function posixUsing(profile: string): Promise<number[]> {
  * are touched: it is a folder this file made for one browser, so no one else's browser holds it.
  */
 async function sweep(profile: string, { graceMs, limitMs }: { graceMs: number; limitMs: number }): Promise<number[]> {
+  // An empty profile is on every command line: it would end every process this user runs.
+  if (!profile.trim()) throw new Error('no profile to look for')
   if (process.platform === 'win32') {
     const out = await new Promise<string>(resolve =>
       execFile(
@@ -116,8 +118,13 @@ function removeProfile(profile: string) {
   }
 }
 
-/** Ends the browser and the processes it started, and waits for it: on Windows the tree under its id, elsewhere its process group (it is started as one). */
-function endNow(child: ChildProcess) {
+/**
+ * Ends the browser and the processes it started, and waits for it: on Windows the tree under its id, elsewhere its
+ * process group (it is started as one). A browser that has already ended is left alone: its id may now be another
+ * process's, whose tree this must not end. Its helpers, if any outlive it, are found by the profile (sweep).
+ */
+export function endNow(child: Pick<ChildProcess, 'pid' | 'exitCode' | 'signalCode'>) {
+  if (child.exitCode !== null || child.signalCode !== null || !child.pid) return
   if (process.platform === 'win32') spawnSync(systemProgram('taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 30_000 })
   else
     try {
@@ -127,11 +134,34 @@ function endNow(child: ChildProcess) {
     }
 }
 
-/** Browsers not closed yet. Ended as the test process ends, whatever ends it first (a test that failed before close(), an uncaught error). */
-const OPEN = new Set<ChildProcess>()
-process.on('exit', () => {
-  for (const child of OPEN) endNow(child)
-})
+/**
+ * Browsers not closed yet, with their profiles. Ended as the test process ends, whatever ends it first (a test that
+ * failed before close(), an uncaught error, and on macOS and Linux Ctrl+C or a SIGTERM, which no longer reach a browser
+ * in its own process group), and their profiles removed where nothing holds them any more.
+ */
+const OPEN = new Map<ChildProcess, string>()
+function endOpen() {
+  for (const [child, profile] of OPEN) {
+    endNow(child)
+    try {
+      rmSync(profile, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+    } catch {
+      // a file the ending browser still holds (EPERM): it is in the temporary folder
+    }
+  }
+  OPEN.clear()
+}
+process.on('exit', endOpen)
+if (process.platform !== 'win32')
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    const onSignal = () => {
+      endOpen()
+      process.removeListener(signal, onSignal)
+      // Raised again so the process ends as the signal says; when another listener took it, that one decides.
+      if (!process.listenerCount(signal)) process.kill(process.pid, signal)
+    }
+    process.on(signal, onSignal)
+  }
 
 /** Asks the browser to close itself (DevTools Browser.close), so it ends its own processes and lets go of its profile. Whatever fails here, the sweep after it ends them. */
 async function askToClose(port: number) {
@@ -171,7 +201,7 @@ export async function openBrowser(exe: string, { before = [], startTimeoutMs = 3
     // its own process group on macOS and Linux, so endNow ends its helpers with it
     detached: process.platform !== 'win32',
   })
-  OPEN.add(child)
+  OPEN.set(child, profile)
   const port = await new Promise<number>((ok, fail) => {
     let said = ''
     child.stderr!.on('data', chunk => {
@@ -183,7 +213,8 @@ export async function openBrowser(exe: string, { before = [], startTimeoutMs = 3
     setTimeout(() => fail(new Error('the browser did not say where it listens')), startTimeoutMs).unref()
   }).catch(async (err: Error) => {
     // A browser that ended before it listened may have handed over to processes it started, whose parent is now
-    // gone (taskkill /T finds no tree under an ended id): they are found by the profile on their command line.
+    // gone (taskkill /T finds no tree under an ended id): they are found by the profile on their command line. endNow
+    // ends the tree of one that still runs (it timed out) and leaves the id of one that ended alone.
     OPEN.delete(child)
     endNow(child)
     const left = await sweep(profile, { graceMs: 0, limitMs: GONE_LIMIT_MS })

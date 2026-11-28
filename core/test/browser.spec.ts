@@ -6,19 +6,19 @@
  * is one, plays a normal close and a start stopped halfway. Only processes with this test's own profile are counted or ended.
  */
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { browserPath, openBrowser, processesUsing } from './browser'
+import { browserPath, endNow, openBrowser, processesUsing } from './browser'
 
 /**
  * Plays a browser: `ends` starts a helper that outlives it and ends (0) before it listens (as Edge did here: "the
- * browser ended (0) before it listened"), out of reach of taskkill /T once its parent id is gone; `silent` keeps running with a helper and never says where it listens; `listens` says it
- * listens and keeps running with a helper. Each helper carries the profile on its command line, as a browser's do. The
+ * browser ended (0) before it listened"), out of reach of taskkill /T once its parent id is gone; `silent` keeps
+ * running with a helper and never says where it listens; `listens` says it listens and keeps running with a helper. Each helper carries the profile on its command line, as a browser's do. The
  * profile is written to `record` so the test can look for it.
  */
 const STAND_IN = `
@@ -65,11 +65,16 @@ describe('the test browser leaves nothing behind (T-55)', () => {
     assert.equal(existsSync(profile), false, 'the profile folder is still there')
   })
 
+  // On Windows Node's own job object also ends a non-detached browser as the test process ends, so "throws" fails
+  // without the exit hook only on macOS and Linux; "finishes" hangs without it everywhere. "is sent SIGTERM" is the
+  // signal handler's case (macOS and Linux: Windows has no such signal to send itself).
   for (const [how, end] of [
     ['throws', `throw new Error('the test failed before close()')`],
     ['finishes', `console.log('the test finished without close()')`],
+    ['is sent SIGTERM', `console.log('the test was stopped before close()')\nsetInterval(() => {}, 1000)\nprocess.kill(process.pid, 'SIGTERM')`],
   ] as const)
-    test(`a test process that ${how} without close() ends, and ends its browser and the browser helper`, async () => {
+    test(`a test process that ${how} without close() ends, ends its browser and the browser helper, and removes the profile`, async t => {
+      if (how === 'is sent SIGTERM' && process.platform === 'win32') return t.skip('no SIGTERM to send itself on Windows')
       const file = record()
       const script = join(dir, `abandon-${how}.mts`)
       const helper = pathToFileURL(fileURLToPath(new URL('./browser.ts', import.meta.url))).href
@@ -77,7 +82,9 @@ describe('the test browser leaves nothing behind (T-55)', () => {
       // A browser left open must not keep the test process running (it would never end): 60 s is the limit here.
       const ran = spawnSync(process.execPath, ['--import', 'tsx', script], { cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8', timeout: 60_000, windowsHide: true })
       assert.equal(ran.error, undefined, 'the test process did not end')
-      assert.match(ran.stdout + ran.stderr, /the test (failed before|finished without) close\(\)/)
+      assert.match(ran.stdout + ran.stderr, /the test (failed before|finished without|was stopped before) close\(\)/)
+      // the signal is raised again once the browser is ended, so the process still ends as SIGTERM says
+      if (how === 'is sent SIGTERM') assert.equal(ran.signal, 'SIGTERM', ran.stderr)
       const profile = readFileSync(file, 'utf8')
       let left = await processesUsing(profile)
       for (let i = 0; i < 40 && left.length; i++) {
@@ -85,8 +92,30 @@ describe('the test browser leaves nothing behind (T-55)', () => {
         left = await processesUsing(profile)
       }
       assert.deepEqual(left, [], 'a process with the test profile is still running')
-      rmSync(profile, { recursive: true, force: true })
+      assert.equal(existsSync(profile), false, 'the profile folder is still there')
     })
+
+  test('a browser that has ended is not ended again by its id, which may be another process now', async () => {
+    // A process of this test's own plays the one that got the ended browser's id.
+    const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true, detached: process.platform !== 'win32' })
+    try {
+      endNow({ pid: other.pid, exitCode: 0, signalCode: null })
+      endNow({ pid: other.pid, exitCode: null, signalCode: 'SIGKILL' })
+      await new Promise(resolve => setTimeout(resolve, 500))
+      assert.equal(other.exitCode, null, 'the process with the id was ended')
+      assert.equal(other.signalCode, null, 'the process with the id was ended')
+      // and one that still runs is ended
+      const gone = new Promise(resolve => other.once('exit', resolve))
+      endNow(other)
+      await gone
+    } finally {
+      other.kill('SIGKILL')
+    }
+  })
+
+  test('an empty profile is refused, not looked for on every command line', async () => {
+    for (const profile of ['', '   ']) await assert.rejects(processesUsing(profile), /no profile to look for/)
+  })
 
   test('a real browser: after close() no process with its profile runs and the profile is gone', async t => {
     const exe = browserPath()
