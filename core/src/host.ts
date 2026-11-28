@@ -216,19 +216,26 @@ export function desktopClaude(env: NodeJS.ProcessEnv = process.env, platform: No
   return found[0]?.file ?? null
 }
 
-/** Where the core keeps its data: PROJECT_PM_HOME, else ~/.project-pm. */
+/**
+ * The home folder in `env`, found as the mod finds it (hooks/actions.ts dataDir): USERPROFILE, else HOME, else the
+ * process's own. A demo or a test that gives the core a temporary home in its env keeps the person's real one out of
+ * it (T-53, T-54).
+ */
+function homeOf(env: NodeJS.ProcessEnv): string {
+  return env.USERPROFILE ?? env.HOME ?? homedir()
+}
+
+/** Where the core keeps its data: PROJECT_PM_HOME, else .project-pm in the env's home folder (homeOf). */
 export function dataHome(env: NodeJS.ProcessEnv = process.env): string {
-  return env.PROJECT_PM_HOME?.trim() || join(homedir(), '.project-pm')
+  return env.PROJECT_PM_HOME?.trim() || join(homeOf(env), '.project-pm')
 }
 
 /**
  * Where the desktop mod (v0.9) keeps its data: ~/.claude/project-pm. The core reads it, and writes projects back (E1).
- * The home folder is the one in `env`, found as the mod finds it (hooks/actions.ts dataDir: USERPROFILE, else HOME):
- * PROJECT_PM_HOME and CLAUDE_CONFIG_DIR do not move it. A demo or a test that gives the core a temporary home in its
- * env keeps the person's real folder out of it (T-53).
+ * The home folder is the one in `env` (homeOf): PROJECT_PM_HOME and CLAUDE_CONFIG_DIR do not move it.
  */
 export function legacyHome(env: NodeJS.ProcessEnv = process.env): string {
-  return join(env.USERPROFILE ?? env.HOME ?? homedir(), '.claude', 'project-pm')
+  return join(homeOf(env), '.claude', 'project-pm')
 }
 
 /** A file name for an actor id: `claude-code:1a2b` is not a legal file name on Windows. */

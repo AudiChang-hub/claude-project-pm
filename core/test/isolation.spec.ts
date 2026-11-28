@@ -13,6 +13,8 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
+import { projectSessions } from '../src/actors'
+import { dataHome } from '../src/host'
 import { serve } from '../src/http'
 import type { ProjectRef } from '../src/project'
 import { resolveProject } from '../src/project'
@@ -153,5 +155,76 @@ describe('the mod\'s folder is found as the mod finds it (T-53)', () => {
     assert.equal(paths({ USERPROFILE: a, HOME: b }).legacy, join(a, '.claude', 'project-pm'))
     assert.equal(paths({ HOME: b }).legacy, join(b, '.claude', 'project-pm'))
     assert.equal(paths({}).legacy, join(w.home, '.claude', 'project-pm'))
+  })
+})
+
+/** A desktop PM's round in the mod's folder of `home`: the desktop app's list, one session in the Acme repo. */
+function modRound(home: string, pmId: string, sessionId: string, cwd: string) {
+  const file = join(home, '.claude', 'project-pm', 'rounds', `${pmId}.json`)
+  mkdirSync(join(file, '..'), { recursive: true })
+  const session = { id: sessionId, title: 'Acme coupon field', cwd, isRunning: true, lastActivityAt: new Date(NOW).toISOString(), isPinned: false, hasOpenPr: false }
+  writeFileSync(file, JSON.stringify({ sessions: { list: [session], fetchedAt: NOW, error: null }, lastWords: {}, ciChecks: {}, pushChecks: {} }))
+}
+
+describe('the desktop round and the data home come from the env\'s home folder too (T-54)', () => {
+  let w: World
+  let demoHome: string
+  beforeEach(() => {
+    // The person's "real" home is w.home (os.homedir() reads it); the demo has a home of its own next to its repo.
+    w = world('en', { legacy: true })
+    demoHome = join(w.root, 'demo', 'home')
+    mkdirSync(join(demoHome, '.claude', 'project-pm'), { recursive: true })
+    assert.equal(homedir(), w.home)
+  })
+  afterEach(() => w.done())
+
+  test('a desktop PM\'s round is read from the mod\'s folder of the env\'s home, not the real one', async () => {
+    modRound(w.home, 'local_pm', 'local_real', w.repo)
+    modRound(demoHome, 'local_pm', 'local_demo', w.repo)
+    const ref = (await resolveProject(w.repo))!
+    const env = { ...w.env, USERPROFILE: demoHome, HOME: demoHome }
+    const found = await projectSessions(ref, [], env, 'local_pm', Date.now())
+    assert.deepEqual(found.sessions.map(s => s.id), ['local_demo'])
+    // HOME alone, as on macOS and Linux.
+    const onlyHome: NodeJS.ProcessEnv = { ...w.env, HOME: demoHome }
+    delete onlyHome.USERPROFILE
+    assert.deepEqual((await projectSessions(ref, [], onlyHome, 'local_pm', Date.now())).sessions.map(s => s.id), ['local_demo'])
+  })
+
+  test('with no PROJECT_PM_HOME, the core keeps its data in .project-pm of the env\'s home, and none in the real one', async () => {
+    const realCore = join(w.home, '.project-pm')
+    const realMod = join(w.home, '.claude', 'project-pm')
+    const before = { core: snapshot(realCore), mod: snapshot(realMod) }
+    const env: NodeJS.ProcessEnv = { ...w.env, USERPROFILE: demoHome, HOME: demoHome }
+    delete env.PROJECT_PM_HOME
+    assert.equal(dataHome(env), join(demoHome, '.project-pm'))
+    const ref = (await resolveProject(w.repo))!
+    assert.equal(paths(env).project(ref), join(demoHome, '.project-pm', 'projects', `${ref.file}.json`))
+    await pmTool(w.ctx('claude-code:pm-acme', { env }), { action: 'claim' })
+    await ledgerTool(w.ctx('claude-code:pm-acme', { env }), { action: 'add', text: 'Add a coupon field to checkout' })
+    const kept = JSON.parse(readFileSync(paths(env).project(ref), 'utf8')) as { ledger: { text: string }[] }
+    assert.deepEqual(kept.ledger.map(i => i.text), ['Add a coupon field to checkout'])
+    assert.deepEqual([...snapshot(realCore)], [...before.core])
+    assert.deepEqual([...snapshot(realMod)], [...before.mod])
+    // USERPROFILE first, HOME second, as legacyHome.
+    const a = join(w.root, 'a')
+    const b = join(w.root, 'b')
+    assert.equal(dataHome({ USERPROFILE: a, HOME: b }), join(a, '.project-pm'))
+    assert.equal(dataHome({ HOME: b }), join(b, '.project-pm'))
+    assert.equal(dataHome({ USERPROFILE: a, HOME: b, PROJECT_PM_HOME: join(w.root, 'pm') }), join(w.root, 'pm'))
+  })
+
+  test('nothing set: the data stays in ~/.project-pm and ~/.claude/project-pm, and the round is read there, as before', async () => {
+    // The env of a person's Claude Code: its home is the one os.homedir() gives; or no home in it at all.
+    const asBefore = { ...w.env }
+    delete asBefore.PROJECT_PM_HOME
+    const bare: NodeJS.ProcessEnv = {}
+    for (const env of [asBefore, bare]) {
+      assert.equal(dataHome(env), join(w.home, '.project-pm'))
+      assert.equal(paths(env).legacy, join(w.home, '.claude', 'project-pm'))
+    }
+    modRound(w.home, 'local_pm', 'local_real', w.repo)
+    const ref = (await resolveProject(w.repo))!
+    for (const env of [asBefore, bare]) assert.deepEqual((await projectSessions(ref, [], env, 'local_pm', Date.now())).sessions.map(s => s.id), ['local_real'])
   })
 })

@@ -105,11 +105,12 @@ export type DesktopRound = { list: Session[]; words: Record<string, LastWord>; c
 /**
  * The desktop app's session list as a desktop PM's mod last saw it, with each session's last words and what git and
  * GitHub said of them; null when the PM is no desktop session or its mod kept no round. A round older than
- * ROUND_FRESH_MS (the desktop app closed) still names the sessions, but none of them counts as running.
+ * ROUND_FRESH_MS (the desktop app closed) still names the sessions, but none of them counts as running. The mod's
+ * folder is the one of the home folder in `env` (legacyHome, T-54).
  */
-export async function desktopRound(pmId: string | null | undefined, now: number): Promise<DesktopRound | null> {
+export async function desktopRound(pmId: string | null | undefined, now: number, env: NodeJS.ProcessEnv = process.env): Promise<DesktopRound | null> {
   if (!pmId || !DESKTOP_ID.test(pmId)) return null
-  const file = join(legacyHome(), 'rounds', `${pmId}.json`)
+  const file = join(legacyHome(env), 'rounds', `${pmId}.json`)
   let round: Round | null
   let at: number
   try {
@@ -151,7 +152,7 @@ export async function projectSessions(ref: ProjectRef, owners: string[], env: No
   const tracks: Record<string, Track> = {}
   for (const actor of actors) tracks[actor.id] = trackOf(actor)
   const wanted = new Set(owners.map(o => o.trim()))
-  const round = await desktopRound(pmId, now)
+  const round = await desktopRound(pmId, now, env)
   const everyone: Session[] = []
   const mine: Session[] = []
   for (const one of round?.list ?? []) {
