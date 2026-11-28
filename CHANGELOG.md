@@ -7,6 +7,9 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+### Changed
+- A session sends its PM an update message only when it enters a state the PM has to act on: work done and waiting for QA, stuck or waiting on the user's decision, or hand-over notes written, once per entry (T-57). Progress, CI, release and task-list changes no longer send one; the board shows them at its next round, which also keeps the PM from being woken by each of them where its mod has stopped taking updates in.
+
 ## [1.2.1] - 2026-11-23
 
 ### Fixed

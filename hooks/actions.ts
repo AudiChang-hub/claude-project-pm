@@ -4,7 +4,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, McpToolResult } from 'claude-code'
 
-import type { AgentRecord, CiCheck, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Track } from '../types'
+import type { AgentRecord, CiCheck, KeyState, LastWord, LedgerItem, Me, Notice, ProjectFile, PushCheck, Scope, Session, Sessions, Track } from '../types'
 import {
   AGENTS_KEPT,
   READ_ONLY_TYPES,
@@ -36,6 +36,7 @@ import {
   isScratch,
   itemCode,
   keyFile,
+  keyStateOf,
   latestWords,
   leftOf,
   ledgerRow,
@@ -254,8 +255,9 @@ const notifyFailedFor = new Set<string>()
 
 /**
  * Tells this project's PM that this session's track changed, so its board is redrawn now rather than at its next
- * poll. Only to a PM whose mod takes the message in without a turn (its track's `inbox`); never from the PM itself, a
- * scratch folder or a project without a PM. The track itself is already on disk: the message only names the session.
+ * poll; called only on entering a key state (noteKeyState). Only to a PM whose mod takes the message in without a
+ * turn (its track's `inbox`); never from the PM itself, a scratch folder or a project without a PM. The track itself
+ * is already on disk: the message only names the session.
  */
 export async function notifyPm($: EngineInterface) {
   const self = await read($, me)
@@ -282,6 +284,23 @@ export async function notifyPm($: EngineInterface) {
     if (!notifyFailedFor.has(pmId)) $.ui.log(t('log.notifyFailed', { reason: reason(err) }))
     notifyFailedFor.add(pmId)
   }
+}
+
+/**
+ * Keeps where this session stands for its PM (keyStateOf) and sends the PM an update only when it enters a key state
+ * (T-57): work done for QA, stuck or waiting on the user's decision, hand-over notes written. Staying in one sends
+ * nothing again, and every other change (in progress, waiting on CI or a release, the task list) waits for the PM's
+ * next round: its board reads the track from disk all the same. `isReport`: a report set it, so the end of the turn
+ * it was made in keeps it (turn.complete), and the next turn's end, without a report of its own, leaves it.
+ */
+export async function noteKeyState($: EngineInterface, state: KeyState | null, isReport: boolean) {
+  const own = getMine()
+  if (!own) return
+  const before = own.keyState?.state ?? null
+  if (before !== state || (own.keyState?.isReported === true) !== isReport) {
+    await changeMine($, (track): Track => ({ ...track, keyState: isReport ? { state, isReported: true } : { state } }))
+  }
+  if (state !== null && state !== before) await notifyPm($)
 }
 
 // ── The report tool, for the sessions of a project with a PM ──
@@ -336,7 +355,7 @@ export async function report($: EngineInterface, input: Record<string, unknown>)
     }
   }
   await changeMine($, track => ({ ...track, report: made, reportAt: now }))
-  await notifyPm($)
+  await noteKeyState($, keyStateOf(made), true)
 
   return made.detail ? t('report.savedDetail', { status: made.status, path: made.detail }) : t('report.saved', { status: made.status })
 }

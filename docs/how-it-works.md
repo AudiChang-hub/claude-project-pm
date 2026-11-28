@@ -45,7 +45,7 @@ At the top: a completion ring and three counters (running, waiting on you, not f
 
 **A PM that behaves like one.** The PM reads the board before every report, hands implementation to other sessions instead of editing code itself, relays sub-sessions' questions to you word for word, asks before archiving anything, and will not say "all done" while anything needs attention. It gets a notification when a session starts waiting on you, fails CI, or stops with steps left.
 
-**The PM hears at once.** When a session reports or ends a turn, its mod sends the PM a one-line update (`$.session.send`), and the PM's mod takes it in (`session.receive`) before it reaches the PM's conversation: the board is redrawn within a moment, without starting a turn or spending tokens. Only a PM whose mod can take the update in is sent one; the 30-second poll stays as the fallback.
+**The PM hears at once.** When a session enters a state the PM has to act on (work done and waiting for QA, stuck or waiting on the user's decision, hand-over notes written), its mod sends the PM a one-line update (`$.session.send`), once per entry; every other change waits for the board's next round, and the PM's mod takes it in (`session.receive`) before it reaches the PM's conversation: the board is redrawn within a moment, without starting a turn or spending tokens. Only a PM whose mod can take the update in is sent one; the 30-second poll stays as the fallback.
 
 **Housekeeping.** Archive a finished session from its card (hover to reveal, then confirm; the confirm warns about open steps, an open PR or a pin). In a project with no PM yet, a band above the prompt offers to start a PM session or make the current one the PM.
 

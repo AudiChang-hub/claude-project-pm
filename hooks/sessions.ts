@@ -1,7 +1,7 @@
 // Reading sessions into a project's board: who is working, who waits on you,
 // who stopped with steps left, and what the PM was asked to keep track of.
 
-import type { AgentRecord, AgentState, BackgroundTask, CiCheck, LastWord, LedgerItem, ProjectFile, PushCheck, Report, ReportStatus, Session, Step, Track } from '../types'
+import type { AgentRecord, AgentState, BackgroundTask, CiCheck, KeyState, LastWord, LedgerItem, ProjectFile, PushCheck, Report, ReportStatus, Session, Step, Track } from '../types'
 import { agentName, isSettledAgent } from './agents'
 import { MESSAGES, t } from './messages'
 import { isAgentId, isSameId, openBreakdown, qaAttention, qaShown, qaText } from './qa'
@@ -306,6 +306,24 @@ export function reportOf(input: Record<string, unknown>): Report | null {
   if (next) report.next = next
 
   return report
+}
+
+/** A hand-over's first line, as role.delivery and handover.template ask for it: `[交接, sha]` or `[handover, sha]`. */
+const HANDOVER_LINE = /^\s*\[\s*(?:交接|hand-?over)\s*[,，\]]/i
+
+/**
+ * Where a session stands as far as its PM must hear of it at once (T-57), from its report and its last answer:
+ * `handover` when either opens with the hand-over line; `verify` for a `done` report (its work waits for QA);
+ * `blocked` for `blocked`, and for `waiting_user`, which waits on a decision only the PM can bring to the user (PM
+ * rule 7). Null for any other (in progress, waiting on CI or a release, no report): the board shows those at its next
+ * round, and the PM is not sent an update for them.
+ */
+export function keyStateOf(report: Pick<Report, 'status' | 'summary'> | null | undefined, answer = ''): KeyState | null {
+  if (HANDOVER_LINE.test(report?.summary ?? '') || HANDOVER_LINE.test(answer)) return 'handover'
+  if (report?.status === 'done') return 'verify'
+  if (report?.status === 'blocked' || report?.status === 'waiting_user') return 'blocked'
+
+  return null
 }
 
 /**

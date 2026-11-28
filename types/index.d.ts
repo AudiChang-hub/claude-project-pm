@@ -60,6 +60,12 @@ export type Track = {
   /** The version of the update messages this session's mod takes in (session.receive); absent before it could. */
   inbox?: number
   /**
+   * Where the session last stood as far as its PM must hear at once (keyStateOf, T-57): the PM is sent an update only
+   * when this enters one of the key states. `isReported`: a report of the turn still running set it (cleared as the
+   * turn ends), so the turn's end keeps it; absent in a track an older mod wrote.
+   */
+  keyState?: { state: KeyState | null; isReported?: boolean }
+  /**
    * Whether the last turn ended on an error (turn.complete's reason `error`: a usage limit, an API error), set at every
    * turn's end; absent in a track an older mod wrote. The error's words are in the transcript, not in `lastAnswer`.
    */
@@ -91,6 +97,12 @@ export type Track = {
   /** Hand-overs the app would not start in the turn they came up in: started at the user's next message. */
   pendingHandoffs?: { title: string; prompt: string; at: number }[]
 }
+
+/**
+ * The states a PM hears of the moment a session enters one (T-57): `verify` work done, waiting for QA (待驗收);
+ * `blocked` stuck, or waiting on the user's decision (卡住); `handover` hand-over notes written (交接).
+ */
+export type KeyState = 'verify' | 'blocked' | 'handover'
 
 /** Where a session's work stands, as it says itself. */
 export type ReportStatus = 'done' | 'in_progress' | 'blocked' | 'waiting_user' | 'waiting_ci' | 'waiting_release'

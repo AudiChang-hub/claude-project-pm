@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isDeliveredAgent, isDeliveredStatus, isPushedContent, keyFile, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, limitOf, statusOf, undeliveredOf, usageLimitOf } from '../hooks/sessions'
+import { QUOTE, applyPlan, betterCi, boardText, caveatOf, ledgerRow, ledgerText, ciTarget, ciTargets, ciVerdict, declaredOf, isCiPending, isDeliveredAgent, isDeliveredStatus, isPushedContent, keyFile, keyStateOf, leftOf, ownCommitOf, parseLastWord, projectKey, reportOf, reportWords, limitOf, statusOf, undeliveredOf, usageLimitOf } from '../hooks/sessions'
 import type { Status } from '../hooks/sessions'
 import { closesBoard } from '../hooks/actions'
 import { isQaDescription, openBreakdown, qaAttention, qaBlocker, qaBrief, qaShown, qaUpdate } from '../hooks/qa'
@@ -1802,7 +1802,10 @@ test('a session of a project with a PM gets the report tool, keeps its report an
   const kept = JSON.parse(files.get(`${DIR}/sessions/local_open.json`)!)
   expect(kept.report).toEqual({ status: 'waiting_ci', summary: '匯出 CSV 已推上 main', commit: '3fa1c2e' })
   expect(kept.inbox).toBe(1)
-  // The PM is told now, by id only: its board reads the track from disk.
+  // Waiting on CI is no key state (T-57): the PM's board reads it at its next round, and the PM is not sent a thing.
+  expect(sent).toEqual([])
+  // Done is: the PM is told now, by id only: its board reads the track from disk.
+  await $.tool.call({ tool: 'mcp__project-pm__report', status: 'done', summary: '匯出 CSV 完成', commit: '3fa1c2e', delivery: 'not_needed' } as never)
   expect(sent).toEqual([{ to: 'local_pm', text: '[project-pm:update] {"id":"local_open"}' }])
 
   const refused = await $.tool.call({ tool: 'mcp__project-pm__report', status: 'finished', summary: 'x' } as never)
@@ -1857,6 +1860,113 @@ test('the PM takes an update in without a turn and its board reads the session a
   // Anything else a peer sends goes on to the model as before.
   const other = await $.session.receive({ origin: { kind: 'peer' }, text: '幫我看一下 PR' } as never)
   expect(other).toEqual({ text: '幫我看一下 PR' })
+})
+
+// ── T-57: a session sends its PM an update only on entering 待驗收, 卡住 or 交接 ──
+
+test('the key states a PM hears of at once: done for QA, stuck or waiting on the user, a hand-over', () => {
+  expect(keyStateOf({ status: 'done', summary: '匯出 CSV 做完了' })).toBe('verify')
+  expect(keyStateOf({ status: 'blocked', summary: '缺測試帳號' })).toBe('blocked')
+  // Waiting on the user's decision stops the work until the PM brings it to the user (PM rule 7): stuck as well.
+  expect(keyStateOf({ status: 'waiting_user', summary: '要一起發 2.3.1 嗎？' })).toBe('blocked')
+  for (const status of ['in_progress', 'waiting_ci', 'waiting_release'] as const) expect(keyStateOf({ status, summary: 'x' })).toBe(null)
+  expect(keyStateOf(null)).toBe(null)
+  expect(keyStateOf(undefined, '改好了，等 CI。')).toBe(null)
+  // The hand-over line, in either language, in the report's summary or as the first line of the answer.
+  expect(keyStateOf({ status: 'in_progress', summary: '[交接, 3fa1c2e] 筆記在 notes.md' })).toBe('handover')
+  expect(keyStateOf({ status: 'done', summary: '[handover, 3fa1c2e] notes in notes.md' })).toBe('handover')
+  expect(keyStateOf(null, '[交接，3fa1c2e] 筆記寫好了\n分支 feature/x')).toBe('handover')
+  expect(keyStateOf(null, '[Hand-over] notes written')).toBe('handover')
+  // Not a hand-over: the words elsewhere than the first line's start, or a word that only begins the same.
+  expect(keyStateOf(null, '下一步是交接給 [交接, sha] 的 Session')).toBe(null)
+  expect(keyStateOf(null, '[handovers, 3fa1c2e]')).toBe(null)
+})
+
+for (const [lang, handover] of [['zh-TW', '[交接, 3fa1c2e] 筆記在 C:\\Users\\dev\\notes.md'], ['en', '[handover, 3fa1c2e] notes at C:\\Users\\dev\\notes.md']] as const) {
+  test(`a session sends its PM an update only on entering a key state, once each time (${lang})`, { options: { language: lang } }, async ($, on) => {
+    const files: Files = new Map()
+    const sent: string[] = []
+    files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+    files.set(`${DIR}/sessions/local_pm.json`, JSON.stringify(track('local_pm', { inbox: 1 })))
+    const clock = mock.clock(on, { now: NOW })
+    on('session.send', ($, e) => {
+      sent.push(`${e.to} ${e.text}`)
+
+      return { isDelivered: false, reason: 'The recipient did not accept the message.' }
+    })
+    on('tool.call', { tool: 'mcp__ccd_turn__update_plan' }, () => ({ result: 'ok' }))
+    on('turn.complete', () => ({ text: '' }))
+    world(on, 'local_open', files)
+    await $.session.start(START)
+    const report = (status: string, summary: string) => $.tool.call({ tool: 'mcp__project-pm__report', status, summary } as never)
+    const turn = async (answer: string) => {
+      await clock.advance(1_000)
+      await $.turn.complete({ answer, durationMs: 1, isAborted: false, turnId: 't', reason: 'answer' } as never)
+    }
+    const UPDATE = 'local_pm [project-pm:update] {"id":"local_open"}'
+
+    // Work in progress, a task list, CI, a release: the board shows them at its next round; the PM is not sent a thing.
+    await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', items: [{ content: 'export', status: 'in_progress' }] } as never)
+    await report('in_progress', 'half way')
+    await turn('Half way.')
+    await report('waiting_ci', 'pushed, CI running')
+    await turn('CI is running.')
+    await report('waiting_release', 'done, not released')
+    await turn('Not released yet.')
+    expect(sent).toEqual([])
+
+    // Done, waiting for QA: the PM hears of it once, not again at the end of the same turn.
+    await report('done', 'export done')
+    await turn('Done.')
+    expect(sent).toEqual([UPDATE])
+    // Asked again, reported done again without leaving it: nothing new to hear.
+    await report('done', 'export done, re-checked')
+    await turn('Still done.')
+    expect(sent).toEqual([UPDATE])
+
+    // A turn without a report leaves it; stuck enters another key state.
+    await turn('Looking at the next item.')
+    await report('blocked', 'no test account')
+    await turn('Blocked.')
+    expect(sent).toEqual([UPDATE, UPDATE])
+    // Waiting on the user's decision is stuck as well: no second update while it stays stuck.
+    await report('waiting_user', 'ship 2.3.1 too?')
+    await turn('Ship 2.3.1 too?')
+    expect(sent).toEqual([UPDATE, UPDATE])
+
+    // The hand-over line as the first line of the answer, with no report: the PM hears of it.
+    await turn(`${handover}\nbranch feature/export`)
+    expect(sent).toEqual([UPDATE, UPDATE, UPDATE])
+    expect(JSON.parse(files.get(`${DIR}/sessions/local_open.json`)!).keyState).toEqual({ state: 'handover' })
+  })
+}
+
+test("with the core's report tool too, a session tells its PM only on entering a key state", ZH, async ($, on) => {
+  const files: Files = new Map()
+  const tools: string[] = ['pm']
+  const sent: string[] = []
+  files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger: [], nextId: 1 }))
+  files.set(`${DIR}/sessions/local_pm.json`, JSON.stringify(track('local_pm', { inbox: 1 })))
+  const clock = mock.clock(on, { now: NOW })
+  on('session.send', ($, e) => {
+    sent.push(e.to)
+
+    return { isDelivered: false, reason: 'The recipient did not accept the message.' }
+  })
+  world(on, 'local_open', files, [], () => null, tools, [], coreServer(files, []))
+  on('tool.call', { tool: 'mcp__project-pm__report' }, () => ({ result: 'the core report' }))
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start(START)
+  const report = (status: string, summary: string) => $.tool.call({ tool: 'mcp__project-pm__report', status, summary } as never)
+
+  expect(String(((await report('waiting_ci', '已推上 main，CI 在跑')) as { result?: unknown }).result)).toBe('the core report')
+  await clock.advance(1_000)
+  await $.turn.complete({ answer: 'CI 在跑。', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+  expect(sent).toEqual([])
+  await report('done', '做完了，等驗收')
+  await clock.advance(1_000)
+  await $.turn.complete({ answer: '做完了。', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' } as never)
+  expect(sent).toEqual(['local_pm'])
 })
 
 test('the development guidelines reach the PM and the sessions of its project, read fresh each turn', { options: { language: 'zh-TW', guidelines: '~/Documents/rules.md' } }, async ($, on) => {

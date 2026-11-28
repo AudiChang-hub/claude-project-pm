@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Me } from '../types'
 
-import { applyPlan, clip, finishedTasks, planFromTodos } from './sessions'
+import { applyPlan, clip, finishedTasks, keyStateOf, planFromTodos, reportOf } from './sessions'
 import {
   BOARD_TOOL,
   CLAIM,
@@ -29,7 +29,7 @@ import {
   isReporter,
   ledger,
   loadRound,
-  notifyPm,
+  noteKeyState,
   openBoard,
   reason,
   refresh,
@@ -425,9 +425,12 @@ export const register: Register = (on, options) => {
       // The context this turn left: the card's figure, the hand-over's and the PM's own compaction's (quota.ts).
       await afterTurn($, e.usage).catch(err => $.ui.log(`project-pm: ${reason(err)}`))
       refreshSoon($, 500)
-      // The PM hears of it now, not at its next poll.
+      // The PM hears of it now only when the session enters a key state (T-57): this turn's report says where it
+      // stands, or the hand-over line its answer opens with; a turn without either leaves the key state it was in.
       try {
-        await notifyPm($)
+        const kept = getMine()?.keyState
+        const reported = kept?.isReported ? kept.state : null
+        await noteKeyState($, keyStateOf(null, e.answer) ?? reported, false)
       } catch (err) {
         $.ui.log(`project-pm: ${reason(err)}`)
       }
@@ -472,11 +475,12 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', { tool: REPORT_TOOL }, async ($, e, next) => {
-    // The core's report tool (E2): it keeps the report; the PM hears of it at once.
+    // The core's report tool (E2): it keeps the report; the PM hears of it at once when it enters a key state (T-57).
     if (await usesCore($)) {
       const result = await next(e)
       refreshSoon($, 100)
-      await notifyPm($).catch(() => undefined)
+      const made = result.deny === undefined && result.isError !== true ? reportOf(e as unknown as Record<string, unknown>) : null
+      if (made) await noteKeyState($, keyStateOf(made), true).catch(() => undefined)
 
       return result
     }
@@ -488,6 +492,12 @@ export const register: Register = (on, options) => {
 
   // An update from another session of the project: its track is on disk, so the board reads it now. Taken in here,
   // so it is never queued, written to the transcript or read by the model: no turn, no tokens.
+  // The limit (T-57): only while this copy of the mod runs. The engine raises session.receive for the desktop app's
+  // host-injected peer messages too, but where the PM's hooks are not running (seen under Claude Code 2.1.330: a PM
+  // whose mod hooks stopped mid-session, until /reload-plugins, with no notice in the conversation), every hook fails
+  // open and each update reaches the PM's model as "Another Claude session sent a message", a turn of its own. The
+  // sender cannot tell: the desktop app answers "queued" either way. So sessions send an update only on entering a key
+  // state (noteKeyState), where a PM woken by one has something to act on.
   on('session.receive', async ($, e, next) => {
     const id = updateOf(e.text)
     if (!id) return next(e)
