@@ -3697,6 +3697,74 @@ for (const lang of ['zh-TW', 'en'] as const) {
   })
 }
 
+// ── T-59: work already closed is not waiting on you, on the pane and the board alike ──
+
+for (const lang of ['zh-TW', 'en'] as const) {
+  test(`a session whose work items were closed after its last report leaves the figures, on the pane and the board alike (${lang})`, { options: { language: lang } }, async ($, on) => {
+    const files: Files = new Map()
+    const item = (id: number, owner: string, status: string, updatedAt: number) => ({ id, text: `項目 ${id}`, owner, status, note: '', createdAt: NOW - 7_200_000, updatedAt })
+    // local_ask asked, then its item was closed (by another session, an agent or the person); local_open still asks about an open one.
+    const ledger = [item(1, 'local_ask', 'done', NOW - 60_000), item(2, 'local_open', 'open', NOW - 3_600_000)]
+    files.set(PROJECT_FILE, JSON.stringify({ key: projectKey(PROJECT), name: 'Acme 商店後台', path: PROJECT, pmId: 'local_pm', isDismissed: false, ledger, nextId: 3 }))
+    files.set(`${DIR}/sessions/local_ask.json`, JSON.stringify(track('local_ask', { report: { status: 'waiting_user', summary: 'T-01：舊欄位要保留唯讀還是刪掉？' }, reportAt: NOW - 600_000 })))
+    files.set(`${DIR}/sessions/local_open.json`, JSON.stringify(track('local_open', { ask: '列表頁要不要加匯出？' })))
+    const clock = mock.clock(on, { now: NOW })
+    world(on, 'local_pm', files)
+    await $.session.start(START)
+    await clock.advance(1000)
+    const text = String(((await $.tool.call({ tool: 'mcp__project-pm__board' } as never)) as { result?: unknown }).result)
+    const asking = lang === 'zh-TW' ? /｜待回覆 1｜/ : /\| Waiting on you 1 \|/
+    expect(text).toMatch(asking)
+    // The board's own words: t() here speaks the test module's language, not the plugin's option.
+    const [from, to] = lang === 'zh-TW' ? ['## 需要處理', '## 工作項目'] : ['## Needs attention', '## Work items']
+    const attention = text.slice(text.indexOf(from), text.indexOf(to))
+    expect(attention).not.toContain('移除舊版優惠欄位')
+    expect(attention).toContain('商品列表頁')
+    const ui = await $.ui.mount({
+      plugin: 'project-pm',
+      surface: 'desktop',
+      component: 'Pane',
+      requestId: 'project-pm',
+      props: { title: 'PM', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 80 } },
+    } as never)
+    // Folded with the ended sessions on the pane, as the board leaves it out of its figures.
+    expect(await ui.find({ key: 'card:local_ask' })).toBeUndefined()
+    expect(await ui.find({ key: 'card:local_open' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test(`a hand-over whose new session was started, or whose work items are done, is not one to start (${lang})`, () => {
+    const was = getLang()
+    setLang(lang)
+    try {
+      const handoff = (title: string) => ({ title, prompt: `交接：筆記在 C:/notes/${title}.md，照筆記繼續。`, at: NOW - 7_200_000 })
+      const pm = { ...track('local_pm', { title: 'PM' }), pendingHandoffs: [handoff('優惠清理第二輪'), handoff('T-08 搜尋篩選第二輪'), handoff('T-09 發票第二輪'), handoff('價格規則第二輪')] }
+      const session = (id: string, title: string, minutesAgo: number) => ({ id, title, cwd: PROJECT, isRunning: false, lastActivityAt: new Date(NOW - minutesAgo * 60_000).toISOString(), isPinned: false, hasOpenPr: false })
+      // Started since (an hour ago, after the hand-over); one of the same title that has done nothing since does not count.
+      const started = session('local_coupon2', '優惠清理第二輪', 60)
+      const before = session('local_rules_old', '價格規則第二輪', 300)
+      const item = (id: number, status: string, updatedAt: number) => ({ id, text: `項目 ${id}`, owner: 'agent:z8', status, note: '', createdAt: NOW - 9_000_000, updatedAt })
+      const text = boardText({
+        project: { name: 'Acme 商店後台', path: PROJECT },
+        sessions: [started, before],
+        tracks: { local_pm: pm as never },
+        words: {},
+        ledger: [item(8, 'done', NOW - 3_600_000), item(9, 'open', NOW - 3_600_000)] as never,
+        now: NOW,
+        isIncludingDone: false,
+        pmId: 'local_pm',
+      })
+      const pending = (title: string) => t('board.attention.handoffPending', { title })
+      expect(text).not.toContain(pending('優惠清理第二輪'))
+      expect(text).not.toContain(pending('T-08 搜尋篩選第二輪'))
+      expect(text).toContain(pending('T-09 發票第二輪'))
+      expect(text).toContain(pending('價格規則第二輪'))
+    } finally {
+      setLang(was)
+    }
+  })
+}
+
 // ── T-43: a session people read by name; its id only on the model's board ──
 
 test('an untitled session is named by its instruction on the pane and the board, the board keeping its id for the model', ZH, async ($, on) => {

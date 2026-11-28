@@ -18,6 +18,7 @@ import {
   boardText,
   cardSummary,
   caveatOf,
+  closedAt,
   isActive,
   isHandedOff,
   kpiOf,
@@ -537,7 +538,7 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     if (found.errors.length) sessionsError = found.errors.join('; ')
   } catch (err) {
     sessionsError = err instanceof Error ? err.message : String(err)
-    found = { sessions: [] as Session[], everyone: [] as Session[], tracks: {} as Record<string, Track>, actors: [] as Actor[], errors: [], words: {}, ci: {}, push: {}, agents: [] }
+    found = { sessions: [] as Session[], everyone: [] as Session[], archived: [] as Session[], tracks: {} as Record<string, Track>, actors: [] as Actor[], errors: [], words: {}, ci: {}, push: {}, agents: [] }
   }
   // The PM is not one of the sessions it follows (the desktop app's list leaves the asking session out too).
   found = { ...found, sessions: found.sessions.filter(s => s.id !== project.pmId) }
@@ -574,6 +575,7 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
     project: { name: ref.name, path: ref.path },
     sessions: found.sessions,
     everyone: found.everyone,
+    archived: found.archived,
     tracks: found.tracks,
     words,
     ci,
@@ -612,7 +614,12 @@ export async function boardOf(ctx: Ctx, ref: ProjectRef, isIncludingDone: boolea
   const actorById = new Map(found.actors.map(a => [a.id, a]))
   const statusById = new Map<string, Status>()
   // As the board and the pane read it: the person's closing (settledAt) and a handover (isHandedOff) count too.
-  for (const s of found.everyone) statusById.set(s.id, statusOf(s, hasReport(found.tracks[s.id]) ? found.tracks[s.id] : undefined, words[s.id], now, ci[s.id], push[s.id], settledAt(s.id, project.ledger), isHandedOff(s.id, project.ledger)))
+  for (const s of found.everyone) {
+    const track = hasReport(found.tracks[s.id]) ? found.tracks[s.id] : undefined
+    // The codes a report names are this project's: only its own sessions' are looked up (boardStatusOf, T-59).
+    const named = found.sessions.some(one => one.id === s.id) ? project.ledger : []
+    statusById.set(s.id, statusOf(s, track, words[s.id], now, ci[s.id], push[s.id], settledAt(s.id, project.ledger), isHandedOff(s.id, project.ledger), closedAt(s.id, track, project.ledger, named)))
+  }
   // Each item's QA as the text board reads it (deliveredOf), so the web board's counts and the board's words agree (T-42).
   const isDelivered = deliveredOf(input)
   const openItems = project.ledger.filter(i => i.status === 'open')

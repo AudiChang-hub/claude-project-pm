@@ -4,7 +4,7 @@
  * the core's hooks stand aside where the mod keeps each session's record. Acme data in a temporary home only.
  */
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
@@ -169,6 +169,103 @@ for (const lang of LANGS) {
     test('without a desktop PM nothing of the mod\'s round is read', async () => {
       const found = await projectSessions(ref, [], w.env, 'claude-code:pm1', NOW)
       assert.deepEqual(found.everyone, [])
+    })
+
+    // ── T-59: archived sessions, and work already closed, are not counted ──
+
+    /** The text board's counts line for these statuses, as the board writes it. */
+    const countsOf = (statuses: string[]) => {
+      const n = (s: string) => statuses.filter(one => one === s).length
+
+      return t('board.counts', { total: statuses.length, asking: n('asking'), failed: n('failed'), limit: n('limit'), ci: n('ci'), unreleased: n('unreleased'), open: n('open'), running: n('running'), waiting: n('waiting'), done: n('done'), stale: n('stale') })
+    }
+    const projectFile = () => join(legacy, 'projects', `${keyFile(projectKey(ref.path))}.json`)
+    const ledgerOf = (ledger: unknown[], nextId = 20) => write(projectFile(), { key: ref.key, name: ref.name, path: ref.path, pmId: 'local_pm', isDismissed: false, nextId, ledger })
+    const item = (id: number, owner: string | null, status: string, updatedAt: number, text = `Item ${id}`) => ({ id, text, owner, status, note: '', createdAt: NOW - 9_000_000, updatedAt })
+    /** The PM's round with this list instead, its last words and checks kept. */
+    const roundOf = (sessions: Session[]) => {
+      const file = join(legacy, 'rounds', 'local_pm.json')
+      write(file, { ...JSON.parse(readFileSync(file, 'utf8')), sessions: { list: sessions, fetchedAt: NOW, error: null } })
+    }
+    const listed = (id: string, title: string, minutesAgo: number): Session => ({ id, title, cwd: w.repo, isRunning: false, lastActivityAt: at(minutesAgo), isPinned: false, hasOpenPr: false })
+    const reported = (id: string, title: string, status: string, summary: string, when: number) =>
+      changeActor(id, () => ({ id, tool: 'claude-code', title, cwd: w.repo, projectKey: ref.key, lastSeenAt: when, report: { status, summary } as never, reportAt: when }), w.env)
+
+    test('a desktop session the app no longer lists (archived) is not counted, on the text board, the web board and its figures (T-59)', async () => {
+      // Reported through the core, then archived: the app's list (the PM's round, fetched at NOW) leaves them out.
+      await reported('local_gone_ask', 'Old coupon question', 'waiting_user', 'Keep coupon_v1 read-only, or drop it?', NOW - 3 * 3_600_000)
+      await reported('local_gone_rel', 'Old payouts release', 'waiting_release', 'Payouts fix committed (3fa1c2e); waiting for the release.', NOW - 2 * 3_600_000)
+      await reported('local_gone_wip', 'Old search filters', 'in_progress', 'Half the filters done.', NOW - 3_600_000)
+      // One that reported after the list was fetched: the app may not list it yet, so it still counts.
+      await reported('local_newer', 'Brand-new invoices session', 'waiting_user', 'PDF or CSV for the invoices export?', NOW + 60_000)
+      const { text, peopleText, json } = await boardOf(w.ctx('local_pm'), ref, false)
+      const byId = Object.fromEntries(json.actors.map(a => [a.id, a.status]))
+      assert.deepEqual(byId, { local_ask: 'asking', local_run: 'running', local_word: 'asking', local_newer: 'asking' })
+      assert.deepEqual(json.pane.kpi, { running: 2, runningAgents: 1, asking: 3, open: 0 })
+      // The text board counts what the web board and the pane count.
+      for (const board of [text, peopleText]) {
+        assert.ok(board.includes(countsOf(json.actors.map(a => a.status))), board)
+        for (const title of ['Old coupon question', 'Old payouts release', 'Old search filters']) assert.ok(!board.includes(title), `${title} in\n${board}`)
+        assert.ok(board.includes('Brand-new invoices session'))
+      }
+      assert.ok(!json.attention.some(line => /Old (coupon|payouts|search)/.test(line.text)))
+    })
+
+    test('a session whose work items were all closed after its last report is not waiting on you nor unfinished; one that spoke after the close is (T-59)', async () => {
+      roundOf([...list, listed('local_named', 'Export columns', 30), listed('local_after', 'Refund rules', 30), listed('local_wip', 'Order search', 30), listed('local_mine', 'Gift cards', 30)])
+      // local_ask asked (its track, turn 10 minutes ago); its item was closed 1 minute ago.
+      // local_named owns nothing: its report names T-04, done (by an agent) after the report.
+      await reported('local_named', 'Export columns', 'waiting_user', 'T-04: keep the old CSV columns or rename them?', NOW - 30 * 60_000)
+      // local_after asked again after its item was closed: still waiting on you.
+      await reported('local_after', 'Refund rules', 'waiting_user', 'T-05 reopened? The refund cap still looks wrong.', NOW - 30 * 60_000)
+      // local_wip stopped midway; its work was taken over and dropped since.
+      await reported('local_wip', 'Order search', 'in_progress', 'Search by SKU half done (T-06).', NOW - 30 * 60_000)
+      // local_mine still owns an open item: still waiting on you.
+      await reported('local_mine', 'Gift cards', 'waiting_user', 'T-07: one gift card per order, or many?', NOW - 30 * 60_000)
+      const wip = { ...item(6, 'agent:z9', 'dropped', NOW - 5 * 60_000), formerOwners: ['local_wip'] }
+      ledgerOf([item(1, 'local_word', 'open', NOW - 3_600_000), item(3, 'local_ask', 'done', NOW - 60_000), item(4, 'agent:z8', 'done', NOW - 5 * 60_000), item(5, 'local_after', 'done', NOW - 2 * 3_600_000), wip, item(7, 'local_mine', 'open', NOW - 3_600_000)])
+      const { text, peopleText, json } = await boardOf(w.ctx('local_pm'), ref, false)
+      const byId = Object.fromEntries(json.actors.map(a => [a.id, a.status]))
+      assert.equal(byId.local_ask, 'done')
+      assert.equal(byId.local_named, 'done')
+      assert.equal(byId.local_wip, 'done')
+      assert.equal(byId.local_after, 'asking')
+      assert.equal(byId.local_mine, 'asking')
+      assert.equal(byId.local_word, 'asking')
+      assert.deepEqual(json.pane.kpi, kpiOf(json.actors.map(a => a.status), json.agents as never))
+      assert.equal(json.pane.kpi.asking, 3)
+      assert.equal(json.pane.kpi.open, 0)
+      for (const board of [text, peopleText]) {
+        assert.ok(board.includes(countsOf(json.actors.map(a => a.status))), board)
+        const attention = board.slice(board.indexOf(t('board.section.attention')), board.indexOf(t('board.section.items')))
+        for (const title of ['Retire v1 coupon fields', 'Export columns', 'Order search']) assert.ok(!attention.includes(title), `${title} in\n${attention}`)
+        for (const title of ['Refund rules', 'Gift cards']) assert.ok(attention.includes(title), `${title} not in\n${attention}`)
+      }
+    })
+
+    test('a hand-over whose new session was started, or whose work items are done, is not one to start; a real one is (T-59)', async () => {
+      const handoff = (title: string, prompt = `Hand-over: read the notes at C:/notes/${title}.md and carry on.`) => ({ title, prompt, at: NOW - 2 * 3_600_000 })
+      write(join(legacy, 'sessions', 'local_pm.json'), {
+        ...track('local_pm', w.repo, { title: 'acme-shop · PM' }),
+        pendingHandoffs: [
+          handoff('Coupon cleanup, round 2'),
+          handoff('T-08 search filters, round 2'),
+          handoff('Old reports, round 2'),
+          handoff('T-09 invoices, round 2'),
+          handoff('Price rules, round 2'),
+        ],
+      })
+      // Started since: listed by the app, or archived already (the core still knows its report).
+      roundOf([...list, listed('local_coupon2', 'Coupon cleanup, round 2', 30)])
+      await reported('local_reports2', 'Old reports, round 2', 'done', 'Reports moved to the new page.', NOW - 3_600_000)
+      ledgerOf([item(1, 'local_word', 'open', NOW - 3_600_000), item(8, 'agent:z8', 'done', NOW - 3_600_000), item(9, null, 'open', NOW - 3_600_000)])
+      const { text, peopleText, json } = await boardOf(w.ctx('local_pm'), ref, false)
+      const pending = (title: string) => t('board.attention.handoffPending', { title })
+      for (const board of [text, peopleText]) {
+        for (const title of ['Coupon cleanup, round 2', 'T-08 search filters, round 2', 'Old reports, round 2']) assert.ok(!board.includes(pending(title)), `${title} in\n${board}`)
+        for (const title of ['T-09 invoices, round 2', 'Price rules, round 2']) assert.ok(board.includes(pending(title)), `${title} not in\n${board}`)
+      }
+      assert.deepEqual(json.attention.filter(line => line.text === pending('T-09 invoices, round 2') || line.text === pending('Price rules, round 2')).length, 2)
     })
 
     test('the hooks stand aside in a desktop session where the mod is installed, and use its id where it is not', async () => {

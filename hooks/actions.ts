@@ -46,6 +46,7 @@ import {
   needsTranscript,
   quoteOf,
   settledAt,
+  closedAt,
   openSteps,
   ownCommitOf,
   parseLastWord,
@@ -795,12 +796,14 @@ export async function announce($: EngineInterface) {
   const all = liveTracks(state.list, await read($, tracks), words)
   const ci = await read($, ciChecks)
   const push = await read($, pushChecks)
-  const items = Object.values(await read($, projects)).flatMap(file => file.ledger)
+  const files = await read($, projects)
+  const items = Object.values(files).flatMap(file => file.ledger)
+  const own = files[self.projectKey]?.ledger ?? []
   const now = await $.clock.now()
   const now_ = new Map<string, Status>()
   for (const one of state.list) {
     if (projectKey(one.cwd) !== self.projectKey) continue
-    now_.set(one.id, statusOf(one, all[one.id], words[one.id], now, ci[one.id], push[one.id], settledAt(one.id, items), isHandedOff(one.id, items)))
+    now_.set(one.id, statusOf(one, all[one.id], words[one.id], now, ci[one.id], push[one.id], settledAt(one.id, items), isHandedOff(one.id, items), closedAt(one.id, all[one.id], items, own)))
   }
   const before = statusesBefore
   statusesBefore = now_
