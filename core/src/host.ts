@@ -221,7 +221,7 @@ export function desktopClaude(env: NodeJS.ProcessEnv = process.env, platform: No
  * process's own. A demo or a test that gives the core a temporary home in its env keeps the person's real one out of
  * it (T-53, T-54).
  */
-function homeOf(env: NodeJS.ProcessEnv): string {
+export function homeOf(env: NodeJS.ProcessEnv): string {
   return env.USERPROFILE ?? env.HOME ?? homedir()
 }
 

@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
 
 import { projectSessions } from '../src/actors'
+import { guidelinesSetting, readGuidelines } from '../src/hook'
 import { dataHome } from '../src/host'
 import { serve } from '../src/http'
 import type { ProjectRef } from '../src/project'
@@ -226,5 +227,32 @@ describe('the desktop round and the data home come from the env\'s home folder t
     modRound(w.home, 'local_pm', 'local_real', w.repo)
     const ref = (await resolveProject(w.repo))!
     for (const env of [asBefore, bare]) assert.deepEqual((await projectSessions(ref, [], env, 'local_pm', Date.now())).sessions.map(s => s.id), ['local_real'])
+  })
+
+  test('~ in the person\'s config.json guidelines is the env\'s home, as the mod reads it (hooks/guidelines.ts)', async () => {
+    writeFileSync(join(w.home, 'acme-rules.md'), 'Acme real rule.\n')
+    writeFileSync(join(demoHome, 'acme-rules.md'), 'Acme demo rule.\n')
+    const ref = (await resolveProject(w.repo))!
+    const config = (env: NodeJS.ProcessEnv) => {
+      mkdirSync(dataHome(env), { recursive: true })
+      writeFileSync(join(dataHome(env), 'config.json'), JSON.stringify({ guidelines: '~/acme-rules.md' }))
+    }
+    const slash = (path: string) => path.replace(/\\/g, '/')
+    // A demo with a home of its own: its own file, never the real one.
+    const demo: NodeJS.ProcessEnv = { ...w.env, PROJECT_PM_HOME: join(w.root, 'demo', 'pmhome'), USERPROFILE: demoHome, HOME: demoHome }
+    config(demo)
+    const found = await readGuidelines(ref, demo)
+    assert.ok(found && 'text' in found, JSON.stringify(found))
+    assert.equal(found.text, 'Acme demo rule.')
+    assert.equal(slash(found.file), slash(join(demoHome, 'acme-rules.md')))
+    assert.deepEqual(await guidelinesSetting(ref, demo), { from: 'user', file: slash(join(demoHome, 'acme-rules.md')) })
+    // Nothing set: ~ is the home os.homedir() gives, as before.
+    const asBefore: NodeJS.ProcessEnv = { ...w.env }
+    delete asBefore.PROJECT_PM_HOME
+    for (const env of [asBefore, {}]) {
+      config(env)
+      const mine = await readGuidelines(ref, env)
+      assert.ok(mine && 'text' in mine && mine.text === 'Acme real rule.', JSON.stringify(mine))
+    }
   })
 })

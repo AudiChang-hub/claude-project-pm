@@ -18,7 +18,7 @@ import type { BackgroundTask, Step } from '../../types'
 import type { Run } from './host'
 import type { GuidelinesSetting } from './guard'
 import { GUARDED_TOOLS, alertText, watchGuidelines } from './guard'
-import { dataHome, run as hostRun } from './host'
+import { dataHome, homeOf, run as hostRun } from './host'
 import { hostSessionId, isModInstalled } from './mod'
 import { NotPlainPathError, localRealpath, plainLocalPath } from './localpath'
 import { ct } from './messages'
@@ -376,14 +376,17 @@ async function projectNamed(ref: ProjectRef, run: Run): Promise<string | null> {
   return tracked ? named : null
 }
 
-/** The file the person's own ~/.project-pm/config.json names (any path; nothing about it is looked up here). */
+/**
+ * The file the person's own ~/.project-pm/config.json names (any path; nothing about it is looked up here). `~` is the
+ * env's home folder (homeOf), as the mod reads it (hooks/guidelines.ts), where config.json itself is found (T-54).
+ */
 async function userNamed(ref: ProjectRef, env: NodeJS.ProcessEnv): Promise<string | null> {
   const fromUser = await readJsonFile<{ guidelines?: unknown }>(join(dataHome(env), 'config.json')).catch(() => {
     throw new SettingError('corrupt')
   })
   if (typeof fromUser?.guidelines !== 'string' || !fromUser.guidelines.trim()) return null
 
-  return guidelinesPath(fromUser.guidelines, homedir().replace(/\\/g, '/'), ref.path.replace(/\\/g, '/'))
+  return guidelinesPath(fromUser.guidelines, homeOf(env).replace(/\\/g, '/'), ref.path.replace(/\\/g, '/'))
 }
 
 /**
