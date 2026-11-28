@@ -7,6 +7,8 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-11-28
+
 ### Fixed
 - A demo or test that gives the core a temporary home (USERPROFILE or HOME) in its environment no longer reads a desktop PM's session list from the real `~/.claude/project-pm`, nor, without PROJECT_PM_HOME, keeps its data in the real `~/.project-pm` (T-54). With nothing set, data stays where it was.
 - `~` in the guidelines path of your own `config.json` now means the same home folder the core finds `config.json` in, as the desktop mod reads it (T-54).

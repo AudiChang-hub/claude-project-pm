@@ -1,6 +1,6 @@
 {
   "name": "project-pm",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "A PM for AI coding sessions: a ledger of the work, a QA gate before it closes, and a board of where every session stands, served over MCP to any AI coding tool.",
   "license": "MIT",
   "repository": "https://github.com/AudiChang-hub/claude-project-pm",
