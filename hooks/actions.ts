@@ -247,17 +247,23 @@ export function updateOf(text: string): string | null {
   }
 }
 
-/** Whether a PM takes in update messages, as its own track says; asked again after INBOX_RECHECK_MS. */
-const inboxOf = new Map<string, { isOpen: boolean; at: number }>()
+/**
+ * Whether a PM takes in update messages, as its own track says; asked again after INBOX_RECHECK_MS. `shutAt`: when an
+ * update reached that PM's model instead of its mod (notifyPm), so it stays shut until its mod writes again.
+ */
+const inboxOf = new Map<string, { isOpen: boolean; at: number; shutAt?: number }>()
 const INBOX_RECHECK_MS = 5 * 60_000
 /** A failed send is logged once per PM. */
 const notifyFailedFor = new Set<string>()
+/** A PM found not taking updates in is logged once, until it takes them again. */
+const notTakingFor = new Set<string>()
 
 /**
  * Tells this project's PM that this session's track changed, so its board is redrawn now rather than at its next
  * poll; called only on entering a key state (noteKeyState). Only to a PM whose mod takes the message in without a
  * turn (its track's `inbox`); never from the PM itself, a scratch folder or a project without a PM. The track itself
- * is already on disk: the message only names the session.
+ * is already on disk: the message only names the session. A send that fails is not tried again: the PM's poll reads
+ * the track all the same.
  */
 export async function notifyPm($: EngineInterface) {
   const self = await read($, me)
@@ -270,8 +276,12 @@ export async function notifyPm($: EngineInterface) {
   let inbox = inboxOf.get(pmId)
   if (!inbox || now - inbox.at >= INBOX_RECHECK_MS) {
     const pm = await readJson<Track>($, `${await dataDir($)}/sessions/${pmId}.json`)
-    inbox = { isOpen: (pm?.inbox ?? 0) >= INBOX_VERSION, at: now }
+    // A PM shut for not taking an update in opens again once its mod ran a turn's end after that (it writes turnAt):
+    // a mod whose hooks stopped writes nothing, however long, and a fixed wait would only wake it again and again.
+    const shutAt = inbox?.shutAt !== undefined && (pm?.turnAt ?? 0) <= inbox.shutAt ? inbox.shutAt : undefined
+    inbox = { isOpen: (pm?.inbox ?? 0) >= INBOX_VERSION && shutAt === undefined, at: now, ...(shutAt !== undefined ? { shutAt } : {}) }
     inboxOf.set(pmId, inbox)
+    if (shutAt === undefined) notTakingFor.delete(pmId)
   }
   if (!inbox.isOpen) return
   try {
@@ -280,25 +290,42 @@ export async function notifyPm($: EngineInterface) {
     // that is the update arriving, not a failure.
     if (!sent.isDelivered && !/did not accept/i.test(sent.reason)) throw new Error(sent.reason)
     notifyFailedFor.delete(pmId)
+    // Delivered is the update queued for the PM's model: its mod did not take it in (its hooks not running, T-57), and
+    // each one more would start a turn there. No more updates go to it until its mod runs again (above).
+    if (sent.isDelivered) {
+      inboxOf.set(pmId, { isOpen: false, at: now, shutAt: now })
+      if (!notTakingFor.has(pmId)) $.ui.log(t('log.pmNotTaking'))
+      notTakingFor.add(pmId)
+    }
   } catch (err) {
     if (!notifyFailedFor.has(pmId)) $.ui.log(t('log.notifyFailed', { reason: reason(err) }))
     notifyFailedFor.add(pmId)
   }
 }
 
+/** The main conversation's turn now running (turn.start), so a report knows the turn it belongs to. */
+let turnNow: string | null = null
+
+/** Notes the main conversation's turn that starts (turn.start). */
+export function startTurn(turnId: string) {
+  turnNow = turnId
+}
+
 /**
  * Keeps where this session stands for its PM (keyStateOf) and sends the PM an update only when it enters a key state
  * (T-57): work done for QA, stuck or waiting on the user's decision, hand-over notes written. Staying in one sends
  * nothing again, and every other change (in progress, waiting on CI or a release, the task list) waits for the PM's
- * next round: its board reads the track from disk all the same. `isReport`: a report set it, so the end of the turn
- * it was made in keeps it (turn.complete), and the next turn's end, without a report of its own, leaves it.
+ * next round: its board reads the track from disk all the same. `isReport`: a report set it, kept with the turn it was
+ * made in, so that turn's end keeps it (turn.complete) and any other turn's end, without a report of its own, leaves
+ * it: a process that ended before its turn did leaves nothing that holds the state on.
  */
 export async function noteKeyState($: EngineInterface, state: KeyState | null, isReport: boolean) {
   const own = getMine()
   if (!own) return
   const before = own.keyState?.state ?? null
-  if (before !== state || (own.keyState?.isReported === true) !== isReport) {
-    await changeMine($, (track): Track => ({ ...track, keyState: isReport ? { state, isReported: true } : { state } }))
+  const turnId = isReport ? (turnNow ?? undefined) : undefined
+  if (before !== state || own.keyState?.turnId !== turnId) {
+    await changeMine($, (track): Track => ({ ...track, keyState: turnId !== undefined ? { state, turnId } : { state } }))
   }
   if (state !== null && state !== before) await notifyPm($)
 }

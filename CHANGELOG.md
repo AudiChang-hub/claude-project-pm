@@ -7,8 +7,13 @@ Versions match `version` in `.claude-plugin/plugin.json`.
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-28
+
 ### Changed
-- A session sends its PM an update message only when it enters a state the PM has to act on: work done and waiting for QA, stuck or waiting on the user's decision, or hand-over notes written, once per entry (T-57). Progress, CI, release and task-list changes no longer send one; the board shows them at its next round, which also keeps the PM from being woken by each of them where its mod has stopped taking updates in.
+- A session sends its PM an update message only when it enters a state the PM has to act on: work done and waiting for QA, stuck or waiting on the user's decision, or hand-over notes written, once per entry (T-57). Progress, CI, release and task-list changes no longer send one; the board shows them at its next round.
+
+### Fixed
+- A PM whose mod had stopped taking update messages in (its hooks no longer running, seen with Claude Code 2.1.330 until `/reload-plugins`) was woken for a turn by every update from every session (T-57). Once an update reaches a PM's conversation instead of its mod, sessions send that PM no more until its mod runs again.
 
 ## [1.2.1] - 2026-11-23
 

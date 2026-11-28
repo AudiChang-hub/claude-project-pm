@@ -308,8 +308,11 @@ export function reportOf(input: Record<string, unknown>): Report | null {
   return report
 }
 
-/** A hand-over's first line, as role.delivery and handover.template ask for it: `[交接, sha]` or `[handover, sha]`. */
-const HANDOVER_LINE = /^\s*\[\s*(?:交接|hand-?over)\s*[,，\]]/i
+/**
+ * A hand-over's first line, as role.delivery and handover.template ask for it: `[交接, sha]` or `[handover, sha]`, also
+ * as Markdown wraps it (in backticks, bold, a quote); never a Markdown link that opens with the word, `[Handover](…)`.
+ */
+const HANDOVER_LINE = /^[\s`*_>]*\[\s*(?:交接|hand-?over)\s*(?:[,，]|\](?!\())/i
 
 /**
  * Where a session stands as far as its PM must hear of it at once (T-57), from its report and its last answer:

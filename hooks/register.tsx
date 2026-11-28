@@ -40,6 +40,7 @@ import {
   rememberBoard,
   report,
   startAgent,
+  startTurn,
   str,
   takeNotices,
   textOf,
@@ -397,6 +398,13 @@ export const register: Register = (on, options) => {
     return result
   }).catch(($, e, next) => next(e))
 
+  // The main conversation's turn that starts: a report made in it is kept with it (noteKeyState).
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) startTurn(e.turnId)
+
+    return next(e)
+  })
+
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
       const now = await $.clock.now()
@@ -429,7 +437,7 @@ export const register: Register = (on, options) => {
       // stands, or the hand-over line its answer opens with; a turn without either leaves the key state it was in.
       try {
         const kept = getMine()?.keyState
-        const reported = kept?.isReported ? kept.state : null
+        const reported = kept?.turnId !== undefined && kept.turnId === e.turnId ? kept.state : null
         await noteKeyState($, keyStateOf(null, e.answer) ?? reported, false)
       } catch (err) {
         $.ui.log(`project-pm: ${reason(err)}`)
@@ -496,8 +504,9 @@ export const register: Register = (on, options) => {
   // host-injected peer messages too, but where the PM's hooks are not running (seen under Claude Code 2.1.330: a PM
   // whose mod hooks stopped mid-session, until /reload-plugins, with no notice in the conversation), every hook fails
   // open and each update reaches the PM's model as "Another Claude session sent a message", a turn of its own. The
-  // sender cannot tell: the desktop app answers "queued" either way. So sessions send an update only on entering a key
-  // state (noteKeyState), where a PM woken by one has something to act on.
+  // sender reads the difference: a consumed update answers "did not accept it", one queued for the model answers
+  // delivered (CHANGELOG 0.6.1). So notifyPm stops sending to a PM that answered delivered until its mod writes again,
+  // and sessions send an update only on entering a key state (noteKeyState).
   on('session.receive', async ($, e, next) => {
     const id = updateOf(e.text)
     if (!id) return next(e)

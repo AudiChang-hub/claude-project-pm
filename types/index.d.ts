@@ -61,10 +61,11 @@ export type Track = {
   inbox?: number
   /**
    * Where the session last stood as far as its PM must hear at once (keyStateOf, T-57): the PM is sent an update only
-   * when this enters one of the key states. `isReported`: a report of the turn still running set it (cleared as the
-   * turn ends), so the turn's end keeps it; absent in a track an older mod wrote.
+   * when this enters one of the key states. `turnId`: the turn whose report set it, so that turn's end keeps it and
+   * any other turn's end (one after a process that ended mid-turn included) leaves it; absent in a track an older mod
+   * wrote.
    */
-  keyState?: { state: KeyState | null; isReported?: boolean }
+  keyState?: { state: KeyState | null; turnId?: string }
   /**
    * Whether the last turn ended on an error (turn.complete's reason `error`: a usage limit, an API error), set at every
    * turn's end; absent in a track an older mod wrote. The error's words are in the transcript, not in `lastAnswer`.

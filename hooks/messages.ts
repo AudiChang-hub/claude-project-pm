@@ -120,6 +120,7 @@ PM 請你交接時，照交接範本寫筆記（{template}），回報第一行 
   'report.badStatus': 'status 要是 done、in_progress、blocked、waiting_user、waiting_ci 或 waiting_release。',
   'report.noProject': '這個 Session 所在的專案沒有 PM，不需要回報。',
   'log.notifyFailed': 'project-pm：無法直接通知 PM（{reason}），PM 會在下次輪詢時讀到。',
+  'log.pmNotTaking': 'project-pm：PM 的 Mod 沒有攔下更新訊息，訊息會讓 PM 多跑一輪。先不再傳更新給這個 PM，等它的 Mod 恢復運作；PM 仍會在下次輪詢時讀到。',
 
   // Becoming the PM, stepping down, starting a PM session, archiving.
   'claim.noId': '無法取得此 Session 的 id（可能不在桌面版中），無法擔任 PM。',
@@ -573,6 +574,7 @@ Delivery: pending (what it waits on)`,
   'report.badStatus': 'status must be done, in_progress, blocked, waiting_user, waiting_ci or waiting_release.',
   'report.noProject': 'This session\'s project has no PM: nothing to report.',
   'log.notifyFailed': 'project-pm: could not tell the PM directly ({reason}); it will read the update on its next poll.',
+  'log.pmNotTaking': 'project-pm: the PM\'s mod did not take the update in, so the update would start a turn there. No more updates go to that PM until its mod runs again; it still reads them on its next poll.',
 
   'claim.noId': "This session's id is not available (perhaps it is not in the desktop app), so it cannot be the PM.",
   'claim.scratch': 'This session is in a scratch folder and belongs to no project, so it cannot be the PM.',
